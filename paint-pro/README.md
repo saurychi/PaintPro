@@ -4,3 +4,4 @@ PaintPro is a Field Service & Business Intelligence web app built for painting a
 
 #Team Members:
 - Francis Daniel V. Austria
+- Paul Edrian S. Pazon
