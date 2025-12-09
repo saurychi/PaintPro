@@ -1,0 +1,79 @@
+.hero {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-image: url("/welcome_page_bg.jpg");
+  background-size: cover;
+  background-position: center;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0.4)
+  );
+}
+
+.content {
+  position: relative;
+  max-width: 720px;
+  padding: 48px 40px;
+  text-align: center;
+  z-index: 1;
+}
+
+.logoRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.logoIcon {
+  border-radius: 16px;
+}
+
+.logoText {
+  font-size: 40px;
+  font-weight: 600;
+  color: #26c453; /* PaintPro green */
+}
+
+.tagline {
+  font-size: 16px;
+  line-height: 1.6;
+  color: #333333;
+  max-width: 640px;
+  margin: 0 auto 32px auto;
+}
+
+.startButton {
+  padding: 12px 64px;
+  border-radius: 999px;
+  border: none;
+  outline: none;
+  background-color: #19b24a;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+
+.startButton:hover {
+  background-color: #13a243;
+  box-shadow: 0 8px 20px rgba(19, 162, 67, 0.3);
+  transform: translateY(-1px);
+}
+
+.startButton:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
