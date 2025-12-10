@@ -1,0 +1,131 @@
+.container {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  padding-bottom: 40px;
+}
+
+.title {
+  font-size: 32px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: #1a1a1a;
+  text-align: left;
+  width: 360px;
+}
+
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+.logoText {
+  font-size: 36px;
+  font-weight: 600;
+  color: #24c55c;
+}
+
+.form {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 14px;
+  color: #333;
+}
+
+.input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #dcdcdc;
+  outline: none;
+  font-size: 14px;
+}
+
+.passwordWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.iconButton {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+}
+
+.rememberRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -10px;
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+}
+
+.rememberLabel {
+  font-size: 13px;
+  color: #333;
+}
+
+.signupText {
+  font-size: 13px;
+  color: #333;
+  text-align: center;
+  margin-top: -4px;
+}
+
+.signupLink {
+  color: #24c55c;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.signupLink:hover {
+  text-decoration: underline;
+}
+
+.signinButton {
+  margin-top: 8px;
+  width: 100%;
+  padding: 14px;
+  background-color: #24c55c;
+  color: white;
+  border: none;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.12s ease, transform 0.12s ease;
+}
+
+.signinButton:hover {
+  background-color: #1ea850;
+  transform: translateY(-1px);
+}
+
+.signinButton:active {
+  transform: translateY(0);
+}
