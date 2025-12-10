@@ -1,16 +1,5 @@
 "use client";
 
-// export default function Dashboard() {
-//     return (
-//         <div style={{ display: "flex" }}>
-//             <SideNavbar activeKey="jobs" />
-//             <main style={{ flex: 1 }}>
-//                 Dashboard
-//             </main>
-//         </div>
-//     );
-// }
-
 import { useEffect, useState } from "react";
 import SideNavbar from "@/components/sideNavbar";
 import { db } from "@/firebase/firebase.config";
@@ -22,33 +11,63 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchJobs = async () => {
-      const querySnapshot = await getDocs(collection(db, "jobs"));
-      const jobsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setJobs(jobsList);
+      try {
+        const querySnapshot = await getDocs(collection(db, "jobs"));
+        const jobsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setJobs(jobsList);
+      } catch (error) {
+        console.error("Error fetching jobs:", error);
+      }
     };
     fetchJobs();
   }, []);
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Job Quotations</h1>
-        <Link href="/dashboard/create-job">
-          <button className="bg-green-500 text-white px-4 py-2 rounded">New Job</button>
-        </Link>
-      </div>
+    <div className="flex min-h-screen bg-gray-50">
+      {/* Sidebar added here */}
+      <SideNavbar activeKey="jobs" />
 
-      <div className="grid gap-4">
-        {jobs.map((job) => (
-          <Link key={job.id} href={`/dashboard/job/${job.id}`}>
-            <div className="border p-4 rounded hover:shadow-md cursor-pointer bg-white">
-              <h2 className="font-bold text-lg">{job.clientName || "Unnamed Client"}</h2>
-              <p className="text-gray-500">Status: {job.status}</p>
-              {/* You can calculate total cost here using a helper function */}
-            </div>
+      {/* Main Content Area */}
+      <main className="flex-1 p-8">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">Job Quotations</h1>
+          <Link href="/dashboard/create-job">
+            <button className="bg-green-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-green-700 transition-colors shadow-sm">
+              + New Job
+            </button>
           </Link>
-        ))}
-      </div>
+        </div>
+
+        <div className="grid gap-4">
+          {jobs.length === 0 ? (
+            <p className="text-gray-500 text-center py-10">No jobs found. Click "New Job" to create one.</p>
+          ) : (
+            jobs.map((job) => (
+              <Link key={job.id} href={`/dashboard/job/${job.id}`}>
+                <div className="border border-gray-200 p-5 rounded-xl bg-white hover:shadow-md cursor-pointer transition-shadow flex justify-between items-center">
+                  <div>
+                    <h2 className="font-bold text-lg text-gray-900">{job.clientName || "Unnamed Client"}</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {job.clientAddress ? `📍 ${job.clientAddress}` : "No address"}
+                    </p>
+                  </div>
+                  
+                  <div className="text-right">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide
+                      ${job.status === 'approved' ? 'bg-green-100 text-green-700' : 
+                        job.status === 'pending' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {job.status || "Draft"}
+                    </span>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {job.createdAt ? new Date(job.createdAt).toLocaleDateString() : ""}
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+      </main>
     </div>
   );
 }
