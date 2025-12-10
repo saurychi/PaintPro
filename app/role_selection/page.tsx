@@ -22,7 +22,7 @@ export default function RoleSelection() {
         <h1 className={styles.title}>What role you are in our system?</h1>
 
         <div className={styles.buttons}>
-          <Link href="/client">
+          <Link href="/auth/signin">
             <button className={styles.roleButton}>Client</button>
           </Link>
           <Link href="/staff/auth/signin">
