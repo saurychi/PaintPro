@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import styles from "./staffNavbar.module.css";
+import styles from "./css/staffNavbar.module.css";
 
 type SidebarItem = {
   key: string;
