@@ -44,7 +44,7 @@ export default function Signin() {
         await signInWithEmailAndPassword(auth, userDoc.data().email, password);
       }
 
-      router.push("/admin/dashboard");
+      router.push("/dashboard");
     } catch (err: any) {
       console.error(err);
 
@@ -64,6 +64,7 @@ export default function Signin() {
 
   return (
     <div className={styles.container}>
+      <h1 className={styles.title}>Sign-in</h1>
 
       <div className={styles.logoRow}>
         <Image
@@ -78,7 +79,7 @@ export default function Signin() {
 
       <div className={styles.form}>
         <div className={styles.inputGroup}>
-          <label className={styles.label}>Client Code</label>
+          <label className={styles.label}>Username</label>
           <input
             type="text"
             className={styles.input}
@@ -87,21 +88,49 @@ export default function Signin() {
           />
         </div>
 
+        <div className={styles.inputGroup}>
+          <label className={styles.label}>Password</label>
+
+          <div className={styles.passwordWrapper}>
+            <input
+              type={showPassword ? "text" : "password"}
+              className={styles.input}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={() => setShowPassword(!showPassword)}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+        </div>
+
         {error && <p style={{ color: "red", fontSize: "13px" }}>{error}</p>}
 
         <div className={styles.rememberRow}>
           <input type="checkbox" id="remember" className={styles.checkbox} />
           <label htmlFor="remember" className={styles.rememberLabel}>
-            Access automatically in this PC
+            Remember me
           </label>
         </div>
+
+        <p className={styles.signupText}>
+          Don&apos;t have an account?{" "}
+          <Link href="/staff/auth/signup" className={styles.signupLink}>
+            Signup here
+          </Link>
+        </p>
 
         <button
           className={styles.signinButton}
           onClick={handleSignin}
           disabled={loading}
         >
-          {loading ? "Accessing..." : "Access"}
+          {loading ? "Signing in..." : "Sign in"}
         </button>
       </div>
     </div>
