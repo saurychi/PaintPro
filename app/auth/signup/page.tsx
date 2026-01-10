@@ -131,7 +131,7 @@ export default function Signup() {
 
         <p className={styles.loginText}>
           Already have an account?{" "}
-          <Link href="/staff/auth/signin" className={styles.loginLink}>
+          <Link href="/auth/signin" className={styles.loginLink}>
             Sign in here
           </Link>
         </p>
