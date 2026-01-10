@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import Image from "next/image"
-import Link from "next/link"
+import Image from "next/image";
+import Link from "next/link";
 import {
   Home,
   Users,
@@ -13,7 +13,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-} from "lucide-react"
+} from "lucide-react";
 
 import {
   Sidebar,
@@ -24,17 +24,17 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   useSidebar,
-} from "@/components/ui/sidebar"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
 type Item = {
-  title: string
-  url: string
-  icon: React.ElementType
-  key: string
-}
+  title: string;
+  url: string;
+  icon: React.ElementType;
+  key: string;
+};
 
-const items: Item[] = [
+const ADMIN_ITEMS: Item[] = [
   { key: "dashboard", title: "Dashboard", url: "/admin", icon: Home },
   { key: "staff", title: "Staff", url: "/admin/staff", icon: Users },
   { key: "schedule", title: "Schedule", url: "/admin/schedule", icon: CalendarDays },
@@ -43,16 +43,33 @@ const items: Item[] = [
   { key: "documents", title: "Documents", url: "/admin/documents", icon: FileText },
   { key: "messages", title: "Messages", url: "/admin/messages", icon: MessageSquare },
   { key: "settings", title: "Settings", url: "/admin/settings", icon: Settings },
-]
+];
 
-export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) {
-  const { open, setOpen } = useSidebar()
+const CLIENT_ITEMS: Item[] = [
+  { key: "dashboard", title: "Dashboard", url: "/client", icon: Home },
+  { key: "staff", title: "Staff", url: "/client/staff", icon: Users },
+  { key: "schedule", title: "Schedule", url: "/client/schedule", icon: CalendarDays },
+  { key: "report", title: "Report", url: "/client/report", icon: BarChart3 },
+  // If you don’t have /client/inventory yet, you can remove this line.
+  { key: "inventory", title: "Inventory", url: "/client/inventory", icon: Boxes },
+  { key: "documents", title: "Documents", url: "/client/documents", icon: FileText },
+  { key: "messages", title: "Messages", url: "/client/messages", icon: MessageSquare },
+  { key: "settings", title: "Settings", url: "/client/settings", icon: Settings },
+];
+
+export function AppSidebar({
+  activeKey = "dashboard",
+  variant = "admin",
+}: {
+  activeKey?: string;
+  variant?: "admin" | "client";
+}) {
+  const { open, setOpen } = useSidebar();
+
+  const items = variant === "client" ? CLIENT_ITEMS : ADMIN_ITEMS;
 
   return (
-    <Sidebar
-      collapsible="icon"
-      className="relative border-r bg-white"
-    >
+    <Sidebar collapsible="icon" className="relative border-r bg-white">
       {/* HEADER */}
       <SidebarHeader className="gap-0 px-3 py-3">
         <div className="flex items-center gap-2">
@@ -63,6 +80,7 @@ export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) 
               width={40}
               height={40}
               className="h-10 w-10 object-contain"
+              priority
             />
           </div>
 
@@ -77,6 +95,7 @@ export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) 
         </div>
       </SidebarHeader>
 
+      {/* collapse toggle */}
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -94,8 +113,8 @@ export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) 
       <SidebarContent className="px-2 py-3">
         <SidebarMenu>
           {items.map((item) => {
-            const Icon = item.icon
-            const isActive = item.key === activeKey
+            const Icon = item.icon;
+            const isActive = item.key === activeKey;
 
             return (
               <SidebarMenuItem key={item.key}>
@@ -114,12 +133,12 @@ export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) 
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            )
+            );
           })}
         </SidebarMenu>
       </SidebarContent>
 
       <SidebarFooter className="px-2 py-3" />
     </Sidebar>
-  )
+  );
 }
