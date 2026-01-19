@@ -50,11 +50,21 @@ const CLIENT_ITEMS: Item[] = [
   { key: "staff", title: "Staff", url: "/client/staff", icon: Users },
   { key: "schedule", title: "Schedule", url: "/client/schedule", icon: CalendarDays },
   { key: "report", title: "Report", url: "/client/report", icon: BarChart3 },
-  // If you don’t have /client/inventory yet, you can remove this line.
   { key: "inventory", title: "Inventory", url: "/client/inventory", icon: Boxes },
   { key: "documents", title: "Documents", url: "/client/documents", icon: FileText },
   { key: "messages", title: "Messages", url: "/client/messages", icon: MessageSquare },
   { key: "settings", title: "Settings", url: "/client/settings", icon: Settings },
+];
+
+const STAFF_ITEMS: Item[] = [
+  { key: "dashboard", title: "Dashboard", url: "/staff", icon: Home },
+  { key: "staff", title: "Staff", url: "/staff/staff", icon: Users },
+  { key: "schedule", title: "Schedule", url: "/staff/schedule", icon: CalendarDays },
+  { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
+  { key: "inventory", title: "Inventory", url: "/staff/inventory", icon: Boxes },
+  { key: "documents", title: "Documents", url: "/staff/documents", icon: FileText },
+  { key: "messages", title: "Messages", url: "/staff/messages", icon: MessageSquare },
+  { key: "settings", title: "Settings", url: "/staff/settings", icon: Settings },
 ];
 
 export function AppSidebar({
@@ -62,11 +72,12 @@ export function AppSidebar({
   variant = "admin",
 }: {
   activeKey?: string;
-  variant?: "admin" | "client";
+  variant?: "admin" | "client" | "staff";
 }) {
   const { open, setOpen } = useSidebar();
 
-  const items = variant === "client" ? CLIENT_ITEMS : ADMIN_ITEMS;
+  const items =
+    variant === "client" ? CLIENT_ITEMS : variant === "staff" ? STAFF_ITEMS : ADMIN_ITEMS;
 
   return (
     <Sidebar collapsible="icon" className="relative border-r bg-white">
