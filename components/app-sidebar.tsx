@@ -2,6 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import {
   Home,
   Users,
@@ -19,7 +20,6 @@ import {
   Sidebar,
   SidebarContent,
   SidebarHeader,
-  SidebarFooter,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -34,7 +34,9 @@ type Item = {
   key: string
 }
 
-const items: Item[] = [
+type Role = "admin" | "staff" | "client"
+
+const adminItems: Item[] = [
   { key: "dashboard", title: "Dashboard", url: "/admin", icon: Home },
   { key: "staff", title: "Staff", url: "/admin/staff", icon: Users },
   { key: "schedule", title: "Schedule", url: "/admin/schedule", icon: CalendarDays },
@@ -45,57 +47,98 @@ const items: Item[] = [
   { key: "settings", title: "Settings", url: "/admin/settings", icon: Settings },
 ]
 
-export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) {
+const staffItems: Item[] = [
+  { key: "dashboard", title: "Dashboard", url: "/staff/home", icon: Home },
+  { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
+  { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
+]
+
+const clientItems: Item[] = [
+  { key: "dashboard", title: "Dashboard", url: "/admin", icon: Home },
+  { key: "report", title: "Report", url: "/client/report", icon: BarChart3 },
+  { key: "messages", title: "Messages", url: "/client/messages", icon: MessageSquare },
+  { key: "documents", title: "Documents", url: "/client/documents", icon: FileText },
+  { key: "schedule", title: "Schedule", url: "/client/schedule", icon: CalendarDays },
+  { key: "settings", title: "Settings", url: "/client/settings", icon: Settings },
+]
+
+const ITEMS_BY_ROLE: Record<Role, Item[]> = {
+  admin: adminItems,
+  staff: staffItems,
+  client: clientItems,
+}
+
+function isRouteActive(pathname: string, itemUrl: string) {
+  const isRootRoute = itemUrl.split("/").length === 2
+  if (isRootRoute) return pathname === itemUrl
+  return pathname === itemUrl || pathname.startsWith(itemUrl + "/")
+}
+
+type AppSidebarProps = {
+  role: Role
+}
+
+export function AppSidebar({ role }: AppSidebarProps) {
   const { open, setOpen } = useSidebar()
+  const pathname = usePathname()
+
+  const menuItems = ITEMS_BY_ROLE[role]
 
   return (
     <Sidebar
       collapsible="icon"
-      className="relative border-r bg-white"
+      className={cn(
+       "fixed inset-y-0 left-0 z-40",
+        "border-r border-gray-200/60",
+      )}
     >
-      {/* HEADER */}
-      <SidebarHeader className="gap-0 px-3 py-3">
-        <div className="flex items-center gap-2">
-          <div className="h-10 w-10 overflow-hidden rounded-md bg-white">
-            <Image
-              src="/paint_pro_logo.png"
-              alt="Paul Jackman logo"
-              width={40}
-              height={40}
-              className="h-10 w-10 object-contain"
-            />
-          </div>
-
-          <div className={cn("min-w-0", !open && "hidden")}>
-            <div className="text-xs font-semibold leading-4 text-gray-700">PAUL</div>
-            <div className="text-xs font-semibold leading-4 text-gray-700">JACKMAN</div>
-          </div>
-        </div>
-
-        <div className="relative mt-3">
-          <div className="h-px w-full bg-gray-200" />
-        </div>
-      </SidebarHeader>
-
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
         className={cn(
-          "absolute z-50 grid h-7 w-7 place-items-center",
-          "top-[72px] -right-3",
-          "rounded-full border bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+          "absolute z-50",
+          "top-4 -right-4",
+          "h-8 w-9",
+          "border border-gray-200/60 bg-white",
+          "grid place-items-center text-gray-400 shadow-sm hover:bg-gray-50",
+          "flex justify-between content-center"
         )}
       >
-        {open ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        <ChevronLeft className="h-5" />
+        <ChevronRight className="h-5" />
       </button>
 
-      {/* CONTENT */}
-      <SidebarContent className="px-2 py-3">
-        <SidebarMenu>
-          {items.map((item) => {
+      <SidebarHeader className="px-4 py-4">
+        <div className={cn("flex items-center", open ? "gap-3" : "justify-center")}>
+          <Image
+            src="/paint_pro_logo.png"
+            alt="Paul Jackman logo"
+            width={36}
+            height={36}
+            className="object-contain"
+            priority
+          />
+
+          {open && (
+            <div className="leading-tight">
+              <div className="text-xs font-semibold text-gray-700">PAUL</div>
+              <div className="text-xs font-semibold text-gray-700">JACKMAN</div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 h-px w-full bg-gray-200/60" />
+      </SidebarHeader>
+
+      <SidebarContent className="px-2 py-4">
+        <SidebarMenu className={cn(
+          "space-y-1 flex",
+          open ? "" : "items-center"
+        )}>
+          {menuItems.map((item) => {
             const Icon = item.icon
-            const isActive = item.key === activeKey
+            const isActive = isRouteActive(pathname, item.url)
 
             return (
               <SidebarMenuItem key={item.key}>
@@ -103,14 +146,24 @@ export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) 
                   <Link
                     href={item.url}
                     className={cn(
-                      "h-11 rounded-md px-3 text-gray-600 hover:bg-gray-100 hover:text-gray-900",
-                      isActive && "bg-emerald-500 text-white hover:bg-emerald-500 hover:text-white"
+                      "w-full overflow-visible",
+                      open
+                        ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium"
+                        : cn(
+                            "flex h-14 items-center justify-center rounded-md",
+                            "[&>svg]:!h-5 [&>svg]:!w-5"
+                          ),
+                      "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                      isActive && "bg-[#00BF63] text-white hover:bg-[#00BF63]"
                     )}
                   >
-                    <Icon className={cn("h-5 w-5", isActive && "text-white")} />
-                    <span className={cn("ml-3 text-sm font-medium", !open && "hidden")}>
-                      {item.title}
-                    </span>
+                    <Icon
+                      className={cn(
+                        isActive ? "text-white hover:text-[#00BF63]" : "text-gray-500",
+                        open ? "h-5 w-5" : "!h-5 !w-5"
+                      )}
+                    />
+                    {open && <span className="truncate">{item.title}</span>}
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -118,8 +171,6 @@ export function AppSidebar({ activeKey = "dashboard" }: { activeKey?: string }) 
           })}
         </SidebarMenu>
       </SidebarContent>
-
-      <SidebarFooter className="px-2 py-3" />
     </Sidebar>
   )
 }
