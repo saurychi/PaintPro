@@ -1,7 +1,7 @@
 function EmployeeOverviewModal() {
     return (
         <div>
-            Employee Overview Modal
+            EmployeeOverviewModal
         </div>
     );
 }

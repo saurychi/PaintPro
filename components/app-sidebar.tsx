@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import Image from "next/image"
 import Link from "next/link"
@@ -14,7 +14,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-} from "lucide-react"
+} from "lucide-react";
 
 import {
   Sidebar,
@@ -24,15 +24,15 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   useSidebar,
-} from "@/components/ui/sidebar"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
 type Item = {
-  title: string
-  url: string
-  icon: React.ElementType
-  key: string
-}
+  title: string;
+  url: string;
+  icon: React.ElementType;
+  key: string;
+};
 
 type Role = "admin" | "staff" | "client"
 
@@ -167,10 +167,10 @@ export function AppSidebar({ role }: AppSidebarProps) {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            )
+            );
           })}
         </SidebarMenu>
       </SidebarContent>
     </Sidebar>
-  )
+  );
 }
