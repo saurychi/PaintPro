@@ -44,7 +44,7 @@ export default function Signin() {
         await signInWithEmailAndPassword(auth, userDoc.data().email, password);
       }
 
-      router.push("/dashboard");
+      router.push("/admin");
     } catch (err: any) {
       console.error(err);
 
@@ -120,7 +120,7 @@ export default function Signin() {
 
         <p className={styles.signupText}>
           Don&apos;t have an account?{" "}
-          <Link href="/staff/auth/signup" className={styles.signupLink}>
+          <Link href="/auth/signup" className={styles.signupLink}>
             Signup here
           </Link>
         </p>

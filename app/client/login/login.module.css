@@ -1,0 +1,107 @@
+.hero {
+  height: 100vh;
+  width: 100%;
+  background: #ffffff;
+  display: grid;
+  place-items: center;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* IMPORTANT: keep the content block centered and not full width */
+.content {
+  width: min(520px, 92vw);
+  text-align: center;
+}
+
+/* Logo area */
+.logoRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.logoText {
+  font-size: 34px;
+  font-weight: 600;
+  color: #7ad957;
+}
+
+/* Form card area */
+.form {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.label {
+  font-size: 13px;
+  color: #666;
+}
+
+.hideBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #888;
+}
+
+.eye {
+  font-size: 12px;
+}
+
+/* Input */
+.input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #dcdcdc;
+  outline: none;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.input:focus {
+  border-color: #00c060;
+  box-shadow: 0 0 0 3px rgba(0, 192, 96, 0.12);
+}
+
+/* Checkbox */
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 22px;
+}
+
+/* Button */
+.accessButton {
+  width: 100%;
+  height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: #00c060;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.accessButton:hover {
+  background: #00a851;
+}
