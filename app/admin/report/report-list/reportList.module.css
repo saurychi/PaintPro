@@ -3,6 +3,9 @@
   width: 100%;
   max-width: 1400px;
   margin: 0 auto;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .headerRow {
@@ -21,7 +24,7 @@
 
 .title {
   font-size: 40px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
   color: #111827;
@@ -29,7 +32,7 @@
 
 .subtitle {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -67,6 +70,7 @@
   background: transparent;
   padding: 0 14px 0 34px;
   font-size: 14px;
+  font-weight: 400;
   color: #111827;
 }
 
@@ -81,7 +85,7 @@
   padding: 0 12px;
   border-radius: 999px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -111,7 +115,7 @@
 }
 
 .sortValue {
-  font-weight: 900;
+  font-weight: 600;
   margin-left: 6px;
 }
 
@@ -140,7 +144,7 @@
 
 .menuLabel {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
   padding: 8px 10px 6px;
 }
@@ -161,7 +165,7 @@
   align-items: center;
   gap: 10px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 500;
   cursor: pointer;
   color: #111827;
 }
@@ -185,7 +189,7 @@
   border-radius: 10px;
   cursor: pointer;
   color: #111827;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .checkItem:hover {
@@ -204,7 +208,7 @@
 
 .sectionLabel {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
   margin-bottom: 10px;
 }
@@ -225,8 +229,9 @@
   border-bottom: 1px solid #e5e7eb;
   padding: 10px 12px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
+  letter-spacing: 0.02em;
 }
 
 .tableRow {
@@ -236,6 +241,7 @@
   padding: 12px 12px;
   border-bottom: 1px solid #f1f5f9;
   font-size: 14px;
+  font-weight: 400;
 }
 
 .tableRow:last-child {
@@ -256,7 +262,7 @@
 }
 
 .reportTitle {
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   white-space: nowrap;
   overflow: hidden;
@@ -266,7 +272,7 @@
 .reportSub {
   margin-top: 4px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
   white-space: nowrap;
   overflow: hidden;
@@ -277,7 +283,7 @@
 .cellDate,
 .cellPeriod {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #374151;
   white-space: nowrap;
   overflow: hidden;
@@ -293,7 +299,7 @@
   padding: 0 12px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   letter-spacing: 0.02em;
   border: 1px solid transparent;
 }
@@ -319,7 +325,7 @@
   padding: 0 10px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   border: 1px solid transparent;
 }
 
@@ -378,14 +384,14 @@
 
 .emptyTitle {
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .emptyText {
   margin-top: 6px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 

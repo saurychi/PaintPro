@@ -1,5 +1,8 @@
 .page {
   padding: 22px 26px;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .headerRow {
@@ -18,7 +21,7 @@
 
 .title {
   font-size: 40px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
   color: #111827;
@@ -26,7 +29,7 @@
 
 .subtitle {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -56,14 +59,14 @@
 
 .cardTitle {
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   margin-bottom: 2px;
 }
 
 .cardSub {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -76,7 +79,7 @@
   background: #22c55e;
   color: #fff;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -99,7 +102,7 @@
   background: #fff;
   color: #111827;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -141,21 +144,21 @@
 
 .kpiLabel {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
 }
 
 .kpiValue {
   margin-top: 6px;
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .kpiHint {
   margin-top: 6px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   color: #14532d;
 }
 
@@ -185,7 +188,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  font-weight: 900;
+  font-weight: 500;
   font-size: 13px;
   color: #111827;
   cursor: pointer;
@@ -223,14 +226,14 @@
 
 .noteTitle {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   margin-bottom: 6px;
 }
 
 .noteText {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
   line-height: 1.35;
 }
