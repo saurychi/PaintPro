@@ -179,7 +179,7 @@ export default function ReportOverviewPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.title}>Report</h1>
+      <h1 className={styles.title}>Report Overview</h1>
 
       <div className={styles.topGrid}>
         {/* ROI */}

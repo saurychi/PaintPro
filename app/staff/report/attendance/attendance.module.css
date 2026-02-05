@@ -1,5 +1,8 @@
 .page {
   padding: 22px 26px;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .headerRow {
@@ -19,7 +22,7 @@
 
 .title {
   font-size: 40px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
   color: #111827;
@@ -27,7 +30,7 @@
 
 .subtitle {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -65,6 +68,7 @@
   background: transparent;
   padding: 0 14px 0 34px;
   font-size: 14px;
+  font-weight: 400;
   color: #111827;
 }
 
@@ -82,7 +86,7 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
 }
 
@@ -105,14 +109,14 @@
   border: 1px solid #e5e7eb;
   padding: 0 10px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   color: #111827;
   background: #fff;
 }
 
 .rangeSep {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 400;
   color: #9ca3af;
 }
 
@@ -123,7 +127,7 @@
   border: 1px solid #e5e7eb;
   padding: 0 10px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   color: #111827;
   background: #fff;
 }
@@ -144,14 +148,14 @@
 
 .cardLabel {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
 }
 
 .cardValue {
   margin-top: 6px;
   font-size: 28px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
@@ -186,13 +190,13 @@
 
 .tableTitle {
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .tableMeta {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -211,8 +215,9 @@
   border-bottom: 1px solid #e5e7eb;
   padding: 10px 12px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
+  letter-spacing: 0.02em;
 }
 
 .tableRow {
@@ -221,6 +226,8 @@
   align-items: center;
   padding: 12px 12px;
   border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+  font-weight: 400;
 }
 
 .tableRow:last-child {
@@ -233,7 +240,7 @@
 
 .staffName {
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   white-space: nowrap;
   overflow: hidden;
@@ -243,7 +250,7 @@
 .staffSub {
   margin-top: 4px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
   white-space: nowrap;
   overflow: hidden;
@@ -254,7 +261,7 @@
 .cellTime,
 .cellHours {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   color: #374151;
   white-space: nowrap;
 }
@@ -272,7 +279,7 @@
   padding: 0 10px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   border: 1px solid transparent;
 }
 
@@ -345,7 +352,7 @@
   display: flex;
   align-items: center;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 500;
   cursor: pointer;
   color: #111827;
 }
@@ -360,14 +367,14 @@
 
 .emptyTitle {
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .emptyText {
   margin-top: 6px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -387,7 +394,7 @@
   border: 1px solid #e5e7eb;
   background: #fff;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -411,7 +418,7 @@
 
 .pageInfo {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   color: #374151;
 }
 

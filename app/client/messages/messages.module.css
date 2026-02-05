@@ -1,5 +1,8 @@
 .page {
   padding: 22px 26px;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .headerRow {
@@ -11,8 +14,8 @@
 
 .title {
   font-size: 38px;
-  font-weight: 800;
-  color: #0f172a;
+  font-weight: 700;
+  color: #111827;
   letter-spacing: -0.02em;
 }
 
@@ -55,6 +58,8 @@
   height: 40px;
   padding-left: 36px;
   border-radius: 999px;
+  font-weight: 400;
+  color: #111827;
 }
 
 .threadList {
@@ -121,17 +126,18 @@
 
 .threadTitle {
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   color: #111827;
   margin-bottom: 4px;
 }
 
 .threadPreview {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  font-weight: 400;
+  color: rgba(17, 24, 39, 0.55);
   line-height: 1.35;
   display: -webkit-box;
-  line-clamp: 1;  
+  line-clamp: 1;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -168,12 +174,13 @@
 
 .threadMetaText {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+  color: rgba(17, 24, 39, 0.45);
 }
 
 .unreadPill {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: #ffffff;
   background: #10b981;
   border-radius: 999px;
@@ -206,7 +213,7 @@
 }
 
 .avatarLetter {
-  font-weight: 800;
+  font-weight: 600;
   color: rgba(17, 24, 39, 0.75);
 }
 
@@ -241,14 +248,15 @@
 
 .chatName {
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 600;
   color: #111827;
 }
 
 .chatRole {
   margin-top: 2px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.5);
+  font-weight: 400;
+  color: rgba(17, 24, 39, 0.5);
 }
 
 /* Chat body */
@@ -278,8 +286,9 @@
 
 .dayText {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
   color: #10b981;
+  letter-spacing: 0.02em;
 }
 
 .msgRow {
@@ -299,6 +308,7 @@
   padding: 12px 14px;
   border-radius: 12px;
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-word;
@@ -319,7 +329,8 @@
 .timeRow {
   font-size: 10px;
   margin-top: 6px;
-  color: rgba(0, 0, 0, 0.38);
+  font-weight: 400;
+  color: rgba(17, 24, 39, 0.38);
 }
 
 .timeRowMe {
@@ -360,6 +371,8 @@
   height: 44px;
   border-radius: 12px;
   font-size: 13px;
+  font-weight: 400;
+  color: #111827;
 }
 
 .sendBtn {
@@ -369,6 +382,7 @@
   background: #79d14a;
   color: #0b1b0f;
   padding: 0;
+  font-weight: 500;
 }
 
 .sendBtn:hover {

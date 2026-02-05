@@ -1,6 +1,8 @@
-/* app/staff/report/payment/payment.module.css */
 .page {
   padding: 22px 26px;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .headerRow {
@@ -20,7 +22,7 @@
 
 .title {
   font-size: 44px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
   color: #111827;
@@ -30,7 +32,7 @@
   margin-top: 2px;
   font-size: 12px;
   color: rgba(0, 0, 0, 0.55);
-  font-weight: 700;
+  font-weight: 400;
 }
 
 .toolbar {
@@ -67,6 +69,7 @@
   background: transparent;
   padding: 0 14px 0 34px;
   font-size: 14px;
+  font-weight: 400;
   color: #111827;
 }
 
@@ -86,7 +89,7 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
 }
 
@@ -107,7 +110,7 @@
   border: 1px solid #e5e7eb;
   padding: 0 10px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 400;
   color: #111827;
   outline: none;
   background: #fff;
@@ -115,7 +118,7 @@
 
 .rangeSep {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 400;
   color: #9ca3af;
 }
 
@@ -125,7 +128,7 @@
   border: 1px solid #e5e7eb;
   padding: 0 10px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 400;
   color: #111827;
   outline: none;
   background: #fff;
@@ -149,14 +152,14 @@
 
 .statLabel {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: rgba(17, 24, 39, 0.7);
 }
 
 .statValue {
   margin-top: 10px;
   font-size: 30px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
@@ -184,13 +187,13 @@
 
 .sectionLabel {
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .miniMeta {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -209,8 +212,9 @@
   border-bottom: 1px solid #e5e7eb;
   padding: 12px 12px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
   color: #6b7280;
+  letter-spacing: 0.02em;
 }
 
 .tableRow {
@@ -220,6 +224,7 @@
   padding: 14px 12px;
   border-bottom: 1px solid #f1f5f9;
   font-size: 14px;
+  font-weight: 400;
 }
 
 .tableRow:last-child {
@@ -232,7 +237,7 @@
 }
 
 .staffName {
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   white-space: nowrap;
   overflow: hidden;
@@ -242,7 +247,7 @@
 .staffSub {
   margin-top: 4px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
   white-space: nowrap;
   overflow: hidden;
@@ -250,7 +255,7 @@
 }
 
 .payNo {
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   white-space: nowrap;
   overflow: hidden;
@@ -260,7 +265,7 @@
 .paySub {
   margin-top: 4px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
   white-space: nowrap;
   overflow: hidden;
@@ -271,7 +276,7 @@
 .cellDue,
 .cellAmount {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   color: #374151;
   white-space: nowrap;
   overflow: hidden;
@@ -296,7 +301,7 @@
   padding: 0 12px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 
@@ -368,7 +373,7 @@
   align-items: center;
   gap: 10px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 500;
   cursor: pointer;
   color: #111827;
 }
@@ -390,14 +395,14 @@
 
 .emptyTitle {
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .emptyText {
   margin-top: 6px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: #6b7280;
 }
 
@@ -416,7 +421,7 @@
   border: 1px solid #e5e7eb;
   background: #fff;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -440,7 +445,7 @@
 
 .pageInfo {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   color: #374151;
 }
 

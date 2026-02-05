@@ -3,12 +3,14 @@
   width: 100%;
   max-width: 1400px; /* increase if you want */
   margin: 0 auto;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
-
 
 .title {
   font-size: 44px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0 0 14px;
   color: #111827;
@@ -21,13 +23,11 @@
   align-items: start;
 }
 
-
 .rightCol {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-
 
 /* Cards */
 .card {
@@ -55,14 +55,14 @@
 
 .cardTitle {
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
 .cardSubtitle {
   margin-top: 3px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: rgba(0, 0, 0, 0.55);
 }
 
@@ -88,7 +88,7 @@
   border-radius: 10px;
   background: rgba(34, 197, 94, 0.14);
   color: #166534;
-  font-weight: 800;
+  font-weight: 500;
   font-size: 12px;
   cursor: pointer;
 }
@@ -121,7 +121,7 @@
 
 .manualText {
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
@@ -158,14 +158,14 @@
 
 .donutCenterTop {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 500;
   color: rgba(0, 0, 0, 0.55);
   margin-bottom: 6px;
 }
 
 .donutCenterBottom {
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
@@ -201,7 +201,7 @@
 
 .spreadName {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 500;
   color: #111827;
   white-space: nowrap;
   overflow: hidden;
@@ -210,7 +210,7 @@
 
 .spreadValue {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
@@ -226,7 +226,7 @@
 
 .tooltipTitle {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
   margin-bottom: 6px;
 }
@@ -244,13 +244,13 @@
 
 .tooltipName {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 500;
   color: rgba(0, 0, 0, 0.6);
 }
 
 .tooltipValue {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   color: #111827;
 }
 
