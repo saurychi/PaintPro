@@ -1,33 +1,33 @@
-"use client";
+"use client"
 
-import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
+import { AppSidebar } from "@/components/app-sidebar"
+import { cn } from "@/lib/utils"
 
-import { SidebarProvider } from "@/components/ui/sidebar";
-import { AppSidebar } from "@/components/app-sidebar";
-
-export default function StaffLayout({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-
-  // staff activeKey mapping
-  const activeKey =
-    pathname.startsWith("/staff/report/payment") ? "payment" :
-    pathname.startsWith("/staff/report/attendance") ? "attendance" :
-    pathname.startsWith("/staff/report") ? "report" :
-    pathname.startsWith("/staff/schedule") ? "schedule" :
-    pathname.startsWith("/staff/inventory") ? "inventory" :
-    pathname.startsWith("/staff/documents") ? "documents" :
-    pathname.startsWith("/staff/messages") ? "messages" :
-    pathname.startsWith("/staff/settings") ? "settings" :
-    pathname.startsWith("/staff/staff") ? "staff" :
-    "dashboard";
+function AdminShell({ children }: { children: React.ReactNode }) {
+  const { open } = useSidebar()
 
   return (
+    <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
+      <AppSidebar role="staff" />
+
+      <main
+        className={cn(
+          "min-h-screen min-w-0 overflow-auto",
+          "transition-[padding-left] duration-300 ease-in-out",
+          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
+        )}
+      >
+        {children}
+      </main>
+    </div>
+  )
+}
+
+export default function StaffLayout({ children }: { children: React.ReactNode }) {
+  return (
     <SidebarProvider>
-      <div className="flex min-h-screen">
-        <AppSidebar variant="staff" activeKey={activeKey} />
-        <main className="flex-1">{children}</main>
-      </div>
+      <AdminShell>{children}</AdminShell>
     </SidebarProvider>
-  );
+  )
 }

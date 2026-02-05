@@ -11,7 +11,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
       <AppSidebar role="admin" />
 
-      {/* main is offset by the sidebar width */}
       <main
         className={cn(
           "min-h-screen min-w-0 overflow-auto",

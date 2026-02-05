@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import SideNavbar from "@/components/sideNavbar";
 
 export default function StaffProfile() {
   const [showReport, setShowReport] = useState(false);
@@ -18,7 +17,6 @@ export default function StaffProfile() {
 
   return (
     <div className="flex min-h-screen bg-white">
-      <SideNavbar activeKey="profile" />
       <main className="flex-1 overflow-auto p-8">
         <div className="max-w-5xl mx-auto">
           <div className="flex items-center justify-between mb-6">
@@ -60,7 +58,7 @@ export default function StaffProfile() {
                     {[1,2,3,4].map((i) => (
                       <div key={i} className="border rounded-lg p-3 flex items-center justify-between">
                         <span className="text-sm text-gray-700">Dawn House</span>
-                        <button 
+                        <button
                             onClick={() => setShowReport(true)}
                             className="text-xs px-3 py-1 rounded-full bg-[#dcfce7] text-[#166534] hover:bg-[#bbf7d0]"
                         >

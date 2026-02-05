@@ -1,23 +1,33 @@
-"use client";
+"use client"
 
-import React from "react";
-import ClientSideNavbar from "@/components/clientSideNavbar";
-import { usePathname } from "next/navigation";
+import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
+import { AppSidebar } from "@/components/app-sidebar"
+import { cn } from "@/lib/utils"
 
-export default function ClientLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const isLoginPage = pathname === "/client/login";
+function AdminShell({ children }: { children: React.ReactNode }) {
+  const { open } = useSidebar()
 
   return (
-    <div
-      className="flex h-screen bg-gray-50"
-      style={{
-        fontFamily:
-          'var(--font-paintpro), system-ui, -apple-system, "Segoe UI", sans-serif',
-      }}
-    >
-      {!isLoginPage && <ClientSideNavbar />}
-      <main className="flex-1 overflow-y-auto bg-white">{children}</main>
+    <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
+      <AppSidebar role="client" />
+
+      <main
+        className={cn(
+          "min-h-screen min-w-0 overflow-auto",
+          "transition-[padding-left] duration-300 ease-in-out",
+          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
+        )}
+      >
+        {children}
+      </main>
     </div>
-  );
+  )
+}
+
+export default function ClientLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <SidebarProvider>
+      <AdminShell>{children}</AdminShell>
+    </SidebarProvider>
+  )
 }

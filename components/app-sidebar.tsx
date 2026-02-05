@@ -48,14 +48,13 @@ const adminItems: Item[] = [
 ]
 
 const staffItems: Item[] = [
-  { key: "dashboard", title: "Dashboard", url: "/staff/home", icon: Home },
+  { key: "dashboard", title: "Dashboard", url: "/staff", icon: Home },
   { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
   { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
 ]
 
 const clientItems: Item[] = [
-  { key: "dashboard", title: "Dashboard", url: "/admin", icon: Home },
-  { key: "report", title: "Report", url: "/client/report", icon: BarChart3 },
+  { key: "report", title: "Report", url: "/client", icon: BarChart3 },
   { key: "messages", title: "Messages", url: "/client/messages", icon: MessageSquare },
   { key: "documents", title: "Documents", url: "/client/documents", icon: FileText },
   { key: "schedule", title: "Schedule", url: "/client/schedule", icon: CalendarDays },
