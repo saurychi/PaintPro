@@ -159,12 +159,12 @@ export default function DashboardPage() {
           />
         </div>
 
-        <div className="lg:col-span-3 h-[390px] min-h-0 flex flex-col justify-between">
-          <div className="flex-1 min-h-0">
+        <div className="lg:col-span-3 h-[375px] min-h-0 flex flex-col justify-between">
+          <div className="min-h-0">
             <AnalyticsCard percentComplete={45} currentTaskLabel="Spray or Brush Roll Finish" />
           </div>
 
-          <div className="flex-1 min-h-0">
+          <div className="min-h-0">
             <JobCostSpreadCard items={costSpread} />
           </div>
         </div>
