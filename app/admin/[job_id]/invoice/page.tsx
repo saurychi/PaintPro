@@ -1,9 +1,5 @@
-function Invoice() {
-    return (
-        <div>
-            Invoice
-        </div>
-    );
-}
+import InvoiceGeneration from '@/components/invoice-generation'
 
-export default Invoice;
+export default function Page() {
+  return <InvoiceGeneration />
+}

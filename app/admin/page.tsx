@@ -29,6 +29,7 @@ export default function DashboardPage() {
     { label: "Nigger Cost", percent: 10 },
   ]
 
+  // ... (Keep your existing types for ServiceGroup/ServiceStep) ...
   type ServiceStepStatus = "done" | "active" | "pending"
 
   type ServiceStep = {
@@ -152,7 +153,7 @@ export default function DashboardPage() {
             onSeeMore={(id) => console.log("See more:", id)}
             onDownpayment={() => console.log("Downpayment")}
             onStartJob={() => console.log("Start Job")}
-            onCreateInvoice={() => console.log("Create Invoice")}
+            onCreateInvoice={() => router.push("/admin/[job_id]/invoice")}
             onAddPayment={() => console.log("Add Payment")}
             onEmployeeManagement={() => console.log("Employee Management")}
             onConcludeJob={() => console.log("Conclude Job")}
