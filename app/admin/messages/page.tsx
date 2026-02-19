@@ -89,7 +89,7 @@ function AdminMessages() {
 
       <div className="flex flex-1 gap-6 overflow-hidden">
         {/* Conversation List */}
-        <div className="w-full lg:w-1/3 xl:w-1/4 bg-white rounded-xl shadow-sm border border-gray-100 p-4 overflow-y-auto">
+        <div className="w-full lg:w-1/4 xl:w-1/5 bg-white rounded-xl shadow-sm border border-gray-100 p-4 overflow-y-auto">
           <div className="space-y-3">
             {conversations.map((chat) => (
               <button
@@ -197,55 +197,7 @@ function AdminMessages() {
           </div>
         </div>
 
-        {/* Staff Profile Column */}
-        <div className="hidden xl:block w-1/4 bg-white rounded-xl shadow-sm border border-gray-100 p-6 overflow-y-auto">
-          <div className="flex flex-col items-center mb-6">
-            <div className="w-24 h-24 rounded-full bg-red-200 mb-4 relative">
-              <div className="absolute bottom-1 right-1 w-5 h-5 bg-[#00c065] rounded-full border-4 border-white" />
-            </div>
-            <h2 className="text-xl font-bold text-gray-900">Paul Jackman</h2>
-            <p className="text-sm text-gray-500 font-medium">Project Manager</p>
-          </div>
 
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Contact Info</h3>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="text-gray-400">✉</span>
-                  <span>paul.jackman@paintpro.com</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="text-gray-400">☎</span>
-                  <span>+1 (555) 123-4567</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="text-gray-400">📍</span>
-                  <span>Melbourne, Australia</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-gray-100">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Performance</h3>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-medium text-gray-700">Response Rate</span>
-                  <span className="text-xs font-bold text-[#00c065]">98%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5">
-                  <div className="bg-[#00c065] h-1.5 rounded-full" style={{ width: "98%" }} />
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-gray-100">
-              <button className="w-full bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium py-2 rounded-lg transition-colors text-sm" type="button">
-                View Full Profile
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
     </main>
   )
