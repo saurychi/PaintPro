@@ -40,7 +40,7 @@ function Settings() {
     };
 
     return (
-        <div className="max-w-4xl mx-auto pb-10">
+        <div className="w-full px-6 pb-10">
             <h1 className="text-3xl font-bold text-[#1a1a4b] mb-8">Settings</h1>
 
             {/* Profile Details Section */}

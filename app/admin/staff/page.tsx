@@ -2,6 +2,14 @@
 
 import React, { useMemo, useState } from "react"
 
+type WorkTimelineEntry = {
+  jobName: string
+  reportDate: string
+  duration: string
+  description: string
+  materials: string[]
+}
+
 type Employee = {
   id: string
   name: string
@@ -9,6 +17,7 @@ type Employee = {
   phone: string
   photoUrl: string
   metrics: number[] // six-point radar metrics
+  workTimeline: WorkTimelineEntry[]
 }
 
 const initialEmployees: Employee[] = [
@@ -19,6 +28,36 @@ const initialEmployees: Employee[] = [
     phone: "09662749655",
     photoUrl: "/paint_pro_logo.png",
     metrics: [85, 60, 40, 55, 90, 35],
+    workTimeline: [
+      {
+        jobName: "Dawn House",
+        reportDate: "June 15, 2025",
+        duration: "6 Hours",
+        description: "Completed exterior wall preparation and first coat application. Encountered minor dampness on the north wall, treated with sealer.",
+        materials: ["20L Weather Shield Paint (White)", "5L Primer/Sealer", "Sandpaper (Grade 120)"],
+      },
+      {
+        jobName: "Dawn House",
+        reportDate: "June 16, 2025",
+        duration: "5 Hours",
+        description: "Applied second coat on exterior walls. Completed trim painting.",
+        materials: ["15L Weather Shield Paint (White)", "Masking Tape"],
+      },
+      {
+        jobName: "Dawn House",
+        reportDate: "June 17, 2025",
+        duration: "4 Hours",
+        description: "Interior wall preparation and priming.",
+        materials: ["10L Interior Primer", "Sandpaper (Grade 80)"],
+      },
+      {
+        jobName: "Dawn House",
+        reportDate: "June 18, 2025",
+        duration: "7 Hours",
+        description: "Interior painting — living room and hallway.",
+        materials: ["20L Interior Paint (Cream)", "Paint Rollers", "Drop Sheets"],
+      },
+    ],
   },
 ]
 
@@ -26,7 +65,7 @@ export default function Staff() {
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees)
   const [openIndex, setOpenIndex] = useState<number | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [showReport, setShowReport] = useState(false)
+  const [showReport, setShowReport] = useState<WorkTimelineEntry | null>(null)
 
   const addEmployee = (name: string) => {
     const newEmp: Employee = {
@@ -36,6 +75,7 @@ export default function Staff() {
       phone: "0900-000-0000",
       photoUrl: "/paint_pro_logo.png",
       metrics: [60, 50, 45, 55, 65, 40],
+      workTimeline: [],
     }
     setEmployees((prev) => [newEmp, ...prev])
     setOpenIndex(null)
@@ -180,17 +220,17 @@ export default function Staff() {
                           </div>
 
                           <div className="space-y-3">
-                            {[1, 2, 3, 4].map((i) => (
+                            {emp.workTimeline.map((entry, i) => (
                               <div
                                 key={i}
                                 className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"
                               >
                                 <span className="text-sm font-medium text-gray-700">
-                                  Dawn House
+                                  {entry.jobName}
                                 </span>
 
                                 <button
-                                  onClick={() => setShowReport(true)}
+                                  onClick={() => setShowReport(entry)}
                                   className="rounded-full bg-[#dcfce7] px-3 py-1 text-xs font-semibold text-[#166534] transition-colors hover:bg-[#bbf7d0]"
                                 >
                                   See report
@@ -222,9 +262,9 @@ export default function Staff() {
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm">
             <div className="w-[92%] max-w-lg rounded-2xl bg-white p-6 shadow-xl">
               <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-gray-900">Job Report: Dawn House</h3>
+                <h3 className="text-lg font-bold text-gray-900">Job Report: {showReport.jobName}</h3>
                 <button
-                  onClick={() => setShowReport(false)}
+                  onClick={() => setShowReport(null)}
                   className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -238,35 +278,32 @@ export default function Staff() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold uppercase text-gray-500">Date</label>
-                    <p className="text-sm font-medium text-gray-900">June 15, 2025</p>
+                    <p className="text-sm font-medium text-gray-900">{showReport.reportDate}</p>
                   </div>
                   <div>
                     <label className="text-xs font-bold uppercase text-gray-500">Duration</label>
-                    <p className="text-sm font-medium text-gray-900">6 Hours</p>
+                    <p className="text-sm font-medium text-gray-900">{showReport.duration}</p>
                   </div>
                 </div>
 
                 <div>
                   <label className="text-xs font-bold uppercase text-gray-500">Description</label>
-                  <p className="text-sm text-gray-600">
-                    Completed exterior wall preparation and first coat application. Encountered minor dampness on the
-                    north wall, treated with sealer.
-                  </p>
+                  <p className="text-sm text-gray-600">{showReport.description}</p>
                 </div>
 
                 <div>
                   <label className="text-xs font-bold uppercase text-gray-500">Materials Used</label>
                   <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-gray-600">
-                    <li>20L Weather Shield Paint (White)</li>
-                    <li>5L Primer/Sealer</li>
-                    <li>Sandpaper (Grade 120)</li>
+                    {showReport.materials.map((m, i) => (
+                      <li key={i}>{m}</li>
+                    ))}
                   </ul>
                 </div>
               </div>
 
               <div className="mt-6 flex justify-end">
                 <button
-                  onClick={() => setShowReport(false)}
+                  onClick={() => setShowReport(null)}
                   className="rounded-full bg-[#00c065] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#00a054]"
                 >
                   Close Report

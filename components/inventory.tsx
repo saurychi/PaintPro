@@ -12,22 +12,23 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 
+// Hardcoded inventory data
 const INVENTORY_DATA = [
   {
     id: 1,
     name: 'White Latex Primer (1L)',
     unitCost: 32.0,
-    inStock: 7,
+    inStock: 8,
     reorderPoint: 4,
     tags: ['Paint Can'],
     supplier: 'JewLuxe',
@@ -47,7 +48,7 @@ const INVENTORY_DATA = [
   },
   {
     id: 3,
-    name: 'Minwax Stainable (250ml)',
+    name: 'Minwax Stainable(250ml)',
     unitCost: 7.25,
     inStock: 12,
     reorderPoint: 5,
@@ -124,6 +125,7 @@ const INVENTORY_DATA = [
   },
 ]
 
+// Tag color mapping
 const TAG_COLORS: Record<string, string> = {
   'Paint Can': 'bg-blue-100 text-blue-700',
   'Satin': 'bg-pink-100 text-pink-700',
@@ -136,10 +138,6 @@ const TAG_COLORS: Record<string, string> = {
   'Thinner': 'bg-blue-100 text-blue-700',
   'Sandpaper': 'bg-green-100 text-green-700',
 }
-
-// ----------------------------------------------------------------------
-// 2. HELPER COMPONENTS
-// ----------------------------------------------------------------------
 
 function TagBadge({ tag, hasNext }: { tag: string; hasNext?: boolean }) {
   const colorClass = TAG_COLORS[tag] || 'bg-gray-100 text-gray-700'
@@ -192,11 +190,7 @@ function WarningIcon({ type }: { type: string | null }) {
   return null
 }
 
-// ----------------------------------------------------------------------
-// 3. MAIN PAGE COMPONENT
-// ----------------------------------------------------------------------
-
-export default function AdminInventory() {
+export default function InventoryView() {
   const [materialsOpen, setMaterialsOpen] = useState(true)
   const [equipmentOpen, setEquipmentOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -277,7 +271,6 @@ export default function AdminInventory() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          
         </div>
 
         {/* Materials Section */}
@@ -400,9 +393,6 @@ export default function AdminInventory() {
 
           <CollapsibleContent className="mt-4 p-4 text-sm text-gray-600">
             {/* Equipment content would go here */}
-            <div className="text-center py-8 text-gray-400 border border-dashed rounded-lg">
-                No equipment data available yet.
-            </div>
           </CollapsibleContent>
         </Collapsible>
       </div>

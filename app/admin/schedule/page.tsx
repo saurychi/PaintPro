@@ -41,6 +41,12 @@ const UPCOMING_JOBS = [
   { date: "July 3", title: "Epoxy Floor Coating" },
 ]
 
+const CURRENT_JOB = {
+  id: "#0000005D-2025",
+  name: "Lee House",
+  status: "Job on-going",
+}
+
 // Helper to generate calendar days
 const getCalendarDays = (year: number, month: number): CalendarDay[] => {
   const firstDay = new Date(year, month, 1)
@@ -245,12 +251,12 @@ export default function AdminSchedule() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 shrink-0">
             <div className="flex items-center gap-2 mb-3">
               <span className="w-3 h-3 rounded-full bg-[#00c065]" />
-              <span className="text-sm font-medium text-gray-700">Status: Job on-going</span>
+              <span className="text-sm font-medium text-gray-700">Status: {CURRENT_JOB.status}</span>
             </div>
 
             <div className="border border-gray-200 rounded-lg p-3 bg-gray-50/50">
-              <div className="text-lg font-bold text-gray-900 mb-1">#0000005D-2025</div>
-              <div className="text-sm text-gray-600 font-medium">Lee House</div>
+              <div className="text-lg font-bold text-gray-900 mb-1">{CURRENT_JOB.id}</div>
+              <div className="text-sm text-gray-600 font-medium">{CURRENT_JOB.name}</div>
             </div>
           </div>
 
