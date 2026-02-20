@@ -141,7 +141,12 @@ export function AppSidebar({ role }: AppSidebarProps) {
 
             return (
               <SidebarMenuItem key={item.key}>
-                <SidebarMenuButton asChild tooltip={item.title}>
+                <SidebarMenuButton asChild tooltip={item.title} className={
+                  cn(
+                    isActive ? "text-white hover:text-[#00BF63]" : "text-gray-500",
+                    // "bg-red-500"
+                  )
+                }>
                   <Link
                     href={item.url}
                     className={cn(
@@ -152,13 +157,12 @@ export function AppSidebar({ role }: AppSidebarProps) {
                             "flex h-14 items-center justify-center rounded-md",
                             "[&>svg]:!h-5 [&>svg]:!w-5"
                           ),
-                      "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
-                      isActive && "bg-[#00BF63] text-white hover:bg-[#00BF63]"
+                      isActive && "bg-[#00BF63]",
+
                     )}
                   >
                     <Icon
                       className={cn(
-                        isActive ? "text-white hover:text-[#00BF63]" : "text-gray-500",
                         open ? "h-5 w-5" : "!h-5 !w-5"
                       )}
                     />
