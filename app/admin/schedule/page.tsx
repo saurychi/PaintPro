@@ -15,7 +15,7 @@ type Event = {
   type: "primary" | "secondary" // primary = solid green background (selected), secondary = light green pill
 }
 
-// Mock Data
+// Mock Data (edit freely)
 const EVENTS: Event[] = [
   { id: "1", title: "Interior & Ext...", date: new Date(2025, 5, 1), type: "secondary" },
   { id: "2", title: "Roof Painting", date: new Date(2025, 5, 2), type: "primary" },
@@ -53,8 +53,7 @@ const getCalendarDays = (year: number, month: number): CalendarDay[] => {
   const lastDay = new Date(year, month + 1, 0)
   const daysInMonth = lastDay.getDate()
 
-  // 0 = Sunday, 1 = Monday, ... 6 = Saturday
-  // We want Monday = 0
+  // Monday = 0
   let startDayOfWeek = firstDay.getDay() - 1
   if (startDayOfWeek === -1) startDayOfWeek = 6
 
@@ -66,12 +65,12 @@ const getCalendarDays = (year: number, month: number): CalendarDay[] => {
     days.push({ day: prevMonthLastDay - i, currentMonth: false })
   }
 
-  // Current month days
+  // Current month
   for (let i = 1; i <= daysInMonth; i++) {
     days.push({ day: i, currentMonth: true })
   }
 
-  // Next month padding to fill 6 rows (42 cells)
+  // Next month padding to fill 42 cells
   const remainingCells = 42 - days.length
   for (let i = 1; i <= remainingCells; i++) {
     days.push({ day: i, currentMonth: false })
@@ -96,13 +95,11 @@ const monthNames = [
 ]
 
 export default function AdminSchedule() {
-  // Default to June 2025 as per image
   const [currentDate, setCurrentDate] = useState(new Date(2025, 5, 1))
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
-
   const calendarDays = useMemo(() => getCalendarDays(year, month), [year, month])
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1))
@@ -111,13 +108,143 @@ export default function AdminSchedule() {
   const getEventForDay = (day: number, isCurrentMonth: boolean) => {
     if (!isCurrentMonth) return null
     return EVENTS.find(
-      (e) =>
-        e.date.getDate() === day && e.date.getMonth() === month && e.date.getFullYear() === year
+      (e) => e.date.getDate() === day && e.date.getMonth() === month && e.date.getFullYear() === year
     )
   }
 
   return (
-    <main className="h-screen bg-white p-6 flex flex-col overflow-hidden">
+    <main className="h-screen bg-white overflow-hidden">
+      {/* Dashboard shell style */}
+      <div className="p-6 h-full flex flex-col overflow-hidden">
+        <h1 className="text-2xl font-semibold text-gray-900">Schedule</h1>
+
+        <div className="mt-6 flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
+          {/* Calendar Card */}
+          <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm p-4 flex flex-col overflow-hidden">
+            {/* Calendar Header */}
+            <div className="relative flex items-center justify-center shrink-0 mb-4">
+              <button
+                onClick={prevMonth}
+                className="absolute left-2 inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white p-2 text-gray-700 shadow-sm hover:bg-gray-50"
+                aria-label="Previous month"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+
+              <h2 className="text-lg font-semibold text-[#00c065]">
+                {monthNames[month]} {year}
+              </h2>
+
+              <button
+                onClick={nextMonth}
+                className="absolute right-2 inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white p-2 text-gray-700 shadow-sm hover:bg-gray-50"
+                aria-label="Next month"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Days Header */}
+            <div className="grid grid-cols-7 border-b border-gray-100 shrink-0">
+              {["MON", "TUE", "WED", "THUR", "FRI", "SAT", "SUN"].map((d) => (
+                <div key={d} className="p-2 text-center text-gray-400 text-xs font-semibold uppercase">
+                  {d}
+                </div>
+              ))}
+            </div>
+
+            {/* Calendar Grid */}
+            <div className="flex-1 grid grid-cols-7 grid-rows-6 border-l border-t border-gray-100">
+              {calendarDays.map((dateObj, index) => {
+                const event = getEventForDay(dateObj.day, dateObj.currentMonth)
+                const isPrimary = event?.type === "primary"
+
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => event && setSelectedEvent(event)}
+                    className={[
+                      "border-r border-b border-gray-100 p-2 text-left",
+                      "flex flex-col justify-between",
+                      "transition-colors",
+                      "min-w-0",
+                      !dateObj.currentMonth
+                        ? "text-gray-300 bg-gray-50/40 cursor-default"
+                        : event
+                        ? "hover:bg-gray-50"
+                        : "hover:bg-gray-50 cursor-default",
+                      isPrimary ? "!bg-[#00c065] !text-white hover:!bg-[#00a054]" : "",
+                    ].join(" ")}
+                  >
+                    <span className="font-semibold text-sm leading-none">{dateObj.day}</span>
+
+                    {event && (
+                      <span
+                        className={[
+                          "mt-2 text-[10px] font-semibold px-2 py-1 rounded-md truncate w-full",
+                          isPrimary ? "bg-white/20 text-white" : "bg-[#dcfce7] text-[#166534]",
+                        ].join(" ")}
+                      >
+                        {event.title}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          {/* Right Panel */}
+          <aside className="w-full lg:w-80 flex flex-col gap-4 overflow-hidden">
+            {/* Status Card */}
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4 shrink-0">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#00c065]" />
+                <span className="text-sm font-medium text-gray-700">Status: {CURRENT_JOB.status}</span>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+                <div className="text-lg font-bold text-gray-900 mb-1">{CURRENT_JOB.id}</div>
+                <div className="text-sm font-medium text-gray-600">{CURRENT_JOB.name}</div>
+              </div>
+            </div>
+
+            {/* Jobs List */}
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4 flex-1 flex flex-col overflow-hidden">
+              <div className="mb-3 shrink-0">
+                <h3 className="text-sm font-semibold text-gray-900">Jobs</h3>
+              </div>
+
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2">
+                {UPCOMING_JOBS.map((job, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:bg-gray-50 hover:border-[#00c065]"
+                    onClick={() =>
+                      setSelectedEvent({
+                        id: `mock-${idx}`,
+                        title: job.title,
+                        date: new Date(year, month, 1),
+                        type: "secondary",
+                      })
+                    }
+                  >
+                    <div className="text-xs font-semibold text-gray-500 mb-1">{job.date}</div>
+                    <div className="text-xs font-medium text-gray-700">{job.title}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+
       {/* Modal */}
       {selectedEvent && (
         <div
@@ -125,14 +252,14 @@ export default function AdminSchedule() {
           onClick={() => setSelectedEvent(null)}
         >
           <div
-            className="bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md"
+            className="bg-white rounded-lg shadow-2xl p-6 w-[90%] max-w-md"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between mb-4">
-              <h3 className="text-xl font-bold text-[#1a1a4b]">{selectedEvent.title}</h3>
+              <h3 className="text-lg font-bold text-gray-900">{selectedEvent.title}</h3>
               <button
                 onClick={() => setSelectedEvent(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
                 aria-label="Close"
               >
                 ✕
@@ -141,17 +268,18 @@ export default function AdminSchedule() {
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase">Date</label>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Date</label>
                 <p className="text-gray-800 font-medium">{selectedEvent.date.toDateString()}</p>
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase">Description</label>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Description</label>
                 <p className="text-gray-600">This is a placeholder description for the selected event.</p>
               </div>
+
               <div className="pt-4 flex justify-end">
                 <button
                   onClick={() => setSelectedEvent(null)}
-                  className="bg-[#00c065] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#00a054] transition-colors"
+                  className="rounded-lg bg-[#00c065] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#00a054]"
                 >
                   Close
                 </button>
@@ -160,135 +288,6 @@ export default function AdminSchedule() {
           </div>
         </div>
       )}
-
-      {/* Page Header */}
-      <div className="shrink-0 mb-4">
-        <h1 className="text-3xl font-bold text-[#1a1a4b]">Schedule</h1>
-      </div>
-
-      {/* Content (no page scroll) */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
-        {/* Calendar Card */}
-        <section className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex flex-col overflow-hidden">
-          {/* Calendar Header */}
-          <div className="relative flex items-center justify-center shrink-0 mb-4">
-            <button
-              onClick={prevMonth}
-              className="absolute left-[18%] lg:left-[28%] p-2 hover:bg-gray-100 rounded-full"
-              aria-label="Previous month"
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-
-            <h2 className="text-2xl font-bold text-[#00c065]">
-              {monthNames[month]} {year}
-            </h2>
-
-            <button
-              onClick={nextMonth}
-              className="absolute right-[18%] lg:right-[28%] p-2 hover:bg-gray-100 rounded-full"
-              aria-label="Next month"
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Days Header */}
-          <div className="grid grid-cols-7 border-b border-gray-100 shrink-0">
-            {["MON", "TUE", "WED", "THUR", "FRI", "SAT", "SUN"].map((d) => (
-              <div key={d} className="p-2 text-center text-gray-400 text-xs font-medium uppercase">
-                {d}
-              </div>
-            ))}
-          </div>
-
-          {/* Calendar Grid (fills remaining height; 6 rows, 7 cols) */}
-          <div className="flex-1 grid grid-cols-7 grid-rows-6 border-l border-t border-gray-100">
-            {calendarDays.map((dateObj, index) => {
-              const event = getEventForDay(dateObj.day, dateObj.currentMonth)
-              const isPrimary = event?.type === "primary"
-
-              return (
-                <button
-                  key={index}
-                  type="button"
-                  onClick={() => event && setSelectedEvent(event)}
-                  className={[
-                    "border-r border-b border-gray-100 p-2 text-left",
-                    "flex flex-col justify-between",
-                    "hover:bg-gray-50 transition-colors",
-                    "min-w-0",
-                    !dateObj.currentMonth ? "text-gray-300 bg-gray-50/40 hover:bg-gray-50/40" : "text-gray-900",
-                    isPrimary ? "!bg-[#00c065] !text-white hover:!bg-[#00a054]" : "",
-                    event ? "cursor-pointer" : "cursor-default",
-                  ].join(" ")}
-                >
-                  <span className="font-semibold text-sm leading-none">{dateObj.day}</span>
-
-                  {event && (
-                    <span
-                      className={[
-                        "mt-2 text-[10px] font-medium px-2 py-1 rounded truncate w-full",
-                        isPrimary ? "bg-white/20 text-white" : "bg-[#dcfce7] text-[#166534]",
-                      ].join(" ")}
-                    >
-                      {event.title}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        {/* Right Panel */}
-        <aside className="w-full lg:w-80 flex flex-col gap-4 overflow-hidden">
-          {/* Status Card */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 shrink-0">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="w-3 h-3 rounded-full bg-[#00c065]" />
-              <span className="text-sm font-medium text-gray-700">Status: {CURRENT_JOB.status}</span>
-            </div>
-
-            <div className="border border-gray-200 rounded-lg p-3 bg-gray-50/50">
-              <div className="text-lg font-bold text-gray-900 mb-1">{CURRENT_JOB.id}</div>
-              <div className="text-sm text-gray-600 font-medium">{CURRENT_JOB.name}</div>
-            </div>
-          </div>
-
-          {/* Jobs List (internal scroll only) */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center gap-2 mb-3 shrink-0">
-              <h3 className="font-bold text-gray-900">Jobs</h3>
-            </div>
-
-            <div className="flex-1 overflow-y-auto pr-1 space-y-2">
-              {UPCOMING_JOBS.map((job, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-[#00c065] transition-colors"
-                  onClick={() =>
-                    setSelectedEvent({
-                      id: `mock-${idx}`,
-                      title: job.title,
-                      date: new Date(year, month, 1), // placeholder date
-                      type: "secondary",
-                    })
-                  }
-                >
-                  <div className="text-xs font-bold text-gray-500 mb-1">{job.date}</div>
-                  <div className="text-xs text-gray-700 font-medium">{job.title}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </aside>
-      </div>
     </main>
   )
 }

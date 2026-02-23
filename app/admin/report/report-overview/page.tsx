@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import styles from "./reportOverview.module.css";
-
+import Link from "next/link";
 import {
   ResponsiveContainer,
   LineChart,
@@ -13,15 +12,12 @@ import {
   Tooltip,
   PieChart,
   Pie,
+  Cell,
   BarChart,
   Bar,
 } from "recharts";
-
 import { ChevronRight } from "lucide-react";
 
-/* -----------------------------
-   TYPES (backend-ready shape)
------------------------------- */
 type RoiPoint = {
   month: string;
   netProfit: number;
@@ -41,9 +37,6 @@ type EmployeePerfItem = {
   highest: number;
 };
 
-/* -----------------------------
-   SMALL HELPERS
------------------------------- */
 function formatPercent(n: number) {
   return `${n}%`;
 }
@@ -52,10 +45,6 @@ function formatNumber(n: number) {
   return new Intl.NumberFormat().format(n);
 }
 
-/* -----------------------------
-   TOOLTIP TYPES (NO recharts TooltipProps)
-   This matches what recharts passes to Tooltip content
------------------------------- */
 type TooltipPayloadItem = {
   name?: string;
   value?: number | string;
@@ -67,26 +56,21 @@ type BasicTooltipProps = {
   payload?: TooltipPayloadItem[];
 };
 
-/* -----------------------------
-   TOOLTIP COMPONENTS
------------------------------- */
-function LineTooltip(props: BasicTooltipProps) {
-  const active = props.active;
-  const label = props.label;
-  const payload = props.payload ?? [];
-
-  if (!active || payload.length === 0) return null;
-
+function TooltipShell({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: { name: string; value: string }[];
+}) {
   return (
-    <div className={styles.tooltip}>
-      <div className={styles.tooltipTitle}>{label}</div>
-      <div className={styles.tooltipList}>
-        {payload.map((p, idx) => (
-          <div key={idx} className={styles.tooltipRow}>
-            <span className={styles.tooltipName}>{p.name ?? "Value"}</span>
-            <span className={styles.tooltipValue}>
-              {formatNumber(Number(p.value ?? 0))}
-            </span>
+    <div className="min-w-[160px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+      <div className="mb-1 text-xs font-semibold text-gray-900">{title}</div>
+      <div className="grid gap-1.5">
+        {rows.map((r, idx) => (
+          <div key={idx} className="flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold text-gray-500">{r.name}</span>
+            <span className="text-xs font-semibold text-gray-900">{r.value}</span>
           </div>
         ))}
       </div>
@@ -94,26 +78,40 @@ function LineTooltip(props: BasicTooltipProps) {
   );
 }
 
+function LineTooltip(props: BasicTooltipProps) {
+  const active = props.active;
+  const label = props.label;
+  const payload = props.payload ?? [];
+  if (!active || payload.length === 0) return null;
+
+  return (
+    <TooltipShell
+      title={label ?? "Month"}
+      rows={payload.map((p) => ({
+        name: p.name ?? "Value",
+        value: formatNumber(Number(p.value ?? 0)),
+      }))}
+    />
+  );
+}
+
 function PieTooltip(props: BasicTooltipProps) {
   const active = props.active;
   const payload = props.payload ?? [];
-
   if (!active || payload.length === 0) return null;
 
   const first = payload[0];
 
   return (
-    <div className={styles.tooltip}>
-      <div className={styles.tooltipTitle}>{first.name ?? "Share"}</div>
-      <div className={styles.tooltipList}>
-        <div className={styles.tooltipRow}>
-          <span className={styles.tooltipName}>Share</span>
-          <span className={styles.tooltipValue}>
-            {formatPercent(Number(first.value ?? 0))}
-          </span>
-        </div>
-      </div>
-    </div>
+    <TooltipShell
+      title={first.name ?? "Share"}
+      rows={[
+        {
+          name: "Share",
+          value: formatPercent(Number(first.value ?? 0)),
+        },
+      ]}
+    />
   );
 }
 
@@ -121,32 +119,28 @@ function BarTooltip(props: BasicTooltipProps) {
   const active = props.active;
   const label = props.label;
   const payload = props.payload ?? [];
-
   if (!active || payload.length === 0) return null;
 
   return (
-    <div className={styles.tooltip}>
-      <div className={styles.tooltipTitle}>{label}</div>
-      <div className={styles.tooltipList}>
-        {payload.map((p, idx) => (
-          <div key={idx} className={styles.tooltipRow}>
-            <span className={styles.tooltipName}>{p.name ?? "Value"}</span>
-            <span className={styles.tooltipValue}>
-              {formatNumber(Number(p.value ?? 0))}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <TooltipShell
+      title={label ?? "Category"}
+      rows={payload.map((p) => ({
+        name: p.name ?? "Value",
+        value: formatNumber(Number(p.value ?? 0)),
+      }))}
+    />
   );
 }
 
-/* -----------------------------
-   PAGE
------------------------------- */
+const COST_COLORS: Record<string, string> = {
+  "Labor Cost": "#00c065",
+  "Services Cost": "#3b82f6",
+  "Materials Cost": "#f59e0b",
+  "Transportation Cost": "#8b5cf6",
+};
+
 export default function ReportOverviewPage() {
   const data = useMemo(() => {
-    // Replace later with API results
     const roi: RoiPoint[] = [
       { month: "January", netProfit: 25, totalCost: 95, totalPayment: 80 },
       { month: "February", netProfit: 28, totalCost: 100, totalPayment: 86 },
@@ -173,176 +167,234 @@ export default function ReportOverviewPage() {
     ];
 
     const costTotal = costSpread.reduce((acc, it) => acc + it.value, 0);
+    const biggest = costSpread.reduce((best, cur) =>
+      cur.value > best.value ? cur : best
+    );
 
-    return { roi, costSpread, employeePerformance, costTotal };
+    return { roi, costSpread, employeePerformance, costTotal, biggest };
   }, []);
 
-  return (
-    <div className={styles.page}>
-      <h1 className={styles.title}>Report Overview</h1>
+  const card = "rounded-lg border border-gray-200 bg-white p-4 shadow-sm";
+  const cardHeader = "mb-3 flex items-start justify-between gap-3";
+  const cardTitle = "text-sm font-semibold text-gray-900";
+  const cardSubtitle = "mt-1 text-xs text-gray-500";
 
-      <div className={styles.topGrid}>
-        {/* ROI */}
-        <section className={styles.card}>
-          <div className={styles.cardHeader}>
+  const btnSoft =
+    "inline-flex h-9 items-center justify-center rounded-lg border border-emerald-100 bg-emerald-50 px-4 text-xs font-semibold text-emerald-900 hover:bg-emerald-100";
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <Link
+          href="/admin/report"
+          className="rounded-md px-1.5 py-1 text-[#00c065] hover:bg-gray-50 hover:text-[#00a054]"
+        >
+          Report
+        </Link>
+        <ChevronRight className="h-4 w-4 text-gray-400" />
+        <span className="text-gray-900">Report Overview</span>
+      </div>
+
+      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Report Overview</h1>
+
+      <div className="mt-6">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(520px,1fr)_420px]">
+          {/* ROI */}
+          <section className={card}>
+            <div className={cardHeader}>
+              <div>
+                <div className={cardTitle}>Return Investment</div>
+                <div className={cardSubtitle}>2023-present</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col">
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={data.roi}
+                    margin={{ top: 8, right: 10, left: 10, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip content={<LineTooltip />} />
+                    <Line
+                      type="monotone"
+                      dataKey="netProfit"
+                      name="Net Profit"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="totalCost"
+                      name="Total Cost"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="totalPayment"
+                      name="Total Payment"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-3 flex justify-center">
+                <button className={btnSoft} type="button">
+                  see more
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Right column */}
+          <div className="flex flex-col gap-4">
+            {/* Manual Reports */}
+            <section className={card}>
+              <div className={cardHeader}>
+                <div className={cardTitle}>Manual Reports</div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50"
+                  type="button"
+                >
+                  <span className="text-sm font-semibold text-gray-900">Job Reports</span>
+                  <span className="grid h-8 w-8 place-items-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-900">
+                    <ChevronRight className="h-4 w-4" />
+                  </span>
+                </button>
+
+                <button
+                  className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50"
+                  type="button"
+                >
+                  <span className="text-sm font-semibold text-gray-900">
+                    Employee Reports
+                  </span>
+                  <span className="grid h-8 w-8 place-items-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-900">
+                    <ChevronRight className="h-4 w-4" />
+                  </span>
+                </button>
+              </div>
+            </section>
+
+            {/* Cost Spread (kept compact; pushed down when there is extra room) */}
+            <section className={card}>
+              <div className={cardHeader}>
+                <div className={cardTitle}>Average Job Cost Spread</div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr] sm:items-center">
+                <div className="relative h-[160px] w-full sm:w-[160px]">
+                  <ResponsiveContainer width="100%" height={160}>
+                    <PieChart>
+                      <Tooltip content={<PieTooltip />} />
+                      <Pie
+                        data={data.costSpread}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={52}
+                        outerRadius={72}
+                        paddingAngle={2}
+                        isAnimationActive={false}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      >
+                        {data.costSpread.map((it) => (
+                          <Cell
+                            key={it.name}
+                            fill={COST_COLORS[it.name] ?? "#9ca3af"}
+                          />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                    <div className="text-xs font-semibold text-gray-500">Total</div>
+                    <div className="mt-1 text-lg font-semibold text-gray-900">
+                      {formatPercent(data.costTotal)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  {data.costSpread.map((it) => (
+                    <div
+                      key={it.name}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          style={{
+                            backgroundColor: COST_COLORS[it.name] ?? "#9ca3af",
+                          }}
+                          aria-hidden="true"
+                        />
+                        <span className="truncate text-xs font-semibold text-gray-900">
+                          {it.name}
+                        </span>
+                      </div>
+                      <div className="text-xs font-semibold text-gray-900">
+                        {formatPercent(it.value)}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="mt-1 rounded-lg border border-gray-200 bg-white p-2 text-xs text-gray-600">
+                    Biggest share:{" "}
+                    <span className="font-semibold text-gray-900">
+                      {data.biggest.name}
+                    </span>{" "}
+                    ({formatPercent(data.biggest.value)})
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        {/* Employee Performance */}
+        <section className={`mt-4 ${card}`}>
+          <div className={cardHeader}>
             <div>
-              <div className={styles.cardTitle}>Return Investment</div>
-              <div className={styles.cardSubtitle}>2023-present</div>
+              <div className={cardTitle}>Employee Performance</div>
+              <div className={cardSubtitle}>2023-present</div>
             </div>
           </div>
 
-          <div className={styles.chartWrapLg}>
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart
-                data={data.roi}
-                margin={{ top: 8, right: 10, left: 10, bottom: 8 }}
+              <BarChart
+                data={data.employeePerformance}
+                margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                <XAxis dataKey="category" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
-
-                <Tooltip content={<LineTooltip />} />
-
-                <Line
-                  type="monotone"
-                  dataKey="netProfit"
-                  name="Net Profit"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="totalCost"
-                  name="Total Cost"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="totalPayment"
-                  name="Total Payment"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
+                <Tooltip content={<BarTooltip />} />
+                <Bar dataKey="average" name="Average" fill="#00c065" />
+                <Bar dataKey="highest" name="Highest" fill="#3b82f6" />
+                <Bar dataKey="lowest" name="Lowest" fill="#f59e0b" />
+              </BarChart>
             </ResponsiveContainer>
           </div>
 
-          <div className={styles.seeMoreWrap}>
-            <button className={styles.seeMoreBtn} type="button">
+          <div className="mt-3 flex justify-center">
+            <button className={btnSoft} type="button">
               see more
             </button>
           </div>
         </section>
-
-        {/* Right column */}
-        <div className={styles.rightCol}>
-          {/* Manual Reports */}
-          <section className={styles.card}>
-            <div className={styles.cardHeader}>
-              <div className={styles.cardTitle}>Manual Reports</div>
-            </div>
-
-            <div className={styles.manualList}>
-              <button className={styles.manualItem} type="button">
-                <span className={styles.manualText}>Job Reports</span>
-                <span className={styles.manualGo}>
-                  <ChevronRight size={18} />
-                </span>
-              </button>
-
-              <button className={styles.manualItem} type="button">
-                <span className={styles.manualText}>Employee Reports</span>
-                <span className={styles.manualGo}>
-                  <ChevronRight size={18} />
-                </span>
-              </button>
-            </div>
-          </section>
-
-          {/* Donut */}
-          <section className={styles.card}>
-            <div className={styles.cardHeader}>
-              <div className={styles.cardTitle}>Average Job Cost Spread</div>
-            </div>
-
-            <div className={styles.donutArea}>
-              <div className={styles.donutChartWrap}>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Tooltip content={<PieTooltip />} />
-                    <Pie
-                      data={data.costSpread}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={70}
-                      outerRadius={95}
-                      paddingAngle={2}
-                      isAnimationActive={false}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-
-                <div className={styles.donutCenter}>
-                  <div className={styles.donutCenterTop}>Total</div>
-                  <div className={styles.donutCenterBottom}>
-                    {formatPercent(data.costTotal)}
-                  </div>
-                </div>
-              </div>
-
-              <div className={styles.spreadList}>
-                {data.costSpread.map((it) => (
-                  <div key={it.name} className={styles.spreadRow}>
-                    <div className={styles.spreadLeft}>
-                      <span className={styles.dot} aria-hidden="true" />
-                      <span className={styles.spreadName}>{it.name}</span>
-                    </div>
-                    <div className={styles.spreadValue}>
-                      {formatPercent(it.value)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        </div>
       </div>
-
-      {/* Employee Performance */}
-      <section className={styles.cardWide}>
-        <div className={styles.cardHeader}>
-          <div>
-            <div className={styles.cardTitle}>Employee Performance</div>
-            <div className={styles.cardSubtitle}>2023-present</div>
-          </div>
-        </div>
-
-        <div className={styles.chartWrapWide}>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart
-              data={data.employeePerformance}
-              margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="category" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-
-              <Tooltip content={<BarTooltip />} />
-
-              <Bar dataKey="average" name="Average" />
-              <Bar dataKey="highest" name="Highest" />
-              <Bar dataKey="lowest" name="Lowest" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className={styles.seeMoreWrap}>
-          <button className={styles.seeMoreBtn} type="button">
-            see more
-          </button>
-        </div>
-      </section>
     </div>
   );
 }

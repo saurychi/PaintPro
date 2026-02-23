@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import styles from "./reportList.module.css";
-
+import Link from "next/link";
 import {
   Search,
   SlidersHorizontal,
@@ -12,6 +11,7 @@ import {
   Eye,
   Plus,
   FileText,
+  ChevronRight,
 } from "lucide-react";
 
 type ReportType = "JOB" | "EMP";
@@ -23,21 +23,36 @@ type ReportItem = {
   type: ReportType;
   title: string;
   createdBy: string;
-  createdAtISO: string; // backend-ready: keep ISO for sorting
-  periodLabel: string; // e.g. "Jan 2026"
+  createdAtISO: string;
+  periodLabel: string;
   status: ReportStatus;
   format: "PDF" | "CSV";
 };
 
-const typeMeta: Record<ReportType, { label: string; pillClass: string }> = {
-  JOB: { label: "Job Report", pillClass: styles.pillJob },
-  EMP: { label: "Employee Report", pillClass: styles.pillEmp },
+const typeMeta: Record<ReportType, { label: string; className: string }> = {
+  JOB: {
+    label: "Job Report",
+    className: "bg-emerald-50 text-emerald-900 border-emerald-100",
+  },
+  EMP: {
+    label: "Employee Report",
+    className: "bg-blue-50 text-blue-900 border-blue-100",
+  },
 };
 
 const statusMeta: Record<ReportStatus, { label: string; className: string }> = {
-  DRAFT: { label: "Draft", className: styles.statusDraft },
-  GENERATED: { label: "Generated", className: styles.statusGenerated },
-  ARCHIVED: { label: "Archived", className: styles.statusArchived },
+  DRAFT: {
+    label: "Draft",
+    className: "bg-amber-50 text-amber-900 border-amber-100",
+  },
+  GENERATED: {
+    label: "Generated",
+    className: "bg-emerald-50 text-emerald-900 border-emerald-100",
+  },
+  ARCHIVED: {
+    label: "Archived",
+    className: "bg-gray-50 text-gray-900 border-gray-200",
+  },
 };
 
 const MOCK_REPORTS: ReportItem[] = [
@@ -138,7 +153,8 @@ export default function ReportListPage() {
     const searched = !q
       ? base
       : base.filter((r) => {
-          const hay = `${r.title} ${r.createdBy} ${r.periodLabel} ${r.format}`.toLowerCase();
+          const hay =
+            `${r.title} ${r.createdBy} ${r.periodLabel} ${r.format}`.toLowerCase();
           return hay.includes(q);
         });
 
@@ -159,41 +175,56 @@ export default function ReportListPage() {
     setOpenRowMenuId(null);
   }
 
-  // placeholder actions (backend-ready)
   function actionView(report: ReportItem) {
     console.log("view report", report.id);
     setOpenRowMenuId(null);
-    // later: router.push(`/admin/report/report-view/${report.id}`)
   }
 
   function actionDownload(report: ReportItem) {
     console.log("download report", report.id);
     setOpenRowMenuId(null);
-    // later: window.location.href = report.downloadUrl
   }
 
   function actionArchive(report: ReportItem) {
     console.log("archive report", report.id);
     setOpenRowMenuId(null);
-    // later: call API PATCH /reports/:id { status: "ARCHIVED" }
   }
 
-  return (
-    <div className={styles.page} onClick={closeAllPopups}>
-      {/* Header */}
-      <div className={styles.headerRow} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.titleWrap}>
-          <h1 className={styles.title}>Reports</h1>
-          <div className={styles.subtitle}>
-            View generated reports and manage exports.
-          </div>
-        </div>
+  const btnBase =
+    "inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50";
+  const btnPrimary =
+    "inline-flex h-9 items-center gap-2 rounded-lg border border-[#00c065] bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm hover:bg-[#00a054]";
+  const menuBase =
+    "absolute left-0 top-[calc(100%+10px)] z-50 min-w-[240px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm";
+  const menuItem =
+    "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50";
+  const menuLabel = "px-2.5 pb-1 pt-2 text-xs font-semibold text-gray-500";
+  const menuDivider = "my-2 h-px bg-gray-100";
 
-        <div className={styles.toolbar}>
-          <div className={styles.searchWrap}>
-            <Search className={styles.searchIcon} />
+  return (
+    <div className="p-6" onClick={closeAllPopups}>
+      {/* breadcrumb title */}
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <Link
+          href="/admin/report"
+          className="rounded-md px-1.5 py-1 text-[#00c065] hover:bg-gray-50 hover:text-[#00a054]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          Report
+        </Link>
+        <ChevronRight className="h-4 w-4 text-gray-400" />
+        <span className="text-gray-900">Report List</span>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3" onClick={(e) => e.stopPropagation()}>
+        <h1 className="text-2xl font-semibold text-gray-900">Reports</h1>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search */}
+          <div className="relative h-9 w-[280px] max-w-full rounded-lg border border-gray-200 bg-white shadow-sm max-[820px]:w-[220px]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
-              className={styles.searchInput}
+              className="h-full w-full bg-transparent pl-9 pr-3 text-sm text-gray-900 outline-none placeholder:text-gray-400"
               placeholder="Search reports"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -201,9 +232,9 @@ export default function ReportListPage() {
           </div>
 
           {/* NEW */}
-          <div className={styles.ddWrap}>
+          <div className="relative">
             <button
-              className={styles.btnGreen}
+              className={btnPrimary}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -212,26 +243,26 @@ export default function ReportListPage() {
                 setSortOpen(false);
               }}
             >
-              <Plus className={styles.btnIcon} />
+              <Plus className="h-4 w-4" />
               New
             </button>
 
             {newOpen && (
-              <div className={styles.menu}>
+              <div className={menuBase}>
                 <button
-                  className={styles.menuItem}
+                  className={menuItem}
                   onClick={() => console.log("new job report")}
                   type="button"
                 >
-                  <FileText className={styles.menuIcon} />
+                  <FileText className="h-4 w-4 text-gray-500" />
                   Job Report
                 </button>
                 <button
-                  className={styles.menuItem}
+                  className={menuItem}
                   onClick={() => console.log("new employee report")}
                   type="button"
                 >
-                  <FileText className={styles.menuIcon} />
+                  <FileText className="h-4 w-4 text-gray-500" />
                   Employee Report
                 </button>
               </div>
@@ -239,9 +270,9 @@ export default function ReportListPage() {
           </div>
 
           {/* FILTERS */}
-          <div className={styles.ddWrap}>
+          <div className="relative">
             <button
-              className={styles.btnOutline}
+              className={btnBase}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -250,16 +281,17 @@ export default function ReportListPage() {
                 setNewOpen(false);
               }}
             >
-              <SlidersHorizontal className={styles.btnIcon} />
+              <SlidersHorizontal className="h-4 w-4" />
               Filters
             </button>
 
             {filtersOpen && (
-              <div className={styles.menu}>
-                <div className={styles.menuLabel}>Report Type</div>
+              <div className={menuBase}>
+                <div className={menuLabel}>Report Type</div>
 
-                <label className={styles.checkItem}>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50">
                   <input
+                    className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
                     type="checkbox"
                     checked={filterJob}
                     onChange={(e) => setFilterJob(e.target.checked)}
@@ -267,8 +299,9 @@ export default function ReportListPage() {
                   <span>Job Reports</span>
                 </label>
 
-                <label className={styles.checkItem}>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50">
                   <input
+                    className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
                     type="checkbox"
                     checked={filterEmp}
                     onChange={(e) => setFilterEmp(e.target.checked)}
@@ -276,12 +309,13 @@ export default function ReportListPage() {
                   <span>Employee Reports</span>
                 </label>
 
-                <div className={styles.menuDivider} />
+                <div className={menuDivider} />
 
-                <div className={styles.menuLabel}>Status</div>
+                <div className={menuLabel}>Status</div>
 
-                <label className={styles.checkItem}>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50">
                   <input
+                    className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
                     type="checkbox"
                     checked={filterDraft}
                     onChange={(e) => setFilterDraft(e.target.checked)}
@@ -289,8 +323,9 @@ export default function ReportListPage() {
                   <span>Draft</span>
                 </label>
 
-                <label className={styles.checkItem}>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50">
                   <input
+                    className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
                     type="checkbox"
                     checked={filterGenerated}
                     onChange={(e) => setFilterGenerated(e.target.checked)}
@@ -298,8 +333,9 @@ export default function ReportListPage() {
                   <span>Generated</span>
                 </label>
 
-                <label className={styles.checkItem}>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50">
                   <input
+                    className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
                     type="checkbox"
                     checked={filterArchived}
                     onChange={(e) => setFilterArchived(e.target.checked)}
@@ -311,9 +347,9 @@ export default function ReportListPage() {
           </div>
 
           {/* SORT */}
-          <div className={styles.ddWrap}>
+          <div className="relative">
             <button
-              className={styles.btnOutline}
+              className={btnBase}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -322,8 +358,8 @@ export default function ReportListPage() {
                 setNewOpen(false);
               }}
             >
-              Sort by:
-              <span className={styles.sortValue}>
+              <span className="text-sm font-semibold text-gray-900">Sort by:</span>
+              <span className="ml-1 font-semibold text-gray-900">
                 {sortKey === "date_desc"
                   ? "Newest"
                   : sortKey === "date_asc"
@@ -332,21 +368,21 @@ export default function ReportListPage() {
                   ? "Name A–Z"
                   : "Name Z–A"}
               </span>
-              <ArrowUpDown className={styles.btnIcon} />
+              <ArrowUpDown className="h-4 w-4" />
             </button>
 
             {sortOpen && (
-              <div className={styles.menu}>
-                <button className={styles.menuItem} type="button" onClick={() => setSortKey("date_desc")}>
+              <div className={menuBase}>
+                <button className={menuItem} type="button" onClick={() => setSortKey("date_desc")}>
                   Newest
                 </button>
-                <button className={styles.menuItem} type="button" onClick={() => setSortKey("date_asc")}>
+                <button className={menuItem} type="button" onClick={() => setSortKey("date_asc")}>
                   Oldest
                 </button>
-                <button className={styles.menuItem} type="button" onClick={() => setSortKey("name_asc")}>
+                <button className={menuItem} type="button" onClick={() => setSortKey("name_asc")}>
                   Name A–Z
                 </button>
-                <button className={styles.menuItem} type="button" onClick={() => setSortKey("name_desc")}>
+                <button className={menuItem} type="button" onClick={() => setSortKey("name_desc")}>
                   Name Z–A
                 </button>
               </div>
@@ -355,91 +391,114 @@ export default function ReportListPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <section className={styles.section}>
-        <div className={styles.sectionLabel}>All Reports</div>
+      <div className="mt-6" onClick={(e) => e.stopPropagation()}>
+        {/* Table */}
+        <section>
+          <div className="text-xs font-semibold text-gray-500">All Reports</div>
 
-        <div className={styles.table}>
-          <div className={styles.tableHeader}>
-            <div className={styles.cellTitle}>TITLE</div>
-            <div className={styles.cellType}>TYPE</div>
-            <div className={styles.cellPeriod}>PERIOD</div>
-            <div className={styles.cellCreatedBy}>CREATED BY</div>
-            <div className={styles.cellDate}>DATE</div>
-            <div className={styles.cellStatus}>STATUS</div>
-            <div className={styles.cellActions} />
-          </div>
+          <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="grid grid-cols-[1.6fr_220px_140px_260px_190px_140px_60px] items-center border-b border-gray-200 px-3 py-2 text-xs font-semibold tracking-wide text-gray-500 max-[1200px]:grid-cols-[1.6fr_200px_120px_0px_170px_130px_60px] max-[820px]:grid-cols-[1fr_180px_0px_0px_160px_120px_60px]">
+              <div className="min-w-0">TITLE</div>
+              <div className="min-w-0">TYPE</div>
+              <div className="min-w-0 max-[820px]:hidden">PERIOD</div>
+              <div className="min-w-0 max-[1200px]:hidden">CREATED BY</div>
+              <div className="min-w-0">DATE</div>
+              <div className="min-w-0">STATUS</div>
+              <div />
+            </div>
 
-          {filteredReports.map((r) => {
-            const t = typeMeta[r.type];
-            const s = statusMeta[r.status];
+            {filteredReports.map((r) => {
+              const t = typeMeta[r.type];
+              const s = statusMeta[r.status];
 
-            return (
-              <div key={r.id} className={styles.tableRow}>
-                <div className={styles.cellTitle}>
-                  <div className={styles.titleBlock}>
-                    <div className={styles.reportTitle}>{r.title}</div>
-                    <div className={styles.reportSub}>
+              return (
+                <div
+                  key={r.id}
+                  className="grid grid-cols-[1.6fr_220px_140px_260px_190px_140px_60px] items-center border-b border-gray-100 px-3 py-3 text-sm text-gray-900 max-[1200px]:grid-cols-[1.6fr_200px_120px_0px_170px_130px_60px] max-[820px]:grid-cols-[1fr_180px_0px_0px_160px_120px_60px]"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold text-gray-900">{r.title}</div>
+                    <div className="mt-1 truncate text-xs text-gray-500">
                       Format: {r.format} • ID: {r.id}
                     </div>
                   </div>
+
+                  <div className="min-w-0">
+                    <span
+                      className={[
+                        "inline-flex h-6 items-center justify-center rounded-lg border px-3 text-xs font-semibold",
+                        t.className,
+                      ].join(" ")}
+                    >
+                      {t.label}
+                    </span>
+                  </div>
+
+                  <div className="min-w-0 text-sm text-gray-700 max-[820px]:hidden">
+                    <span className="truncate">{r.periodLabel}</span>
+                  </div>
+
+                  <div className="min-w-0 text-sm text-gray-700 max-[1200px]:hidden">
+                    <span className="truncate">{r.createdBy}</span>
+                  </div>
+
+                  <div className="min-w-0 text-sm text-gray-700">
+                    <span className="truncate">{formatDateLabel(r.createdAtISO)}</span>
+                  </div>
+
+                  <div className="min-w-0">
+                    <span
+                      className={[
+                        "inline-flex h-6 items-center justify-center rounded-lg border px-2.5 text-xs font-semibold",
+                        s.className,
+                      ].join(" ")}
+                    >
+                      {s.label}
+                    </span>
+                  </div>
+
+                  <div className="relative flex justify-center" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="grid h-8 w-8 place-items-center rounded-lg border border-transparent bg-transparent hover:bg-gray-50"
+                      type="button"
+                      onClick={() => setOpenRowMenuId((prev) => (prev === r.id ? null : r.id))}
+                      aria-label="Row actions"
+                    >
+                      <MoreVertical className="h-4 w-4 text-gray-500" />
+                    </button>
+
+                    {openRowMenuId === r.id && (
+                      <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                        <button className={menuItem} type="button" onClick={() => actionView(r)}>
+                          <Eye className="h-4 w-4 text-gray-500" />
+                          View
+                        </button>
+                        <button className={menuItem} type="button" onClick={() => actionDownload(r)}>
+                          <Download className="h-4 w-4 text-gray-500" />
+                          Download
+                        </button>
+                        <button className={menuItem} type="button" onClick={() => actionArchive(r)}>
+                          <FileText className="h-4 w-4 text-gray-500" />
+                          Archive
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
+              );
+            })}
 
-                <div className={styles.cellType}>
-                  <span className={`${styles.pill} ${t.pillClass}`}>{t.label}</span>
-                </div>
-
-                <div className={styles.cellPeriod}>{r.periodLabel}</div>
-                <div className={styles.cellCreatedBy}>{r.createdBy}</div>
-                <div className={styles.cellDate}>{formatDateLabel(r.createdAtISO)}</div>
-
-                <div className={styles.cellStatus}>
-                  <span className={`${styles.status} ${s.className}`}>{s.label}</span>
-                </div>
-
-                <div className={styles.cellActions} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className={styles.kebabBtn}
-                    type="button"
-                    onClick={() =>
-                      setOpenRowMenuId((prev) => (prev === r.id ? null : r.id))
-                    }
-                    aria-label="Row actions"
-                  >
-                    <MoreVertical className={styles.kebabIcon} />
-                  </button>
-
-                  {openRowMenuId === r.id && (
-                    <div className={`${styles.menu} ${styles.menuRight}`}>
-                      <button className={styles.menuItem} type="button" onClick={() => actionView(r)}>
-                        <Eye className={styles.menuIcon} />
-                        View
-                      </button>
-                      <button className={styles.menuItem} type="button" onClick={() => actionDownload(r)}>
-                        <Download className={styles.menuIcon} />
-                        Download
-                      </button>
-                      <button className={styles.menuItem} type="button" onClick={() => actionArchive(r)}>
-                        <FileText className={styles.menuIcon} />
-                        Archive
-                      </button>
-                    </div>
-                  )}
+            {filteredReports.length === 0 && (
+              <div className="px-3 py-8 text-center">
+                <div className="text-sm font-semibold text-gray-900">No matching reports</div>
+                <div className="mt-1 text-sm text-gray-500">
+                  Try changing your search, filters, or sort option.
                 </div>
               </div>
-            );
-          })}
-
-          {filteredReports.length === 0 && (
-            <div className={styles.emptyState}>
-              <div className={styles.emptyTitle}>No matching reports</div>
-              <div className={styles.emptyText}>
-                Try changing your search, filters, or sort option.
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
