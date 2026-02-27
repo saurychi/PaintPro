@@ -1,6 +1,8 @@
 "use client"
 
 import React, { useMemo, useState } from "react"
+import Link from "next/link"
+import { Plus, UserCheck } from "lucide-react"
 
 type WorkTimelineEntry = {
   jobName: string
@@ -20,10 +22,6 @@ type Employee = {
   workTimeline: WorkTimelineEntry[]
 }
 
-/**
- * Edit employees here freely.
- * Add more entries or change any field as needed.
- */
 const initialEmployees: Employee[] = [
   {
     id: "21700254",
@@ -104,18 +102,44 @@ export default function Staff() {
 
       <div className="mt-6">
         {/* Header Row */}
-        <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm font-semibold text-gray-700">Employees</div>
 
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50"
-          >
-            <span className="grid h-5 w-5 place-items-center rounded-md bg-[#dcfce7] text-[#166534]">
-              +
-            </span>
-            Add User
-          </button>
+          <div className="flex items-center gap-2">
+
+            {/* Invites */}
+            <Link
+              href="/admin/staff/staff-invite"
+              className={[
+                "inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold shadow-sm",
+                "bg-white text-gray-900",
+                "border-gray-200",
+                "transition-all duration-200 ease-out",
+                "hover:bg-indigo-50 hover:border-indigo-200 hover:shadow-md",
+                "active:scale-[0.98]",
+              ].join(" ")}
+            >
+              <span className="h-2 w-2 rounded-full bg-indigo-500" />
+              Invites
+            </Link>
+
+            {/* Add User */}
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className={[
+                "inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold shadow-sm",
+                "bg-white text-gray-900",
+                "border-[#00c065]/25",
+                "transition-all duration-200 ease-out",
+                "hover:bg-emerald-50 hover:border-[#00c065]/40 hover:shadow-md",
+                "active:scale-[0.98]",
+                "disabled:cursor-not-allowed disabled:opacity-60",
+              ].join(" ")}
+            >
+              <Plus className="h-4 w-4 text-[#00c065]" />
+              Add user
+            </button>
+          </div>
         </div>
 
         {/* Employee List */}
@@ -127,20 +151,20 @@ export default function Staff() {
               <div
                 key={emp.id}
                 className={[
-                  "rounded-xl border bg-white shadow-sm transition-colors",
+                  "rounded-lg border bg-white shadow-sm transition-colors",
                   isOpen ? "border-[#00c065]" : "border-gray-200",
                 ].join(" ")}
               >
                 {/* Trigger */}
                 <button
                   onClick={() => toggleEmployee(idx)}
-                  className="flex w-full items-center justify-between gap-3 rounded-xl px-6 py-4 text-left transition-colors hover:bg-gray-50"
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-6 py-4 text-left transition-colors hover:bg-gray-50"
                 >
                   <div className="flex items-center gap-3">
                     <img
                       src={emp.photoUrl}
                       alt={emp.name}
-                      className="h-10 w-10 rounded-lg border object-cover"
+                      className="h-10 w-10 rounded-lg border border-gray-200 object-cover"
                     />
                     <div className="min-w-0">
                       <div className="truncate font-semibold text-gray-900">{emp.name}</div>
@@ -175,12 +199,12 @@ export default function Staff() {
                         Profile
                       </div>
 
-                      <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
                           <img
                             src={emp.photoUrl}
                             alt={emp.name}
-                            className="h-16 w-16 rounded-lg border object-cover"
+                            className="h-16 w-16 rounded-lg border border-gray-200 object-cover"
                           />
 
                           <div className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-2 sm:gap-x-10">
@@ -209,7 +233,7 @@ export default function Staff() {
                         Work
                       </div>
 
-                      <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-white p-4 lg:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-2">
                         <div className="rounded-lg bg-white p-2">
                           <RadarChart values={emp.metrics} />
                         </div>
@@ -229,7 +253,7 @@ export default function Staff() {
 
                                 <button
                                   onClick={() => setShowReport(entry)}
-                                  className="rounded-lg bg-[#dcfce7] px-3 py-1 text-xs font-semibold text-[#166534] transition-colors hover:bg-[#bbf7d0]"
+                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50"
                                 >
                                   See report
                                 </button>
@@ -261,7 +285,7 @@ export default function Staff() {
       {/* Report Modal */}
       {showReport && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm">
-          <div className="w-[92%] max-w-lg rounded-xl bg-white p-6 shadow-xl">
+          <div className="w-[92%] max-w-lg rounded-lg bg-white p-6 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-bold text-gray-900">Job Report: {showReport.jobName}</h3>
               <button
@@ -342,8 +366,6 @@ function AddUserModal({
   const onPickPhoto: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-
-    // Local preview (not uploaded)
     const url = URL.createObjectURL(file)
     setPhotoUrl(url)
   }
@@ -365,7 +387,7 @@ function AddUserModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm">
-      <div className="w-[92%] max-w-md rounded-xl bg-white p-6 shadow-xl">
+      <div className="w-[92%] max-w-md rounded-lg bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h3 className="text-lg font-bold text-gray-900">Add user</h3>
@@ -385,13 +407,8 @@ function AddUserModal({
         </div>
 
         <div className="space-y-4">
-          {/* Picture */}
           <div className="flex items-center gap-4">
-            <img
-              src={photoUrl}
-              alt="Employee photo preview"
-              className="h-14 w-14 rounded-lg border object-cover"
-            />
+            <img src={photoUrl} alt="Employee photo preview" className="h-14 w-14 rounded-lg border border-gray-200 object-cover" />
 
             <div className="flex-1">
               <label className="mb-1 block text-sm font-medium text-gray-700">Picture</label>
@@ -450,7 +467,7 @@ function AddUserModal({
             onClick={submit}
             className={[
               "rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors",
-              canSubmit ? "bg-[#00c065] hover:bg-[#00a857]" : "cursor-not-allowed bg-gray-300",
+              canSubmit ? "bg-[#00c065] hover:bg-[#00a054]" : "cursor-not-allowed bg-gray-300",
             ].join(" ")}
           >
             Add user

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 const ACCENT = "#00c065"
 const ACCENT_HOVER = "#00a054"
 
-function AdminSettings() {
+function StaffSettings() {
   const router = useRouter()
 
   const [profile, setProfile] = useState({
@@ -95,7 +95,7 @@ function AdminSettings() {
   }
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+    <div className="p-6 h-[calc(100vh-var(--Staff-header-offset,0px))] overflow-hidden">
       <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
 
       <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
@@ -399,4 +399,4 @@ function ToggleRow({
   )
 }
 
-export default AdminSettings
+export default StaffSettings
