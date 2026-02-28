@@ -29,6 +29,7 @@
     "react-dom": "19.2.0",
     "react-icons": "^5.5.0",
     "recharts": "^3.7.0",
+    "resend": "^6.9.3",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

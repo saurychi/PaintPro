@@ -15,7 +15,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 
-type InviteRole = "staff" | "client"
+type InviteRole = "staff" | "manager" | "client"
 
 type InviteRow = {
   id: string
@@ -135,10 +135,11 @@ export default function StaffInvitePage() {
     try {
       setBusy(true)
 
-      const payload =
-        tab === "staff"
-          ? { role: "staff", email: e, password: generatedPassword }
-          : { role: "client", email: e }
+      const needsPassword = tab === "staff" || tab === "manager"
+
+      const payload = needsPassword
+        ? { role: tab, email: e, password: generatedPassword }
+        : { role: "client", email: e }
 
       const res = await fetch("/api/invites", {
         method: "POST",
@@ -155,6 +156,10 @@ export default function StaffInvitePage() {
 
       if (tab === "staff") {
         setSuccess("Staff invite created. Copy the password and send it to the staff member.")
+        setEmail("")
+        setGeneratedPassword(generatePassword())
+      } else if (tab === "manager") {
+        setSuccess("Manager invite created. Copy the password and send it to the manager.")
         setEmail("")
         setGeneratedPassword(generatePassword())
       } else {
@@ -205,6 +210,9 @@ export default function StaffInvitePage() {
     }
   }
 
+  const createBtnLabel =
+    tab === "staff" ? "Create staff invite" : tab === "manager" ? "Create manager invite" : "Create client invite"
+
   return (
     <div className="p-6">
       {/* Breadcrumbs */}
@@ -235,11 +243,10 @@ export default function StaffInvitePage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Icon-only collapse button */}
               <button
                 type="button"
                 onClick={() => setCreateOpen((v) => !v)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-900 shadow-sm hover:bg-gray-50"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                 aria-label={createOpen ? "Collapse create invite" : "Expand create invite"}
                 title={createOpen ? "Collapse" : "Expand"}
               >
@@ -263,7 +270,7 @@ export default function StaffInvitePage() {
                     setTab("staff")
                   }}
                   className={[
-                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition",
+                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition-all duration-200 active:scale-[0.98]",
                     tab === "staff"
                       ? "border-[#00c065] bg-[#00c065]/10 text-gray-900"
                       : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
@@ -276,10 +283,26 @@ export default function StaffInvitePage() {
                   type="button"
                   onClick={() => {
                     resetAlerts()
+                    setTab("manager")
+                  }}
+                  className={[
+                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition-all duration-200 active:scale-[0.98]",
+                    tab === "manager"
+                      ? "border-[#00c065] bg-[#00c065]/10 text-gray-900"
+                      : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
+                  ].join(" ")}
+                >
+                  Manager
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetAlerts()
                     setTab("client")
                   }}
                   className={[
-                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition",
+                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition-all duration-200 active:scale-[0.98]",
                     tab === "client"
                       ? "border-[#00c065] bg-[#00c065]/10 text-gray-900"
                       : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
@@ -304,7 +327,7 @@ export default function StaffInvitePage() {
                 <p className="text-[12px] text-gray-500">This should match the email you invited.</p>
               </div>
 
-              {tab === "staff" && (
+              {(tab === "staff" || tab === "manager") && (
                 <div className="grid gap-1.5">
                   <label className="text-sm text-gray-700">Generated password</label>
 
@@ -319,7 +342,7 @@ export default function StaffInvitePage() {
                       <button
                         type="button"
                         onClick={() => setGeneratedPassword(generatePassword())}
-                        className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50"
+                        className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                       >
                         <RefreshCw className="h-4 w-4 text-gray-500" />
                         Regenerate
@@ -328,7 +351,7 @@ export default function StaffInvitePage() {
                       <button
                         type="button"
                         onClick={copyPassword}
-                        className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50"
+                        className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                       >
                         {copied ? (
                           <Check className="h-4 w-4 text-gray-500" />
@@ -341,7 +364,7 @@ export default function StaffInvitePage() {
                   </div>
 
                   <p className="text-[12px] text-gray-500">
-                    Send this password to the staff member. They will change it later in your setup profile page.
+                    Send this password to the {tab} member. They can change it later in Settings.
                   </p>
                 </div>
               )}
@@ -363,10 +386,10 @@ export default function StaffInvitePage() {
                   type="button"
                   onClick={submit}
                   disabled={!canSubmit}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[#00c065] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#00a054] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#00c065] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <UserPlus className="h-4 w-4" />
-                  {busy ? "Creating..." : tab === "staff" ? "Create staff invite" : "Create client invite"}
+                  {busy ? "Creating..." : createBtnLabel}
                 </button>
               </div>
             </div>
@@ -385,7 +408,7 @@ export default function StaffInvitePage() {
               type="button"
               onClick={loadInvites}
               disabled={listLoading}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4 text-gray-500" />
               {listLoading ? "Refreshing..." : "Refresh"}
@@ -433,24 +456,24 @@ export default function StaffInvitePage() {
                     </div>
                   </div>
 
-                    <div className="flex items-center justify-end gap-2">
-                        <button
-                            type="button"
-                            onClick={() => requestDelete(row)}
-                            disabled={deleteBusyId === row.id}
-                            className={[
-                            "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm",
-                            "bg-red-700 text-white border border-red-800/20",
-                            "transition-all duration-200 ease-out",
-                            "hover:bg-red-600 hover:shadow-md hover:opacity-95",
-                            "active:scale-95",
-                            "disabled:cursor-not-allowed disabled:opacity-60",
-                            ].join(" ")}
-                        >
-                            <Trash2 className="h-4 w-4 text-white/90" />
-                            Delete
-                        </button>
-                    </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => requestDelete(row)}
+                      disabled={deleteBusyId === row.id}
+                      className={[
+                        "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm",
+                        "bg-red-700 text-white border border-red-800/20",
+                        "transition-all duration-200 ease-out",
+                        "hover:bg-red-600 hover:shadow-md hover:opacity-95",
+                        "active:scale-[0.98]",
+                        "disabled:cursor-not-allowed disabled:opacity-60",
+                      ].join(" ")}
+                    >
+                      <Trash2 className="h-4 w-4 text-white/90" />
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -474,7 +497,7 @@ export default function StaffInvitePage() {
               <button
                 type="button"
                 onClick={() => setConfirmDelete(null)}
-                className="grid h-9 w-9 place-items-center rounded-lg border border-transparent hover:bg-gray-50"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-transparent transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                 aria-label="Close"
               >
                 <X className="h-4 w-4 text-gray-500" />
@@ -486,7 +509,7 @@ export default function StaffInvitePage() {
                 type="button"
                 onClick={() => setConfirmDelete(null)}
                 disabled={deleteBusyId === confirmDelete.id}
-                className="inline-flex h-10 items-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 disabled:opacity-60"
+                className="inline-flex h-10 items-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -495,7 +518,7 @@ export default function StaffInvitePage() {
                 type="button"
                 onClick={doDelete}
                 disabled={deleteBusyId === confirmDelete.id}
-                className="inline-flex h-10 items-center rounded-lg bg-gray-900 px-4 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 disabled:opacity-60"
+                className="inline-flex h-10 items-center rounded-lg bg-gray-900 px-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gray-800 active:scale-[0.98] disabled:opacity-60"
               >
                 {deleteBusyId === confirmDelete.id ? "Deleting..." : "Delete"}
               </button>

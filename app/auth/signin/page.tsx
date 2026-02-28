@@ -20,6 +20,7 @@ function isEmail(value: string) {
 export default function Signin() {
   const router = useRouter()
   const params = useSearchParams()
+  const choose = params.get("choose") === "1"
 
   const [identity, setIdentity] = useState("")
   const [password, setPassword] = useState("")
@@ -28,7 +29,6 @@ export default function Signin() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [loading, setLoading] = useState(false)
 
-  // Prefill email from /auth/invite -> /auth/signin?email=...
   useEffect(() => {
     const e = params.get("email")
     if (e) setIdentity(e)
@@ -68,7 +68,6 @@ export default function Signin() {
 
     if (profileError) throw profileError
 
-    // If profile does not exist, treat as not invited and sign out
     if (!profile) {
       await supabase.auth.signOut()
       router.replace("/auth/invite?reason=not_invited")
@@ -98,11 +97,15 @@ export default function Signin() {
     router.replace("/client")
   }
 
-  // Auto-check existing session
   useEffect(() => {
     const auto = async () => {
       setError("")
       try {
+        if (choose) {
+          await supabase.auth.signOut()
+          return
+        }
+
         const { data, error: sessionErr } = await supabase.auth.getSession()
         if (sessionErr) throw sessionErr
 
@@ -119,7 +122,7 @@ export default function Signin() {
     }
 
     auto()
-  }, [router])
+  }, [router, choose])
 
   const handleSignin = async () => {
     setError("")
@@ -250,7 +253,7 @@ export default function Signin() {
             type="button"
             onClick={handleSignin}
             disabled={loading}
-            className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-white bg-[#00c065] hover:bg-[#00a054] disabled:opacity-60 disabled:cursor-not-allowed transition"
+            className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-white bg-[#00c065] shadow-sm transition-all duration-200 hover:bg-[#00a054] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>

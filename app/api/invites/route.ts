@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js"
 
 type CreateBody =
   | { role: "staff"; email: string; password: string }
+  | { role: "manager"; email: string; password: string }
   | { role: "client"; email: string }
 
 function isEmail(value: string) {
@@ -49,14 +50,12 @@ export async function POST(req: Request) {
 
     const { error: inviteErr } = await admin
       .from("invites")
-      .upsert(
-        { email, role, status: "pending", used_at: null },
-        { onConflict: "email" }
-      )
+      .upsert({ email, role, status: "pending", used_at: null }, { onConflict: "email" })
 
     if (inviteErr) return NextResponse.json({ error: inviteErr.message }, { status: 400 })
 
-    if (role === "staff") {
+    // ✅ staff and manager both need an auth user created immediately (password required)
+    if (role === "staff" || role === "manager") {
       const password = (body as any).password?.trim()
       if (!password || password.length < 8) {
         return NextResponse.json({ error: "Invalid generated password." }, { status: 400 })
@@ -66,7 +65,7 @@ export async function POST(req: Request) {
         email,
         password,
         email_confirm: true,
-        user_metadata: { invited_role: "staff" },
+        user_metadata: { invited_role: role },
       })
 
       if (createErr && !createErr.message.toLowerCase().includes("already")) {
@@ -88,7 +87,6 @@ export async function DELETE(req: Request) {
 
     if (!id) return NextResponse.json({ error: "Missing invite id." }, { status: 400 })
 
-    // 1) Load invite first so we know the email
     const { data: invite, error: inviteErr } = await admin
       .from("invites")
       .select("id, email")
@@ -101,7 +99,6 @@ export async function DELETE(req: Request) {
     const email = String(invite.email || "").trim().toLowerCase()
     if (!email) return NextResponse.json({ error: "Invite email is missing." }, { status: 400 })
 
-    // 2) Check profile status (active users should NOT be deleted)
     const { data: profile, error: profileErr } = await admin
       .from("users")
       .select("id, status")
@@ -110,20 +107,17 @@ export async function DELETE(req: Request) {
 
     if (profileErr) return NextResponse.json({ error: profileErr.message }, { status: 400 })
 
-    // 3) If active, only delete the invite row (mark as done)
     if (profile?.status === "active") {
       const { error: delInviteErr } = await admin.from("invites").delete().eq("id", id)
       if (delInviteErr) return NextResponse.json({ error: delInviteErr.message }, { status: 400 })
       return NextResponse.json({ ok: true, mode: "invite_only" })
     }
 
-    // 4) Not active: delete profile row (if exists)
     if (profile?.id) {
       const { error: delProfileErr } = await admin.from("users").delete().eq("id", profile.id)
       if (delProfileErr) return NextResponse.json({ error: delProfileErr.message }, { status: 400 })
     }
 
-    // 5) Not active: delete auth user (if exists)
     const { data: usersByEmail, error: findAuthErr } = await admin.auth.admin.listUsers({
       page: 1,
       perPage: 200,
@@ -136,7 +130,6 @@ export async function DELETE(req: Request) {
       if (delAuthErr) return NextResponse.json({ error: delAuthErr.message }, { status: 400 })
     }
 
-    // 6) Finally delete invite row
     const { error: delInviteErr } = await admin.from("invites").delete().eq("id", id)
     if (delInviteErr) return NextResponse.json({ error: delInviteErr.message }, { status: 400 })
 

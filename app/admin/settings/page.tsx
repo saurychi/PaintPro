@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 
@@ -29,13 +29,25 @@ function AdminSettings() {
   const [pwMsg, setPwMsg] = useState<string | null>(null)
   const [pwErr, setPwErr] = useState<string | null>(null)
 
+  const [hidePasswordSection, setHidePasswordSection] = useState(true)
+
   useEffect(() => {
     const checkSession = async () => {
       const { data } = await supabase.auth.getSession()
+      const session = data.session
 
-      if (!data.session) {
+      if (!session) {
         router.replace("/auth/signin")
+        return
       }
+
+      // If Google is linked, hide the change password section.
+      // Only show change password for accounts that are not using Google.
+      const providers = (session.user.app_metadata as any)?.providers as string[] | undefined
+      const provider = (session.user.app_metadata as any)?.provider as string | undefined
+      const hasGoogle = (providers?.includes("google") ?? false) || provider === "google"
+
+      setHidePasswordSection(hasGoogle)
     }
 
     checkSession()
@@ -84,7 +96,6 @@ function AdminSettings() {
     }
   }
 
-  // ✅ Supabase logout
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut()
@@ -95,88 +106,101 @@ function AdminSettings() {
   }
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
       <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
 
       <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
         <div className="h-full overflow-y-auto pr-1">
-          <div className="w-full">
-            {/* Profile Details */}
-            <SectionHeader title="Profile Details" />
-            <Card>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="First name">
-                  <TextInput
-                    name="firstName"
-                    value={profile.firstName}
-                    onChange={handleProfileChange}
-                    placeholder="First name"
-                  />
-                </Field>
-
-                <Field label="Last name">
-                  <TextInput
-                    name="lastName"
-                    value={profile.lastName}
-                    onChange={handleProfileChange}
-                    placeholder="Last name"
-                  />
-                </Field>
-
-                <Field className="md:col-span-2" label="Email">
-                  <IconInput
-                    icon={
-                      <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
-                        <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
-                      </svg>
-                    }
-                  >
-                    <TextInput
-                      type="email"
-                      name="email"
-                      value={profile.email}
-                      onChange={handleProfileChange}
-                      placeholder="Email"
-                      className="pl-10"
-                    />
-                  </IconInput>
-                </Field>
-
-                <Field className="md:col-span-2" label="Phone Number">
-                  <IconInput
-                    icon={
-                      <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                      </svg>
-                    }
-                  >
-                    <TextInput
-                      type="tel"
-                      name="phone"
-                      value={profile.phone}
-                      onChange={handleProfileChange}
-                      placeholder="Phone number"
-                      className="pl-10"
-                    />
-                  </IconInput>
-                </Field>
+          <div className="w-full space-y-8">
+            {/* Profile */}
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-gray-900">Profile</h2>
               </div>
 
-              <div className="mt-4 flex items-center gap-3">
-                <PrimaryButton>Save</PrimaryButton>
-                <button
-                  type="button"
-                  className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </Card>
+              <Card>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label="First name">
+                    <TextInput
+                      name="firstName"
+                      value={profile.firstName}
+                      onChange={handleProfileChange}
+                      placeholder="First name"
+                    />
+                  </Field>
 
-            {/* Actions */}
-            <div className="mt-8">
-              <SectionHeader title="Actions" />
+                  <Field label="Last name">
+                    <TextInput
+                      name="lastName"
+                      value={profile.lastName}
+                      onChange={handleProfileChange}
+                      placeholder="Last name"
+                    />
+                  </Field>
+
+                  <div className="md:col-span-2">
+                    <div className="my-1 h-px w-full bg-gray-200" />
+                  </div>
+
+                  <Field className="md:col-span-2" label="Email">
+                    <IconInput
+                      icon={
+                        <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                          <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+                        </svg>
+                      }
+                    >
+                      <TextInput
+                        type="email"
+                        name="email"
+                        value={profile.email}
+                        onChange={handleProfileChange}
+                        placeholder="Email"
+                        className="pl-10"
+                      />
+                    </IconInput>
+                  </Field>
+
+                  <Field className="md:col-span-2" label="Phone number">
+                    <IconInput
+                      icon={
+                        <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                        </svg>
+                      }
+                    >
+                      <TextInput
+                        type="tel"
+                        name="phone"
+                        value={profile.phone}
+                        onChange={handleProfileChange}
+                        placeholder="Phone number"
+                        className="pl-10"
+                      />
+                    </IconInput>
+                  </Field>
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <PrimaryButton>Save</PrimaryButton>
+
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.98]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </Card>
+            </div>
+
+            {/* Preferences */}
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-gray-900">Preferences</h2>
+              </div>
+
               <Card>
                 <div className="space-y-3">
                   <ToggleRow
@@ -208,69 +232,77 @@ function AdminSettings() {
             </div>
 
             {/* Authentication */}
-            <div className="mt-8 pb-6">
-              <SectionHeader title="Authentication" />
+            <div className="pb-6">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-gray-900">Authentication</h2>
+              </div>
+
               <Card>
-                {/* Change password */}
-                <div className="mb-6">
-                  <p className="text-sm font-semibold text-gray-900">Change password</p>
-                  <p className="mt-1 text-sm text-gray-600">Update your account password.</p>
+                {!hidePasswordSection ? (
+                  <>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Change password</p>
+                      <p className="mt-1 text-sm text-gray-600">Update your account password.</p>
 
-                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <Field label="New password">
-                      <TextInput
-                        type="password"
-                        value={pw.next}
-                        onChange={(e) => setPw((p) => ({ ...p, next: e.target.value }))}
-                        placeholder="At least 8 characters"
-                      />
-                    </Field>
+                      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <Field label="New password">
+                          <TextInput
+                            type="password"
+                            value={pw.next}
+                            onChange={(e) => setPw((p) => ({ ...p, next: e.target.value }))}
+                            placeholder="At least 8 characters"
+                          />
+                        </Field>
 
-                    <Field label="Confirm new password">
-                      <TextInput
-                        type="password"
-                        value={pw.confirm}
-                        onChange={(e) => setPw((p) => ({ ...p, confirm: e.target.value }))}
-                        placeholder="Repeat password"
-                      />
-                    </Field>
-                  </div>
+                        <Field label="Confirm new password">
+                          <TextInput
+                            type="password"
+                            value={pw.confirm}
+                            onChange={(e) => setPw((p) => ({ ...p, confirm: e.target.value }))}
+                            placeholder="Repeat password"
+                          />
+                        </Field>
+                      </div>
 
-                  {pwErr ? <p className="mt-3 text-sm font-semibold text-red-600">{pwErr}</p> : null}
-                  {pwMsg ? <p className="mt-3 text-sm font-semibold text-emerald-700">{pwMsg}</p> : null}
+                      {pwErr ? <p className="mt-3 text-sm font-semibold text-red-600">{pwErr}</p> : null}
+                      {pwMsg ? <p className="mt-3 text-sm font-semibold text-emerald-700">{pwMsg}</p> : null}
 
-                  <div className="mt-4 flex items-center justify-end">
-                    <button
-                      type="button"
-                      onClick={handleChangePassword}
-                      disabled={pwBusy}
-                      className={[
-                        "inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm",
-                        "transition-all duration-200 ease-out",
-                        "bg-indigo-600 hover:bg-indigo-500 hover:shadow-md",
-                        "active:scale-[0.98]",
-                        "disabled:cursor-not-allowed disabled:opacity-60",
-                      ].join(" ")}
-                    >
-                      {pwBusy ? "Updating..." : "Update password"}
-                    </button>
-                  </div>
-                </div>
+                      <div className="mt-4 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={handleChangePassword}
+                          disabled={pwBusy}
+                          className={[
+                            "inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm",
+                            "transition-all duration-200 ease-out",
+                            "bg-[#00c065] hover:bg-[#00a054] hover:shadow-md",
+                            "active:scale-[0.98]",
+                            "disabled:cursor-not-allowed disabled:opacity-60",
+                          ].join(" ")}
+                        >
+                          {pwBusy ? "Updating..." : "Update password"}
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="h-px w-full bg-gray-200" />
+                    <div className="my-6 h-px w-full bg-gray-200" />
+                  </>
+                ) : null}
 
-                {/* Logout */}
-                <div className="mt-6">
+                <div>
                   <p className="text-sm font-semibold text-gray-900">Log out of this PC</p>
-                  <p className="mt-1 text-sm text-gray-600">
-                    You will be redirected to the sign-in page after logging out.
-                  </p>
+                  <p className="mt-1 text-sm text-gray-600">You will be redirected to the sign-in page after logging out.</p>
 
                   <div className="mt-4">
                     <button
                       type="button"
                       onClick={handleLogout}
-                      className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm hover:bg-gray-50"
+                      className={[
+                        "rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm",
+                        "transition-all duration-200 ease-out",
+                        "hover:bg-red-50 hover:shadow-md",
+                        "active:scale-[0.98]",
+                      ].join(" ")}
                     >
                       Logout
                     </button>
@@ -281,15 +313,6 @@ function AdminSettings() {
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-function SectionHeader({ title }: { title: string }) {
-  return (
-    <div className="flex items-center gap-3 mb-3">
-      <h2 className="text-sm font-semibold text-gray-900 whitespace-nowrap">{title}</h2>
-      <div className="h-px bg-gray-200 w-full" />
     </div>
   )
 }
@@ -309,7 +332,7 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <label className="block text-sm font-semibold text-gray-900 mb-2">{label}</label>
+      <label className="mb-2 block text-sm font-semibold text-gray-900">{label}</label>
       {children}
     </div>
   )
@@ -321,7 +344,7 @@ function TextInput({ className = "", ...props }: React.InputHTMLAttributes<HTMLI
       {...props}
       className={[
         "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm",
-        "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00c065]/20 focus:border-[#00c065]",
+        "placeholder:text-gray-400 focus:border-[#00c065] focus:outline-none focus:ring-2 focus:ring-[#00c065]/20",
         className,
       ].join(" ")}
     />
@@ -331,7 +354,7 @@ function TextInput({ className = "", ...props }: React.InputHTMLAttributes<HTMLI
 function IconInput({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="relative">
-      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">{icon}</div>
+      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">{icon}</div>
       {children}
     </div>
   )
@@ -341,7 +364,7 @@ function PrimaryButton({ children }: { children: React.ReactNode }) {
   return (
     <button
       type="button"
-      className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors"
+      className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 ease-out active:scale-[0.98]"
       style={{ backgroundColor: ACCENT }}
       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = ACCENT_HOVER)}
       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = ACCENT)}
@@ -366,7 +389,7 @@ function ToggleRow({
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:bg-gray-50 transition-colors"
+      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.99]"
       aria-pressed={active}
     >
       <div className="flex items-start justify-between gap-4">

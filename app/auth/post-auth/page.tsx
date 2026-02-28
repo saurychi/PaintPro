@@ -37,7 +37,6 @@ export default function PostAuthPage() {
 
         if (profErr) throw profErr
 
-        // No profile: purge uninvited auth user, then sign out
         if (!profile) {
           try {
             const { data: sess } = await supabase.auth.getSession()
@@ -59,7 +58,12 @@ export default function PostAuthPage() {
           return
         }
 
-        // First-time gate: if a pending invite still exists, force setup profile
+        if (profile.status === "inactive") {
+          await supabase.auth.signOut()
+          router.replace("/auth/signin?reason=inactive")
+          return
+        }
+
         const email = (session.user.email || "").trim().toLowerCase()
         if (email) {
           const { data: hasPending, error: invErr } = await supabase.rpc("has_pending_invite", {
@@ -71,50 +75,6 @@ export default function PostAuthPage() {
             router.replace("/auth/setup-profile")
             return
           }
-        }
-
-        // Auto-activate on first login (if still pending)
-        if (profile.status === "pending") {
-          const { error: upErr } = await supabase.from("users").update({ status: "active" }).eq("id", userId)
-          if (upErr) {
-            console.error("Activate failed:", upErr)
-            setErr(upErr.message)
-            return
-          }
-
-          const { data: verify, error: vErr } = await supabase
-            .from("users")
-            .select("status")
-            .eq("id", userId)
-            .maybeSingle()
-
-          if (vErr) {
-            console.error("Verify failed:", vErr)
-            setErr(vErr.message)
-            return
-          }
-
-          if (verify?.status !== "active") {
-            setErr("Activation did not persist. Likely blocked by RLS.")
-            return
-          }
-
-          if (profile.role === "admin" || profile.role === "manager") {
-            router.replace("/admin")
-            return
-          }
-          if (profile.role === "staff") {
-            router.replace("/staff")
-            return
-          }
-          router.replace("/client")
-          return
-        }
-
-        if (profile.status === "inactive") {
-          await supabase.auth.signOut()
-          router.replace("/auth/signin?reason=inactive")
-          return
         }
 
         if (profile.role === "admin" || profile.role === "manager") {

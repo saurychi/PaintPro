@@ -25,19 +25,25 @@ export default function SetupProfilePage() {
   const router = useRouter()
 
   const countries: CountryOption[] = useMemo(() => {
-    return (rawCountries as CountryRaw[])
-      .filter((c) => c?.country && c?.calling_code)
-      .map((c) => {
-        const code = `+${c.calling_code}`
-        return { label: `${c.country} (${code})`, code }
-      })
-      .sort((a, b) => a.label.localeCompare(b.label))
+    const codes = Array.from(
+      new Set(
+        (rawCountries as CountryRaw[])
+          .filter((c) => c?.calling_code)
+          .map((c) => `+${c.calling_code}`)
+      )
+    ).sort((a, b) => a.localeCompare(b))
+
+    return codes.map((code) => ({ label: code, code }))
   }, [])
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [switching, setSwitching] = useState(false)
   const [err, setErr] = useState("")
   const [ok, setOk] = useState<string | null>(null)
+
+  const [showPw1, setShowPw1] = useState(false)
+  const [showPw2, setShowPw2] = useState(false)
 
   const [form, setForm] = useState({
     username: "",
@@ -117,6 +123,23 @@ export default function SetupProfilePage() {
     boot()
   }, [router])
 
+  const chooseAnotherAccount = async () => {
+    if (switching) return
+    setErr("")
+    setOk(null)
+
+    try {
+      setSwitching(true)
+      await supabase.auth.signOut()
+      router.replace("/auth/signin?choose=1")
+    } catch (e: any) {
+      console.error(e)
+      setErr(e?.message || "Failed to sign out.")
+    } finally {
+      setSwitching(false)
+    }
+  }
+
   const submit = async () => {
     setErr("")
     setOk(null)
@@ -158,31 +181,19 @@ export default function SetupProfilePage() {
         return
       }
 
-      const userId = session.user.id
-      const email = (session.user.email || "").trim().toLowerCase()
-      const phoneFull = phoneLocal ? `${countryCode} ${phoneLocal}` : null
+      const phoneFull = phoneLocal ? `${countryCode} ${phoneLocal}` : ""
 
       if (pw) {
         const { error: pwErr } = await supabase.auth.updateUser({ password: pw })
         if (pwErr) throw pwErr
       }
 
-      const { error: upErr } = await supabase
-        .from("users")
-        .update({
-          username,
-          phone: phoneFull,
-          status: "active",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", userId)
+      const { error: finErr } = await supabase.rpc("finalize_onboarding", {
+        p_username: username,
+        p_phone: phoneFull,
+      })
 
-      if (upErr) throw upErr
-
-      if (email) {
-        const { error: consumeErr } = await supabase.rpc("consume_pending_invite", { p_email: email })
-        if (consumeErr) throw consumeErr
-      }
+      if (finErr) throw finErr
 
       setOk("Profile setup complete.")
       router.replace("/auth/post-auth")
@@ -208,16 +219,29 @@ export default function SetupProfilePage() {
   return (
     <div className="min-h-svh flex items-center justify-center bg-white px-4">
       <div className="w-full max-w-[520px]">
-        <div className="mb-6 flex items-center gap-3">
-          <Image src="/paint_pro_logo.png" alt="PaintPro logo" width={44} height={44} priority />
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-gray-900">Complete your profile</h1>
-            <p className="mt-1 text-sm text-gray-600">Required on your first login.</p>
+        <div className="mb-6 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Image src="/paint_pro_logo.png" alt="PaintPro logo" width={44} height={44} priority />
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold text-gray-900">Complete your profile</h1>
+              <p className="mt-1 text-sm text-gray-600">Required on your first login.</p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={chooseAnotherAccount}
+            disabled={switching || saving}
+            className="shrink-0 inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {switching ? "Signing out..." : "Choose another account"}
+          </button>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          {/* keep the rest of your form as-is */}
           <div className="grid gap-4">
+            {/* ... everything else unchanged ... */}
             <div className="grid gap-1.5">
               <label className="text-sm font-semibold text-gray-900">Username</label>
               <input
@@ -233,14 +257,14 @@ export default function SetupProfilePage() {
             <div className="grid gap-1.5">
               <label className="text-sm font-semibold text-gray-900">Phone number</label>
 
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[160px_1fr]">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_1fr]">
                 <select
                   value={form.countryCode}
                   onChange={(e) => setForm((p) => ({ ...p, countryCode: e.target.value }))}
-                  className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
                 >
                   {countries.map((c) => (
-                    <option key={c.code + c.label} value={c.code}>
+                    <option key={c.code} value={c.code}>
                       {c.label}
                     </option>
                   ))}
@@ -267,21 +291,46 @@ export default function SetupProfilePage() {
                 </p>
               </div>
 
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  type="password"
-                  value={form.newPassword}
-                  onChange={(e) => setForm((p) => ({ ...p, newPassword: e.target.value }))}
-                  className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm text-gray-700 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
-                  placeholder="New password"
-                />
-                <input
-                  type="password"
-                  value={form.confirmPassword}
-                  onChange={(e) => setForm((p) => ({ ...p, confirmPassword: e.target.value }))}
-                  className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm text-gray-700 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
-                  placeholder="Confirm password"
-                />
+              <div className="mt-2 grid gap-3">
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-semibold text-gray-900">New password</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowPw1((v) => !v)}
+                      className="text-sm font-semibold text-[#00c065] transition hover:text-[#00a054] active:scale-[0.98]"
+                    >
+                      {showPw1 ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  <input
+                    type={showPw1 ? "text" : "password"}
+                    value={form.newPassword}
+                    onChange={(e) => setForm((p) => ({ ...p, newPassword: e.target.value }))}
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm text-gray-700 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+                    placeholder="New password"
+                  />
+                </div>
+
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-semibold text-gray-900">Confirm password</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowPw2((v) => !v)}
+                      className="text-sm font-semibold text-[#00c065] transition hover:text-[#00a054] active:scale-[0.98]"
+                    >
+                      {showPw2 ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  <input
+                    type={showPw2 ? "text" : "password"}
+                    value={form.confirmPassword}
+                    onChange={(e) => setForm((p) => ({ ...p, confirmPassword: e.target.value }))}
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm text-gray-700 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+                    placeholder="Confirm password"
+                  />
+                </div>
               </div>
             </div>
 
