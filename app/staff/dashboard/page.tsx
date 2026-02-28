@@ -1,4 +1,4 @@
-function StaffDashboard() {
+function Dashboard() {
     return (
         <div>
             Staff Dashboard
@@ -6,4 +6,4 @@ function StaffDashboard() {
     );
 }
 
-export default StaffDashboard;
+export default Dashboard;

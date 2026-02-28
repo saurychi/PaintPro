@@ -1,0 +1,499 @@
+.page {
+  padding: 22px 26px;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.titleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 260px;
+}
+
+.title {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: #111827;
+}
+
+.subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+  font-weight: 400;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.searchWrap {
+  position: relative;
+  height: 42px;
+  width: 290px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: #9ca3af;
+}
+
+.searchInput {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0 14px 0 34px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #111827;
+}
+
+.rangeWrap,
+.statusWrap {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 16px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rangeLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.rangeIcon {
+  width: 14px;
+  height: 14px;
+}
+
+.rangeInputs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dateInput {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #111827;
+  outline: none;
+  background: #fff;
+}
+
+.rangeSep {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.select {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #111827;
+  outline: none;
+  background: #fff;
+  min-width: 180px;
+}
+
+.statsGrid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.statCard {
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 14px 14px;
+  min-height: 88px;
+}
+
+.statLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(17, 24, 39, 0.7);
+}
+
+.statValue {
+  margin-top: 10px;
+  font-size: 30px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.accentPaid {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.06);
+}
+.accentPending {
+  border-color: rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.08);
+}
+.accentOverdue {
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.sectionTopRow {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.sectionLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.miniMeta {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.table {
+  margin-top: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.tableHeader {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 0.7fr 0.9fr 0.8fr 0.7fr 60px;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  letter-spacing: 0.02em;
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 0.7fr 0.9fr 0.8fr 0.7fr 60px;
+  align-items: center;
+  padding: 14px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.cellStaff,
+.cellPayNo {
+  min-width: 0;
+}
+
+.staffName {
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.staffSub {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.payNo {
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.paySub {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cellPeriod,
+.cellDue,
+.cellAmount {
+  font-size: 13px;
+  font-weight: 400;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cellAmount {
+  text-align: right;
+}
+
+.cellActions {
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pillPaid {
+  background: rgba(34, 197, 94, 0.14);
+  color: #14532d;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.pillPending {
+  background: rgba(245, 158, 11, 0.14);
+  color: #7c2d12;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.pillOverdue {
+  background: rgba(239, 68, 68, 0.12);
+  color: #7f1d1d;
+  border: 1px solid rgba(239, 68, 68, 0.18);
+}
+
+.kebabBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.kebabBtn:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.kebabIcon {
+  width: 18px;
+  height: 18px;
+  color: rgba(17, 24, 39, 0.55);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 220px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  padding: 8px;
+  z-index: 50;
+}
+
+.menuRight {
+  left: auto;
+  right: 0;
+}
+
+.menuItem {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 10px 10px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #111827;
+}
+
+.menuItem:hover {
+  background: #f3f4f6;
+}
+
+.menuIcon {
+  width: 16px;
+  height: 16px;
+  color: rgba(17, 24, 39, 0.7);
+}
+
+.emptyState {
+  padding: 24px 12px;
+  text-align: center;
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.emptyText {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.pagination {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+.pageBtn {
+  height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #111827;
+}
+
+.pageBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.pageIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.pageInfo {
+  font-size: 13px;
+  font-weight: 400;
+  color: #374151;
+}
+
+@media (max-width: 1220px) {
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
+  .tableHeader,
+  .tableRow {
+    grid-template-columns: 1.2fr 0.9fr 0.7fr 0.9fr 0.8fr 0.7fr 60px;
+  }
+}
+
+@media (max-width: 920px) {
+  .searchWrap {
+    width: 240px;
+  }
+
+  .tableHeader,
+  .tableRow {
+    grid-template-columns: 1.2fr 0.9fr 0.7fr 0.9fr 0px 0.7fr 60px;
+  }
+
+  .cellDue {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .page {
+    padding: 18px 16px;
+  }
+
+  .title {
+    font-size: 34px;
+  }
+
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tableHeader,
+  .tableRow {
+    grid-template-columns: 1.2fr 0.9fr 0.7fr 0px 0px 0.7fr 60px;
+  }
+
+  .cellPeriod {
+    display: none;
+  }
+}
