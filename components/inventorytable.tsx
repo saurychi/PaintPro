@@ -1,7 +1,7 @@
-'use client';
+'use client'
 
-import { useState } from 'react';
-import { Checkbox } from '@/components/ui/checkbox';
+import { useState } from 'react'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
   TableBody,
@@ -9,45 +9,44 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { InventoryItem } from '@/lib/inventoryitem';
+} from '@/components/ui/table'
+import { InventoryItem } from '@/lib/inventoryitem'
 
 export interface InventoryTableProps {
-  data: InventoryItem[];
-  onRowClick?: (id: string) => void;
-  onSelectionChange?: (selectedIds: string[]) => void;
+  data: InventoryItem[]
+  onRowClick?: (id: string) => void
+  onSelectionChange?: (selectedIds: string[]) => void
 }
 
-export function InventoryTable({
-  data,
-  onRowClick,
-  onSelectionChange,
-}: InventoryTableProps) {
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+export function InventoryTable({ data, onRowClick, onSelectionChange }: InventoryTableProps) {
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
   const handleSelectRow = (id: string) => {
-    const newSelected = new Set(selectedRows);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedRows(newSelected);
-    onSelectionChange?.(Array.from(newSelected));
-  };
+    const newSelected = new Set(selectedRows)
+    if (newSelected.has(id)) newSelected.delete(id)
+    else newSelected.add(id)
 
-  const handleSelectAll = () => {
-    const newSelected = new Set<string>();
+    setSelectedRows(newSelected)
+    onSelectionChange?.(Array.from(newSelected))
+  }
+
+  const handleSelectAll = (_checked?: boolean | 'indeterminate') => {
+    const newSelected = new Set<string>()
     if (selectedRows.size !== data.length) {
-      data.forEach((item) => newSelected.add(item.id));
+      data.forEach((item) => newSelected.add(item.id))
     }
-    setSelectedRows(newSelected);
-    onSelectionChange?.(Array.from(newSelected));
-  };
+    setSelectedRows(newSelected)
+    onSelectionChange?.(Array.from(newSelected))
+  }
 
-  const formatCurrency = (amount: number) => {
-    return `$${amount.toFixed(2)}`;
-  };
+  const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`
+
+  const headerChecked: boolean | 'indeterminate' =
+    selectedRows.size === 0
+      ? false
+      : selectedRows.size === data.length
+        ? true
+        : 'indeterminate'
 
   return (
     <div className="w-full border border-gray-200 rounded-lg overflow-hidden">
@@ -55,14 +54,9 @@ export function InventoryTable({
         <TableHeader>
           <TableRow className="bg-gray-50 border-b border-gray-200">
             <TableHead className="w-12 px-4 py-3">
-              <Checkbox
-                checked={selectedRows.size === data.length && data.length > 0}
-                indeterminate={
-                  selectedRows.size > 0 && selectedRows.size < data.length
-                }
-                onCheckedChange={handleSelectAll}
-              />
+              <Checkbox checked={headerChecked} onCheckedChange={handleSelectAll} />
             </TableHead>
+
             <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide">
               Material ID
             </TableHead>
@@ -83,6 +77,7 @@ export function InventoryTable({
             </TableHead>
           </TableRow>
         </TableHeader>
+
         <TableBody>
           {data.map((item) => (
             <TableRow
@@ -97,6 +92,7 @@ export function InventoryTable({
                   onClick={(e) => e.stopPropagation()}
                 />
               </TableCell>
+
               <TableCell className="px-4 py-4 text-sm font-medium text-gray-900">
                 {item.id}
               </TableCell>
@@ -113,12 +109,12 @@ export function InventoryTable({
                 {item.inStock}
               </TableCell>
               <TableCell className="px-4 py-4 text-sm text-gray-700">
-                {item.supplier}
+                {item.location}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
     </div>
-  );
+  )
 }

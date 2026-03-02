@@ -1,33 +1,25 @@
-'use client';
+'use client'
 
-import { useState } from 'react';
-import { Search, Filter, Plus, ChevronRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useState } from 'react'
+import { Search, Filter, Plus, ChevronRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 type FilterItem = {
-  name: string;
-  items: string[];
-};
-
-export interface InventoryToolbarProps {
-  onSearch?: (query: string) => void;
-  onCreate?: () => void;
-  onFilterChange?: (filters: Record<string, string[]>) => void;
+  name: string
+  items: string[]
 }
 
-export function InventoryToolbar({
-  onSearch,
-  onCreate,
-  onFilterChange,
-}: InventoryToolbarProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [expandedFilters, setExpandedFilters] = useState<
-    Record<string, boolean>
-  >({});
-  const [selectedFilters, setSelectedFilters] = useState<
-    Record<string, string[]>
-  >({});
+export interface InventoryToolbarProps {
+  onSearch?: (query: string) => void
+  onCreate?: () => void
+  onFilterChange?: (filters: Record<string, string[]>) => void
+}
+
+export function InventoryToolbar({ onSearch, onCreate, onFilterChange }: InventoryToolbarProps) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isFilterOpen, setIsFilterOpen] = useState(false)
+  const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({})
+  const [selectedFilters, setSelectedFilters] = useState<Record<string, string[]>>({})
 
   const filterOptions: FilterItem[] = [
     {
@@ -38,38 +30,39 @@ export function InventoryToolbar({
       name: 'Category',
       items: ['Hardware', 'Textiles', 'Electronics', 'Materials', 'Metals'],
     },
-  ];
+  ]
 
   const handleSearch = (value: string) => {
-    setSearchQuery(value);
-    onSearch?.(value);
-  };
+    setSearchQuery(value)
+    onSearch?.(value)
+  }
 
   const toggleFilterExpand = (filterName: string) => {
     setExpandedFilters((prev) => ({
       ...prev,
       [filterName]: !prev[filterName],
-    }));
-  };
+    }))
+  }
 
   const handleFilterSelect = (filterName: string, item: string) => {
-    const current = selectedFilters[filterName] || [];
-    const updated = current.includes(item)
-      ? current.filter((i) => i !== item)
-      : [...current, item];
+    setSelectedFilters((prev) => {
+      const current = prev[filterName] || []
+      const updated = current.includes(item)
+        ? current.filter((i) => i !== item)
+        : [...current, item]
 
-    const newFilters = {
-      ...selectedFilters,
-      [filterName]: updated.length > 0 ? updated : undefined,
-    };
+      const next: Record<string, string[]> = { ...prev }
 
-    setSelectedFilters(newFilters);
-    onFilterChange?.(
-      Object.fromEntries(
-        Object.entries(newFilters).filter(([, v]) => v !== undefined)
-      )
-    );
-  };
+      if (updated.length > 0) {
+        next[filterName] = updated
+      } else {
+        delete next[filterName]
+      }
+
+      onFilterChange?.(next)
+      return next
+    })
+  }
 
   return (
     <div className="w-full">
@@ -83,11 +76,12 @@ export function InventoryToolbar({
             onChange={(e) => handleSearch(e.target.value)}
             className="w-full px-4 py-2.5 pl-10 bg-white border border-gray-200 rounded-full text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         </div>
 
         {/* Create Button */}
         <Button
+          type="button"
           onClick={onCreate}
           className="bg-green-500 hover:bg-green-600 text-white rounded-full px-4 py-2.5 flex items-center gap-2"
         >
@@ -98,7 +92,8 @@ export function InventoryToolbar({
         {/* Filters Dropdown */}
         <div className="relative">
           <button
-            onClick={() => setIsFilterOpen(!isFilterOpen)}
+            type="button"
+            onClick={() => setIsFilterOpen((v) => !v)}
             className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <Filter className="w-4 h-4" />
@@ -111,6 +106,7 @@ export function InventoryToolbar({
                 <div key={filter.name} className="border-b last:border-b-0">
                   {/* Filter Header */}
                   <button
+                    type="button"
                     onClick={() => toggleFilterExpand(filter.name)}
                     className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
@@ -132,13 +128,8 @@ export function InventoryToolbar({
                         >
                           <input
                             type="checkbox"
-                            checked={
-                              selectedFilters[filter.name]?.includes(item) ||
-                              false
-                            }
-                            onChange={() =>
-                              handleFilterSelect(filter.name, item)
-                            }
+                            checked={selectedFilters[filter.name]?.includes(item) || false}
+                            onChange={() => handleFilterSelect(filter.name, item)}
                             className="w-4 h-4 rounded border-gray-300"
                           />
                           {item}
@@ -153,5 +144,5 @@ export function InventoryToolbar({
         </div>
       </div>
     </div>
-  );
+  )
 }
