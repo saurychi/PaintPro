@@ -49,7 +49,7 @@ export function InventoryTable({ data, onRowClick, onSelectionChange }: Inventor
         : 'indeterminate'
 
   return (
-    <div className="w-full border border-gray-200 rounded-lg overflow-hidden">
+    <div className="w-full bg-white rounded-lg shadow-sm overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow className="bg-gray-50 border-b border-gray-200">
