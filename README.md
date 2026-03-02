@@ -4,5 +4,11 @@ PaintPro is a Field Service & Business Intelligence web app built for painting a
 
 #Team Members:
 - Francis Daniel V. Austria
-- Paul Edrian S. Pazon
+- Lawas Denzel
 - Trent Lee R. Guevara
+
+#Setup
+1. git clone git@github.com:saurychi/PaintPro.git
+2. npm install
+3. create .env.local in root dir and insert details
+4. npm run dev
