@@ -1,69 +1,145 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Plus, Filter, Search } from 'lucide-react'
 import type { InventoryItem } from '@/lib/inventoryitem'
 import { ItemDetailsModal } from '@/components/item-details-modal'
 import { BulkCreateModal } from '@/components/bulk-create-modal'
+import { InventoryToolbar } from '@/components/inventorytoolbar' // Added Import
 
-// Keep mock data here, but it must match the shared InventoryItem type
 const MOCK_MATERIALS: InventoryItem[] = [
   {
-    id: "INV001",
-    name: "Stainless Steel Fastener Kit",
-    unitType: "Hardware",
-    unitCost: 45.99,
-    inStock: 250,
-    supplier: "Pacific Industrial Supply",
-    location: "Warehouse A - Shelf 3",
+    id: "001",
+    name: "White Latex Primer (1L)",
+    unitType: "Can",
+    unitCost: 32.00,
+    inStock: 8,
+    supplier: "JewLuxe",
+    location: "Storage Shed A",
+    dateCreated: "2024-01-10",
+    lastUpdated: "2024-02-15",
+  },
+  {
+    id: "002",
+    name: "White Latex Primer (1L)",
+    unitType: "Can",
+    unitCost: 32.00,
+    inStock: 8,
+    supplier: "JewLuxe",
+    location: "Storage Shed A",
+    dateCreated: "2024-01-10",
+    lastUpdated: "2024-02-15",
+  },
+  {
+    id: "003",
+    name: "Satin Wall Paint (4L)",
+    unitType: "Can",
+    unitCost: 98.00,
+    inStock: 5,
+    supplier: "JewLuxe",
+    location: "Storage Shed A",
+    dateCreated: "2024-01-12",
+    lastUpdated: "2024-02-18",
+  },
+  {
+    id: "004",
+    name: "Wood Filler (250ml)",
+    unitType: "Can",
+    unitCost: 7.25,
+    inStock: 12,
+    supplier: "Hardware Inc",
+    location: "Storage Shed B",
+    dateCreated: "2024-02-01",
+    lastUpdated: "2024-02-20",
+  },
+  {
+    id: "005",
+    name: "Blue Painter's Tape 1\"",
+    unitType: "Roll",
+    unitCost: 3.00,
+    inStock: 16,
+    supplier: "Hardware Inc",
+    location: "Storage Shed A",
     dateCreated: "2024-01-15",
-    lastUpdated: "2025-02-20",
+    lastUpdated: "2024-02-22",
   },
   {
-    id: "INV002",
-    name: "Premium Cotton Fabric Roll",
-    unitType: "Textiles",
-    unitCost: 28.50,
-    inStock: 75,
-    supplier: "Global Textiles Ltd",
-    location: "Warehouse A - Shelf 3",
-    dateCreated: "2024-03-22",
-    lastUpdated: "2025-02-18",
+    id: "006",
+    name: "Heavy Duty Drop Cloth",
+    unitType: "Piece",
+    unitCost: 18.00,
+    inStock: 6,
+    supplier: "JewLuxe",
+    location: "Storage Shed A",
+    dateCreated: "2024-01-20",
+    lastUpdated: "2024-02-25",
   },
   {
-    id: "INV003",
-    name: "LED Lighting Module 24W",
-    unitType: "Electronics",
-    unitCost: 156.75,
-    inStock: 42,
-    supplier: "TechCore Components",
-    location: "Warehouse A - Shelf 3",
-    dateCreated: "2024-05-10",
-    lastUpdated: "2025-02-25",
+    id: "007",
+    name: "Caulk (White, 300ml)",
+    unitType: "Tube",
+    unitCost: 4.50,
+    inStock: 20,
+    supplier: "Hardware Inc",
+    location: "Storage Shed C",
+    dateCreated: "2024-02-05",
+    lastUpdated: "2024-02-28",
   },
   {
-    id: "INV004",
-    name: "Polyurethane Foam Sheet (1m x 2m)",
-    unitType: "Materials",
-    unitCost: 72.40,
-    inStock: 18,
-    supplier: "EuroFoam Industries",
-    location: "Warehouse A - Shelf 3",
-    dateCreated: "2024-02-28",
-    lastUpdated: "2025-02-19",
+    id: "008",
+    name: "Paint Thinner (500ml)",
+    unitType: "Bottle",
+    unitCost: 5.50,
+    inStock: 10,
+    supplier: "JewLuxe",
+    location: "Storage Shed C",
+    dateCreated: "2024-01-25",
+    lastUpdated: "2024-03-01",
   },
   {
-    id: "INV005",
-    name: "Aluminum Extrusion Profile",
-    unitType: "Metals",
-    unitCost: 89.25,
-    inStock: 125,
-    supplier: "MetalTech Solutions",
-    location: "Warehouse A - Shelf 3",
-    dateCreated: "2024-06-12",
-    lastUpdated: "2025-02-21",
+    id: "009",
+    name: "Plastic Sheet (x12 ft)",
+    unitType: "Sheet",
+    unitCost: 0.80,
+    inStock: 60,
+    supplier: "Hardware Inc",
+    location: "Storage Shed A",
+    dateCreated: "2024-02-10",
+    lastUpdated: "2024-03-02",
   },
-]
+  {
+    id: "010",
+    name: "Sandpaper (1000 Grit)",
+    unitType: "Sheet",
+    unitCost: 6.25,
+    inStock: 15,
+    supplier: "Hardware Inc",
+    location: "Storage Shed A",
+    dateCreated: "2024-02-12",
+    lastUpdated: "2024-03-03",
+  },
+  {
+    id: "011",
+    name: "Black Latex Primer (1L)",
+    unitType: "Can",
+    unitCost: 50.99,
+    inStock: 8,
+    supplier: "JewLuxe",
+    location: "Storage Shed A",
+    dateCreated: "2024-01-10",
+    lastUpdated: "2024-02-15",
+  },
+  {
+    id: "012",
+    name: "Sandpaper (400 Grit)",
+    unitType: "Sheet",
+    unitCost: 0.80,
+    inStock: 15,
+    supplier: "Hardware Inc",
+    location: "Storage Shed B",
+    dateCreated: "2024-02-15",
+    lastUpdated: "2024-03-04",
+  },
+];
 
 export default function AdminInventory() {
   const [activeTab, setActiveTab] = useState<'Materials' | 'Equipment'>('Materials')
@@ -99,54 +175,39 @@ export default function AdminInventory() {
       </div>
 
       {/* --- TOOLBAR --- */}
-      <div className="flex justify-between mb-4">
-        <div className="relative w-96">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-          <input
-            className="pl-10 h-10 w-full rounded-md border border-gray-300"
-            placeholder="Search..."
-          />
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            type="button"
-            className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-gray-50"
-          >
-            <Filter className="h-4 w-4" /> Filter
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsCreateOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
-          >
-            <Plus className="h-4 w-4" /> Create
-          </button>
-        </div>
+      <div className="mb-4">
+        <InventoryToolbar onCreate={() => setIsCreateOpen(true)} />
       </div>
 
       {/* --- TABLE --- */}
-      <div className="border rounded-lg overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-gray-50 border-b">
+      <div className="bg-white shadow-sm rounded-lg flex-1 overflow-auto min-h-0">
+        <table className="w-full text-left text-sm relative">
+          {/* Table Headers */}
+          <thead className="bg-gray-50 border-b sticky top-0 z-10 shadow-sm">
             <tr>
+              <th className="p-4">Material ID</th>
               <th className="p-4">Name</th>
-              <th className="p-4">Stock</th>
-              <th className="p-4">Cost</th>
+              <th className="p-4">Material Type</th>
+              <th className="p-4">Unit Cost (AU$)</th>
+              <th className="p-4">In Stock</th>
+              <th className="p-4">Location Stored</th>
             </tr>
           </thead>
 
+          {/* Table Body */}
           <tbody>
             {MOCK_MATERIALS.map((item) => (
               <tr
                 key={item.id}
-                className="border-b hover:bg-gray-50 cursor-pointer"
+                className="border-b hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => setSelectedItem(item)}
               >
-                <td className="p-4">{item.name}</td>
-                <td className="p-4">{item.inStock}</td>
-                <td className="p-4">${item.unitCost.toFixed(2)}</td>
+                <td className="p-4 font-medium text-gray-900">{item.id}</td>
+                <td className="p-4 text-gray-800">{item.name}</td>
+                <td className="p-4 text-gray-600">{item.unitType}</td>
+                <td className="p-4 text-gray-600">${item.unitCost.toFixed(2)}</td>
+                <td className="p-4 text-gray-600">{item.inStock}</td>
+                <td className="p-4 text-gray-500">{item.location}</td>
               </tr>
             ))}
           </tbody>

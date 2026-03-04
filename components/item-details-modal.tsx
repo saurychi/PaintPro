@@ -70,11 +70,12 @@ export function ItemDetailsModal({
     onClose();
   };
 
-  return (
+return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader className="space-y-4">
-          <div className="flex items-center justify-between">
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col border-0 shadow-xl bg-white">
+        
+        <DialogHeader className="space-y-4 shrink-0 mt-4">
+          <div className="flex items-center justify-between pr-8">
             <DialogTitle className="text-2xl font-semibold">
               {displayData.name}
             </DialogTitle>
@@ -83,7 +84,7 @@ export function ItemDetailsModal({
                 variant="outline"
                 size="sm"
                 onClick={handleEditClick}
-                className="bg-gray-200 hover:bg-gray-300 text-gray-700"
+                className="bg-white border-0 shadow-sm hover:bg-gray-50 text-gray-700"
               >
                 Edit Material
               </Button>
@@ -91,47 +92,30 @@ export function ItemDetailsModal({
           </div>
 
           {isEditMode && (
-            <div className="flex items-center gap-2 pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCancel}
-                className="flex items-center gap-2"
-              >
+            <div className="flex items-center gap-2 pt-2 pr-8">
+              <Button variant="outline" size="sm" onClick={handleCancel} className="flex items-center gap-2 border-0 shadow-sm">
                 <ArrowLeft className="w-4 h-4" />
                 Back
               </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleDelete}
-                className="flex items-center gap-2"
-              >
+              <Button variant="destructive" size="sm" onClick={handleDelete} className="flex items-center gap-2 border-0 shadow-sm">
                 <Trash2 className="w-4 h-4" />
                 Delete
               </Button>
-              <Button
-                onClick={handleSave}
-                className="ml-auto bg-green-500 hover:bg-green-600 text-white"
-              >
+              <Button onClick={handleSave} className="ml-auto bg-green-500 hover:bg-green-600 text-white border-0 shadow-sm">
                 Accept Changes
               </Button>
             </div>
           )}
         </DialogHeader>
 
-        <div className="space-y-6">
-          {/* Material ID - Always Read Only */}
+        <div className="flex-1 overflow-y-auto pr-4 pb-4 space-y-6 custom-scrollbar">
+          
+          {/* Material ID */}
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-gray-700">
-              Material ID:
-            </Label>
+            <Label className="text-sm font-medium text-gray-700">Material ID:</Label>
             {isEditMode ? (
-              <Input
-                value={displayData.id}
-                disabled
-                className="bg-gray-100 text-gray-600 cursor-not-allowed"
-              />
+              // Fixed: Added border-0 shadow-inner
+              <Input value={displayData.id} disabled className="bg-gray-100 text-gray-600 cursor-not-allowed border-0 shadow-inner" />
             ) : (
               <p className="text-gray-900">{displayData.id}</p>
             )}
@@ -139,16 +123,10 @@ export function ItemDetailsModal({
 
           {/* Name */}
           <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium text-gray-700">
-              Name:
-            </Label>
+            <Label htmlFor="name" className="text-sm font-medium text-gray-700">Name:</Label>
             {isEditMode ? (
-              <Input
-                id="name"
-                value={editData?.name || ''}
-                onChange={(e) => handleInputChange('name', e.target.value)}
-                className="border-gray-300"
-              />
+              // Fixed: Added border-0 shadow-sm
+              <Input id="name" value={editData?.name || ''} onChange={(e) => handleInputChange('name', e.target.value)} className="border-0 shadow-sm focus-visible:ring-1 focus-visible:ring-gray-300" />
             ) : (
               <p className="text-gray-900">{displayData.name}</p>
             )}
@@ -156,23 +134,10 @@ export function ItemDetailsModal({
 
           {/* Unit Cost */}
           <div className="space-y-2">
-            <Label
-              htmlFor="unitCost"
-              className="text-sm font-medium text-gray-700"
-            >
-              Unit Cost (AUS$):
-            </Label>
+            <Label htmlFor="unitCost" className="text-sm font-medium text-gray-700">Unit Cost (AUS$):</Label>
             {isEditMode ? (
-              <Input
-                id="unitCost"
-                type="number"
-                value={editData?.unitCost || ''}
-                onChange={(e) =>
-                  handleInputChange('unitCost', parseFloat(e.target.value))
-                }
-                className="border-gray-300"
-                step="0.01"
-              />
+              // Fixed: Added border-0 shadow-sm
+              <Input id="unitCost" type="number" value={editData?.unitCost || ''} onChange={(e) => handleInputChange('unitCost', parseFloat(e.target.value))} className="border-0 shadow-sm focus-visible:ring-1 focus-visible:ring-gray-300" step="0.01" />
             ) : (
               <p className="text-gray-900">${displayData.unitCost.toFixed(2)}</p>
             )}
@@ -180,22 +145,10 @@ export function ItemDetailsModal({
 
           {/* In Stock */}
           <div className="space-y-2">
-            <Label
-              htmlFor="inStock"
-              className="text-sm font-medium text-gray-700"
-            >
-              Current In Stock:
-            </Label>
+            <Label htmlFor="inStock" className="text-sm font-medium text-gray-700">Current In Stock:</Label>
             {isEditMode ? (
-              <Input
-                id="inStock"
-                type="number"
-                value={editData?.inStock || ''}
-                onChange={(e) =>
-                  handleInputChange('inStock', parseInt(e.target.value))
-                }
-                className="border-gray-300"
-              />
+              // Fixed: Added border-0 shadow-sm
+              <Input id="inStock" type="number" value={editData?.inStock || ''} onChange={(e) => handleInputChange('inStock', parseInt(e.target.value))} className="border-0 shadow-sm focus-visible:ring-1 focus-visible:ring-gray-300" />
             ) : (
               <p className="text-gray-900">{displayData.inStock}</p>
             )}
@@ -203,19 +156,10 @@ export function ItemDetailsModal({
 
           {/* Category */}
           <div className="space-y-2">
-            <Label
-              htmlFor="category"
-              className="text-sm font-medium text-gray-700"
-            >
-              Material Type:
-            </Label>
+            <Label htmlFor="category" className="text-sm font-medium text-gray-700">Material Type:</Label>
             {isEditMode ? (
-              <Input
-                id="category"
-                value={editData?.unitType || ''}
-                onChange={(e) => handleInputChange('unitType', e.target.value)}
-                className="border-gray-300"
-              />
+              // Fixed: Added border-0 shadow-sm
+              <Input id="category" value={editData?.unitType || ''} onChange={(e) => handleInputChange('unitType', e.target.value)} className="border-0 shadow-sm focus-visible:ring-1 focus-visible:ring-gray-300" />
             ) : (
               <p className="text-gray-900">{displayData.unitType}</p>
             )}
@@ -223,90 +167,44 @@ export function ItemDetailsModal({
 
           {/* Supplier */}
           <div className="space-y-2">
-            <Label
-              htmlFor="supplier"
-              className="text-sm font-medium text-gray-700"
-            >
-              Supplier:
-            </Label>
+            <Label htmlFor="supplier" className="text-sm font-medium text-gray-700">Supplier:</Label>
             {isEditMode ? (
-              <Input
-                id="supplier"
-                value={editData?.supplier || ''}
-                onChange={(e) => handleInputChange('supplier', e.target.value)}
-                className="border-gray-300"
-              />
+              // Fixed: Added border-0 shadow-sm
+              <Input id="supplier" value={editData?.supplier || ''} onChange={(e) => handleInputChange('supplier', e.target.value)} className="border-0 shadow-sm focus-visible:ring-1 focus-visible:ring-gray-300" />
             ) : (
               <p className="text-gray-900">{displayData.supplier}</p>
             )}
           </div>
 
-          {/* Date Created - Always Read Only */}
+          {/* Date Created */}
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-gray-700">
-              Date Added:
-            </Label>
+            <Label className="text-sm font-medium text-gray-700">Date Added:</Label>
             {isEditMode ? (
-              <Input
-                value={new Date(displayData.dateCreated).toLocaleDateString(
-                  'en-US',
-                  {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  }
-                )}
-                disabled
-                className="bg-gray-100 text-gray-600 cursor-not-allowed"
-              />
+              <Input value={new Date(displayData.dateCreated).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} disabled className="bg-gray-100 text-gray-600 cursor-not-allowed border-0 shadow-inner" />
             ) : (
               <p className="text-gray-900">
-                {new Date(displayData.dateCreated).toLocaleDateString('en-US', {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                })}
+                {new Date(displayData.dateCreated).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
               </p>
             )}
           </div>
 
           {/* Additional Information */}
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-gray-700">
-              Additional Information (Optional):
-            </Label>
+            <Label className="text-sm font-medium text-gray-700">Additional Information (Optional):</Label>
             {isEditMode ? (
-              <Textarea
-                placeholder="Enter additional notes..."
-                className="border-gray-300 min-h-32"
-                defaultValue="• These paint cans are meant for walls\n• Bought at discounted price"
-              />
+              // Fixed: Added border-0 shadow-sm
+              <Textarea placeholder="Enter additional notes..." className="border-0 shadow-sm focus-visible:ring-1 focus-visible:ring-gray-300 min-h-[8rem]" defaultValue="• These paint cans are meant for walls\n• Bought at discounted price" />
             ) : (
-              <div className="text-gray-900 space-y-2 text-sm">
-                <p className="text-gray-600">
-                  • These paint cans are meant for walls
-                </p>
+              <div className="text-gray-900 space-y-2 text-sm bg-gray-50 p-4 rounded-lg shadow-inner">
+                <p className="text-gray-600">• These paint cans are meant for walls</p>
                 <p className="text-gray-600">• Bought at discounted price</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Cancel and Save Footer for Edit Mode */}
-        {isEditMode && (
-          <div className="flex gap-2 justify-end pt-6 border-t">
-            <Button variant="outline" onClick={handleCancel}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              className="bg-green-500 hover:bg-green-600 text-white"
-            >
-              Save Changes
-            </Button>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );
 }
+
