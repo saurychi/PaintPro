@@ -10,6 +10,12 @@ type DbUser = {
   status: "active" | "inactive" | "pending"
 }
 
+// false = only clients can access
+// true  = allow other roles too (controlled by ALLOWED_ROLES)
+const ALLOW_CROSS_ROLE_ACCESS = true
+
+const ALLOWED_ROLES: DbUser["role"][] = ["client", "admin", "manager", "staff"]
+
 export default async function ClientLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies()
 
@@ -48,8 +54,13 @@ export default async function ClientLayout({ children }: { children: ReactNode }
   if (!profile) redirect("/auth/invite?reason=not_invited")
   if (profile.status !== "active") redirect("/auth/post-auth")
 
-  // Client-only access
-  if (profile.role !== "client") redirect("/auth/post-auth")
+  if (!ALLOW_CROSS_ROLE_ACCESS) {
+    if (profile.role !== "client") redirect("/auth/post-auth")
+  } else {
+    if (!ALLOWED_ROLES.includes(profile.role)) redirect("/auth/post-auth")
+  }
 
-  return <ClientShellClient>{children}</ClientShellClient>
+  const sidebarRole: DbUser["role"] = ALLOW_CROSS_ROLE_ACCESS ? profile.role : "client"
+
+  return <ClientShellClient role={sidebarRole}>{children}</ClientShellClient>
 }

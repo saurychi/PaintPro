@@ -5,12 +5,14 @@ import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { cn } from "@/lib/utils"
 
-function ClientShell({ children }: { children: React.ReactNode }) {
+type Role = "client" | "staff" | "manager" | "admin"
+
+function ClientShell({ children, role }: { children: React.ReactNode; role: Role }) {
   const { open } = useSidebar()
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
-      <AppSidebar role="client" />
+      <AppSidebar role={role} />
 
       <main
         className={cn(
@@ -25,10 +27,16 @@ function ClientShell({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default function ClientShellClient({ children }: { children: React.ReactNode }) {
+export default function ClientShellClient({
+  children,
+  role,
+}: {
+  children: React.ReactNode
+  role: Role
+}) {
   return (
     <SidebarProvider>
-      <ClientShell>{children}</ClientShell>
+      <ClientShell role={role}>{children}</ClientShell>
     </SidebarProvider>
   )
 }
