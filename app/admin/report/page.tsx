@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   ChevronRight,
@@ -15,9 +15,19 @@ import {
   Printer,
   FileText,
   BarChart3,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react"
 
-type ReportView = "weekly" | "monthly" | "yearly"
+import {
+  getReportSummary,
+  getReportQuickLinks,
+  type ReportSummary,
+  type ReportView as RepoReportView,
+  type QuickLink,
+} from "@/lib/data/reports.repo"
+
+type ReportView = RepoReportView
 
 const BORDER = "border border-gray-200"
 const CARD = `rounded-lg bg-white shadow-sm ${BORDER}`
@@ -37,11 +47,7 @@ function formatTime(d: Date) {
 }
 
 function formatRangeLabel(start: Date, end: Date) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
+  const fmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" })
   return `${fmt.format(start)} to ${fmt.format(end)}`
 }
 
@@ -140,15 +146,15 @@ export default function AdminReportPage() {
   const range = useMemo(() => getRange(view, today), [view, today])
   const rangeText = useMemo(() => formatRangeLabel(range.start, range.end), [range.start, range.end])
 
-  // Placeholder KPIs (front-end only)
-  const kpi = useMemo(() => {
-    return {
-      totalJobs: 128,
-      totalRevenue: 245_300,
-      totalCost: 176_400,
-      netProfit: 68_900,
-    }
-  }, [])
+  const [kpi, setKpi] = useState<ReportSummary>({
+    totalJobs: 0,
+    totalRevenue: 0,
+    totalCost: 0,
+    netProfit: 0,
+  })
+  const [quickLinks, setQuickLinks] = useState<QuickLink[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const profitMargin = useMemo(() => {
     if (kpi.totalRevenue <= 0) return 0
@@ -174,27 +180,51 @@ export default function AdminReportPage() {
 
   const viewText = view === "weekly" ? "Weekly" : view === "yearly" ? "Yearly" : "Monthly"
 
-  const recentItems = useMemo(
-    () => [
-      {
-        id: "r1",
-        title: "Revenue Summary",
-        desc: "Line chart overview and KPIs",
-        href: "/admin/report/report-overview",
-      },
-      {
-        id: "r2",
-        title: "Report List",
-        desc: "View generated reports and history",
-        href: "/admin/report/report-list",
-      },
-    ],
-    []
-  )
+  const actionBtn =
+    "inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 transition-colors active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
 
-  function handleRefresh() {
-    setLastUpdated(new Date())
+  async function refreshSummary() {
+    setLoading(true)
+    setLoadError(null)
+
+    try {
+      const summary = await getReportSummary({
+        view,
+        rangeStartISO: range.start.toISOString(),
+        rangeEndISO: range.end.toISOString(),
+      })
+
+      setKpi(summary)
+      setLastUpdated(new Date())
+    } catch (e: any) {
+      setLoadError(e?.message ?? "Failed to load report summary")
+    } finally {
+      setLoading(false)
+    }
   }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadLinks() {
+      try {
+        const links = await getReportQuickLinks()
+        if (!cancelled) setQuickLinks(links)
+      } catch {
+        // ignore link failures for now
+      }
+    }
+
+    loadLinks()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
 
   function handleExportCsv() {
     const rows = [
@@ -219,9 +249,6 @@ export default function AdminReportPage() {
   function handlePrint() {
     window.print()
   }
-
-  const actionBtn =
-    "inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 transition-colors active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
 
   return (
     <div className="p-6">
@@ -272,7 +299,7 @@ export default function AdminReportPage() {
               <div className="text-sm font-semibold text-gray-900">Report Overview</div>
 
               <div className="flex items-center gap-2">
-                <button type="button" className={`${actionBtn} whitespace-nowrap`} onClick={handleRefresh}>
+                <button type="button" className={`${actionBtn} whitespace-nowrap`} onClick={refreshSummary}>
                   <RefreshCw className="h-4 w-4 text-gray-500" />
                   Refresh
                 </button>
@@ -307,6 +334,21 @@ export default function AdminReportPage() {
                 <span className="font-semibold text-gray-900">{formatTime(lastUpdated)}</span>
               </div>
             </div>
+
+            {/* Loading / error line */}
+            {(loading || loadError) && (
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  )}
+                  {loading ? "Loading report summary…" : "Could not load report summary"}
+                </div>
+                {loadError ? <div className="mt-1 text-sm text-gray-600">{loadError}</div> : null}
+              </div>
+            )}
           </div>
 
           {/* KPIs */}
@@ -358,7 +400,7 @@ export default function AdminReportPage() {
             </div>
           </div>
 
-          {/* Tightened note */}
+          {/* Note */}
           <div className="mt-3 rounded-lg border border-[#00c065]/25 bg-[#00c065]/10 px-4 py-3">
             <div className="flex items-start gap-2">
               <Info className="mt-0.5 h-4 w-4 text-[#00a054]" />
@@ -416,7 +458,7 @@ export default function AdminReportPage() {
             </div>
 
             <div className="mt-3 space-y-2">
-              {recentItems.map((it) => (
+              {quickLinks.map((it) => (
                 <Link
                   key={it.id}
                   href={it.href}
@@ -429,6 +471,11 @@ export default function AdminReportPage() {
                   <ChevronRight className="mt-0.5 h-4 w-4 text-gray-400" />
                 </Link>
               ))}
+              {quickLinks.length === 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-500">
+                  No quick links available.
+                </div>
+              )}
             </div>
 
             <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3 text-xs text-gray-600">
