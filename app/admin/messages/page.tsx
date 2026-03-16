@@ -1,12 +1,13 @@
 "use client"
 
-import React, { useMemo, useState, useEffect } from "react"
+import React, { useMemo, useState, useEffect, useRef } from "react"
 import { 
   fetchConversations, 
   fetchMessages, 
   postMessage,
   fetchAvailableUsers,
   createOrGetConversation,
+  markConversationAsRead,
   type Message 
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
@@ -14,23 +15,29 @@ import { Search } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
 
 export default function AdminMessages() {
+  // UI State
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   
+  // Data State
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<any[]>([]) 
   const [chatHistory, setChatHistory] = useState<Message[]>([])
 
+  // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
   const [availableUsers, setAvailableUsers] = useState<any[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
+  // Auto-Scroll Ref
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // 1. Get current user
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -39,15 +46,39 @@ export default function AdminMessages() {
     getUser()
   }, [])
 
+  // 2. Auto-Scroll to bottom function
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [chatHistory])
+
+  // 3. Helper function to load/refresh conversations
   const loadConversations = async (userId: string, selectChatId?: string) => {
     const data = await fetchConversations(userId)
-    const mappedConvos = data.map((cp: any) => ({
-      id: cp.conversation_id,
-      name: cp.users?.username || "Unknown User",
-      role: cp.users?.role || "Client",
-      lastMessage: "Click to view chat...", 
-      unread: false
-    }))
+    const mappedConvos = data.map((cp: any) => {
+      // Calculate unread status by comparing timestamps
+      const lastMsg = cp.latest_message
+      const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
+      const lastMsgTime = lastMsg ? new Date(lastMsg.created_at).getTime() : 0
+      const isUnread = lastMsgTime > lastReadAt
+
+      return {
+        id: cp.conversation_id,
+        name: cp.users?.username || "Unknown User",
+        role: cp.users?.role || "Client",
+        profile_image_url: cp.users?.profile_image_url || null,
+        lastMessage: lastMsg ? lastMsg.content : "Say hello!", 
+        unread: isUnread,
+        lastActivity: lastMsgTime // <-- NEW: Store time for sorting
+      }
+    })
+
+    // <-- NEW: Sort initial load (highest timestamp first)
+    mappedConvos.sort((a, b) => b.lastActivity - a.lastActivity)
+
     setConversations(mappedConvos)
     
     if (selectChatId) {
@@ -58,31 +89,67 @@ export default function AdminMessages() {
     setIsLoading(false)
   }
 
+  // 4. Initial Load
   useEffect(() => {
-    if (currentUserId) {
-      loadConversations(currentUserId)
-    }
+    if (currentUserId) loadConversations(currentUserId)
   }, [currentUserId])
 
+  // 5. When user CLICKS a chat, Mark as Read in DB
   useEffect(() => {
-    if (!activeChatId || !currentUserId) return
+    if (activeChatId && currentUserId) {
+      markConversationAsRead(activeChatId, currentUserId)
+      setConversations(prev => prev.map(c =>
+        c.id === activeChatId ? { ...c, unread: false } : c
+      ))
+    }
+  }, [activeChatId, currentUserId])
+
+  // 6. Fetch Chat History
+  useEffect(() => {
+    if (!activeChatId) return
 
     async function loadMessages() {
       const msgs = await fetchMessages(activeChatId!)
       setChatHistory(msgs)
     }
     loadMessages()
+  }, [activeChatId])
+
+  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  useEffect(() => {
+    if (!currentUserId) return
 
     const channel = supabase
-      .channel(`chat-${activeChatId}`)
+      .channel(`global-chat-listener`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeChatId}` },
+        { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
         (payload) => {
           const newMessage = payload.new as Message
-          if (newMessage.sender_id !== currentUserId) {
-            setChatHistory((prev) => [...prev, newMessage])
+
+          if (newMessage.conversation_id === activeChatId) {
+            // It's the chat we are currently looking at
+            if (newMessage.sender_id !== currentUserId) {
+              setChatHistory((prev) => [...prev, newMessage])
+              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
+            }
           }
+
+          // <-- NEW: Update the sidebar for ALL incoming messages and bump to top
+          setConversations(prev => {
+            const updated = prev.map(c =>
+              c.id === newMessage.conversation_id
+                ? { 
+                    ...c, 
+                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
+                    lastMessage: newMessage.content,
+                    lastActivity: new Date(newMessage.created_at).getTime() 
+                  }
+                : c
+            )
+            // Re-sort the array so this chat jumps to the top
+            return updated.sort((a, b) => b.lastActivity - a.lastActivity)
+          })
         }
       )
       .subscribe()
@@ -90,12 +157,24 @@ export default function AdminMessages() {
     return () => { supabase.removeChannel(channel) }
   }, [activeChatId, currentUserId])
 
+  // 8. Handle Sending a Message
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !activeChatId || !currentUserId) return
     setIsSending(true)
     try {
       const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
       setChatHistory((prev) => [...prev, sentMsg])
+      
+      // <-- NEW: Update sidebar instantly for ourselves and bump to top
+      setConversations(prev => {
+        const updated = prev.map(c =>
+          c.id === activeChatId 
+            ? { ...c, lastMessage: inputMessage, unread: false, lastActivity: Date.now() } 
+            : c
+        )
+        return updated.sort((a, b) => b.lastActivity - a.lastActivity)
+      })
+
       setInputMessage("")
     } catch (error) {
       console.error("Error sending message:", error)
@@ -108,6 +187,7 @@ export default function AdminMessages() {
     if (e.key === 'Enter') handleSendMessage()
   }
 
+  // Modal Handlers
   const handleOpenNewChat = async () => {
     setIsNewChatOpen(true)
     if (currentUserId) {
@@ -121,9 +201,7 @@ export default function AdminMessages() {
     setIsCreatingChat(true)
     try {
       const newChatId = await createOrGetConversation(currentUserId, targetUserId)
-      
       await loadConversations(currentUserId, newChatId)
-      
       setIsNewChatOpen(false)
       setUserSearchQuery("")
     } catch (error) {
@@ -179,10 +257,12 @@ export default function AdminMessages() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        {chat.unread ? <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> : null}
+                        {chat.unread ? <span className="h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" /> : null}
                         <p className="text-sm font-semibold text-gray-900 truncate">{chat.name}</p>
                       </div>
-                      <p className="mt-1 text-xs text-gray-600 line-clamp-1">{chat.lastMessage}</p>
+                      <p className={`mt-1 text-xs line-clamp-1 ${chat.unread ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
+                        {chat.lastMessage}
+                      </p>
                     </div>
                   </div>
                 </button>
@@ -238,6 +318,8 @@ export default function AdminMessages() {
                     </div>
                   )
                 })}
+                {/* Auto-scroll target */}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* Input Area */}
@@ -255,7 +337,7 @@ export default function AdminMessages() {
                   <button
                     onClick={handleSendMessage}
                     disabled={isSending || !inputMessage.trim()}
-                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
                     style={{ backgroundColor: ACCENT }}
                   >
                     {isSending ? "..." : "Send"}
@@ -273,7 +355,6 @@ export default function AdminMessages() {
           <DialogHeader className="p-6 pb-4 border-b border-gray-100">
             <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
             
-            {/* Search Bar */}
             <div className="relative mt-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -286,7 +367,6 @@ export default function AdminMessages() {
             </div>
           </DialogHeader>
 
-          {/* User List */}
           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
             {filteredUsers.length === 0 ? (
               <p className="text-center text-gray-400 text-sm py-8">No users found.</p>
