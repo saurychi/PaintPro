@@ -30,7 +30,7 @@ export default function Welcome() {
           a smoother, stress free painting journey from start to finish.
         </p>
 
-        <Link href="/role_selection">
+        <Link href="/auth/signin">
           <button className={styles.startButton}>Start</button>
         </Link>
       </div>
