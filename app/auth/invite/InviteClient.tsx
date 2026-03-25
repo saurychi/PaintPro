@@ -27,6 +27,8 @@ export default function InviteClient() {
       setError("This account is not invited. Please contact the admin for access.")
     } else if (reason === "inactive") {
       setError("Your account is inactive. Please contact the admin.")
+    } else if (reason === "invalid_role") {
+      setError("This account does not have a valid internal access role.")
     } else {
       setError("You cannot access PaintPro with this account.")
     }
