@@ -2,9 +2,49 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ChevronRight, CalendarDays } from "lucide-react"
+import {
+  ChevronRight,
+  CalendarDays,
+  Briefcase,
+  PhilippinePeso,
+  TrendingDown,
+  TrendingUp,
+  Info,
+  RefreshCw,
+  Download,
+  Printer,
+  FileText,
+  BarChart3,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react"
 
-type ReportView = "weekly" | "monthly" | "yearly"
+import {
+  getReportSummary,
+  getReportQuickLinks,
+  type ReportSummary,
+  type ReportView as RepoReportView,
+  type QuickLink,
+} from "@/lib/data/reports.repo"
+
+type ReportView = RepoReportView
+
+const BORDER = "border border-gray-200"
+const CARD = `rounded-lg bg-white shadow-sm ${BORDER}`
+const SOFT = "bg-gray-50/60"
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0")
+}
+
+function formatTime(d: Date) {
+  let h = d.getHours()
+  const m = d.getMinutes()
+  const ampm = h >= 12 ? "PM" : "AM"
+  h = h % 12
+  if (h === 0) h = 12
+  return `${h}:${pad2(m)} ${ampm}`
+}
 
 function formatRangeLabel(start: Date, end: Date) {
   const fmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -18,8 +58,9 @@ function startOfDay(d: Date) {
 // Week starts on Monday
 function getWeekRange(today: Date) {
   const d = startOfDay(today)
-  const day = d.getDay() // 0 Sun ... 6 Sat
-  const diffToMonday = (day + 6) % 7 // Mon -> 0, Sun -> 6
+  const day = d.getDay()
+  const diffToMonday = (day + 6) % 7
+
   const start = new Date(d)
   start.setDate(d.getDate() - diffToMonday)
 
@@ -31,7 +72,7 @@ function getWeekRange(today: Date) {
 
 function getMonthRange(today: Date) {
   const start = new Date(today.getFullYear(), today.getMonth(), 1)
-  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0) // last day
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
   return { start, end }
 }
 
@@ -47,45 +88,87 @@ function getRange(view: ReportView, today: Date) {
   return getMonthRange(today)
 }
 
-function viewLabel(view: ReportView) {
-  if (view === "weekly") return "Weekly View"
-  if (view === "yearly") return "Yearly View"
-  return "Monthly View"
+function KpiCard({
+  title,
+  value,
+  hint,
+  icon,
+}: {
+  title: string
+  value: string
+  hint: string
+  icon: React.ReactNode
+}) {
+  return (
+    <div className={["rounded-lg", BORDER, SOFT, "p-4"].join(" ")}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-gray-500">{title}</div>
+          <div className="mt-1 truncate text-xl font-semibold text-gray-900">{value}</div>
+          <div className="mt-1 text-xs text-gray-500">{hint}</div>
+        </div>
+
+        <div className="grid h-9 w-9 place-items-center rounded-lg bg-white shadow-sm border border-gray-200">
+          {icon}
+        </div>
+      </div>
+    </div>
+  )
 }
 
-function useAsOfTime() {
-  const [asOf, setAsOf] = useState(() => new Date())
+function downloadTextFile(filename: string, content: string, mime = "text/plain") {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 
-  useEffect(() => {
-    const id = window.setInterval(() => setAsOf(new Date()), 60_000)
-    return () => window.clearInterval(id)
-  }, [])
-
-  return useMemo(() => {
-    return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(asOf)
-  }, [asOf])
+function toCsvRow(cells: (string | number)[]) {
+  return cells
+    .map((c) => {
+      const s = String(c)
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replaceAll('"', '""')}"`
+      return s
+    })
+    .join(",")
 }
 
 export default function AdminReportPage() {
-  const [view, setView] = useState<ReportView>("monthly")
-  const asOfTime = useAsOfTime()
+  const [view, setView] = useState<ReportView>("weekly")
+  const [lastUpdated, setLastUpdated] = useState<Date>(() => new Date())
 
   const today = useMemo(() => new Date(), [])
   const range = useMemo(() => getRange(view, today), [view, today])
   const rangeText = useMemo(() => formatRangeLabel(range.start, range.end), [range.start, range.end])
 
-  const kpi = useMemo(() => {
-    return {
-      totalJobs: 128,
-      totalRevenue: 245_300,
-      totalCost: 176_400,
-      netProfit: 68_900,
-    }
-  }, [])
+  const [kpi, setKpi] = useState<ReportSummary>({
+    totalJobs: 0,
+    totalRevenue: 0,
+    totalCost: 0,
+    netProfit: 0,
+  })
+  const [quickLinks, setQuickLinks] = useState<QuickLink[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const profitMargin = useMemo(() => {
     if (kpi.totalRevenue <= 0) return 0
     return Math.round((kpi.netProfit / kpi.totalRevenue) * 100)
+  }, [kpi])
+
+  const avgRevenuePerJob = useMemo(() => {
+    if (kpi.totalJobs <= 0) return 0
+    return Math.round(kpi.totalRevenue / kpi.totalJobs)
+  }, [kpi])
+
+  const costRatio = useMemo(() => {
+    if (kpi.totalRevenue <= 0) return 0
+    return Math.round((kpi.totalCost / kpi.totalRevenue) * 100)
   }, [kpi])
 
   const currency = (n: number) =>
@@ -95,152 +178,311 @@ export default function AdminReportPage() {
       maximumFractionDigits: 0,
     }).format(n)
 
+  const viewText = view === "weekly" ? "Weekly" : view === "yearly" ? "Yearly" : "Monthly"
+
+  const actionBtn =
+    "inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 transition-colors active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
+
+  async function refreshSummary() {
+    setLoading(true)
+    setLoadError(null)
+
+    try {
+      const summary = await getReportSummary({
+        view,
+        rangeStartISO: range.start.toISOString(),
+        rangeEndISO: range.end.toISOString(),
+      })
+
+      setKpi(summary)
+      setLastUpdated(new Date())
+    } catch (e: any) {
+      setLoadError(e?.message ?? "Failed to load report summary")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadLinks() {
+      try {
+        const links = await getReportQuickLinks()
+        if (!cancelled) setQuickLinks(links)
+      } catch {
+        // ignore link failures for now
+      }
+    }
+
+    loadLinks()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
+
+  function handleExportCsv() {
+    const rows = [
+      ["Range", rangeText],
+      ["View", viewText],
+      ["Last Updated", formatTime(lastUpdated)],
+      [],
+      ["Metric", "Value"],
+      ["Total Jobs", kpi.totalJobs],
+      ["Total Revenue", kpi.totalRevenue],
+      ["Total Cost", kpi.totalCost],
+      ["Net Profit", kpi.netProfit],
+      ["Profit Margin (%)", profitMargin],
+      ["Avg Revenue per Job", avgRevenuePerJob],
+      ["Cost Ratio (%)", costRatio],
+    ]
+
+    const csv = rows.map((r) => toCsvRow(r as any)).join("\n")
+    downloadTextFile(`paintpro_report_${view}_${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv")
+  }
+
+  function handlePrint() {
+    window.print()
+  }
+
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-semibold text-gray-900">Report</h1>
+      {/* Header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Report</h1>
+          <div className="mt-1 text-sm text-gray-500">Monitor KPIs and open report modules for deeper insights.</div>
+        </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={view}
+            onChange={(e) => setView(e.target.value as ReportView)}
+            className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30"
+          >
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+
+          <Link
+            href="/admin/report/report-overview"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#00c065] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#00a054] active:scale-[0.98]"
+          >
+            Open Overview
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+
+          <Link
+            href="/admin/report/report-list"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 active:scale-[0.98]"
+          >
+            Report List
+            <ChevronRight className="h-4 w-4 text-gray-500" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Body */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
-        <section className="lg:col-span-8 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+        {/* Main column */}
+        <section className={["lg:col-span-8", CARD, "p-4"].join(" ")}>
+          {/* Alignment fix: two-row header inside the card */}
+          <div className="flex flex-col gap-3">
+            {/* Row 1: title + actions */}
+            <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold text-gray-900">Report Overview</div>
 
-              <div className="mt-3 inline-block rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-2 text-xs">
-                <div className="flex flex-wrap items-center gap-4">
-                  <div>
-                    <span className="text-gray-500">Range:</span>{" "}
-                    <span className="font-semibold text-gray-900">{rangeText}</span>
-                  </div>
+              <div className="flex items-center gap-2">
+                <button type="button" className={`${actionBtn} whitespace-nowrap`} onClick={refreshSummary}>
+                  <RefreshCw className="h-4 w-4 text-gray-500" />
+                  Refresh
+                </button>
 
-                  <div>
-                    <span className="text-gray-500">View:</span>{" "}
-                    <span className="font-semibold text-gray-900">
-                      {view === "weekly"
-                        ? "Weekly"
-                        : view === "yearly"
-                        ? "Yearly"
-                        : "Monthly"}
-                    </span>
-                  </div>
+                <button type="button" className={`${actionBtn} whitespace-nowrap`} onClick={handleExportCsv}>
+                  <Download className="h-4 w-4 text-gray-500" />
+                  Export CSV
+                </button>
 
-                  <div>
-                    <span className="text-gray-500">Last Updated:</span>{" "}
-                    <span className="font-semibold text-gray-900">{asOfTime}</span>
-                  </div>
+                <button type="button" className={`${actionBtn} whitespace-nowrap`} onClick={handlePrint}>
+                  <Printer className="h-4 w-4 text-gray-500" />
+                  Print
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2: date summary full width */}
+            <div className="inline-flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-2 text-xs">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-gray-500" />
+                <span className="text-gray-500">Range:</span>
+                <span className="font-semibold text-gray-900">{rangeText}</span>
+              </div>
+
+              <div>
+                <span className="text-gray-500">View:</span>{" "}
+                <span className="font-semibold text-gray-900">{viewText}</span>
+              </div>
+
+              <div>
+                <span className="text-gray-500">Last Updated:</span>{" "}
+                <span className="font-semibold text-gray-900">{formatTime(lastUpdated)}</span>
+              </div>
+            </div>
+
+            {/* Loading / error line */}
+            {(loading || loadError) && (
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  )}
+                  {loading ? "Loading report summary…" : "Could not load report summary"}
+                </div>
+                {loadError ? <div className="mt-1 text-sm text-gray-600">{loadError}</div> : null}
+              </div>
+            )}
+          </div>
+
+          {/* KPIs */}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <KpiCard
+              title="Total Jobs"
+              value={`${kpi.totalJobs}`}
+              hint="Completed and active jobs"
+              icon={<Briefcase className="h-4 w-4 text-gray-600" />}
+            />
+            <KpiCard
+              title="Total Revenue"
+              value={currency(kpi.totalRevenue)}
+              hint="Gross income in range"
+              icon={<PhilippinePeso className="h-4 w-4 text-gray-600" />}
+            />
+            <KpiCard
+              title="Total Cost"
+              value={currency(kpi.totalCost)}
+              hint="Expenses in range"
+              icon={<TrendingDown className="h-4 w-4 text-gray-600" />}
+            />
+            <KpiCard
+              title="Net Profit"
+              value={currency(kpi.netProfit)}
+              hint="Revenue minus cost"
+              icon={<TrendingUp className="h-4 w-4 text-gray-600" />}
+            />
+          </div>
+
+          {/* Summary blocks */}
+          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <div className={["rounded-lg", BORDER, "bg-white", "p-4"].join(" ")}>
+              <div className="text-xs font-semibold text-gray-500">Profit Margin</div>
+              <div className="mt-1 text-xl font-semibold text-gray-900">{profitMargin}%</div>
+              <div className="mt-2 text-xs text-gray-500">Net profit vs total revenue</div>
+            </div>
+
+            <div className={["rounded-lg", BORDER, "bg-white", "p-4"].join(" ")}>
+              <div className="text-xs font-semibold text-gray-500">Avg Revenue per Job</div>
+              <div className="mt-1 text-xl font-semibold text-gray-900">{currency(avgRevenuePerJob)}</div>
+              <div className="mt-2 text-xs text-gray-500">Revenue divided by job count</div>
+            </div>
+
+            <div className={["rounded-lg", BORDER, "bg-white", "p-4"].join(" ")}>
+              <div className="text-xs font-semibold text-gray-500">Cost Ratio</div>
+              <div className="mt-1 text-xl font-semibold text-gray-900">{costRatio}%</div>
+              <div className="mt-2 text-xs text-gray-500">Cost vs revenue for the range</div>
+            </div>
+          </div>
+
+          {/* Note */}
+          <div className="mt-3 rounded-lg border border-[#00c065]/25 bg-[#00c065]/10 px-4 py-3">
+            <div className="flex items-start gap-2">
+              <Info className="mt-0.5 h-4 w-4 text-[#00a054]" />
+              <div>
+                <div className="text-sm font-semibold text-[#166534]">Heads up</div>
+                <div className="mt-1 text-xs text-[#166534]">
+                  KPI values are currently placeholders. When the backend is ready, compute totals based on the selected range and view.
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <label className="sr-only" htmlFor="reportView">
-                  Report view
-                </label>
-                <select
-                  id="reportView"
-                  value={view}
-                  onChange={(e) => setView(e.target.value as ReportView)}
-                  className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30"
-                >
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="yearly">Yearly</option>
-                </select>
-              </div>
+          </div>
+        </section>
+
+        {/* Right column */}
+        <aside className={["lg:col-span-4", "space-y-4"].join(" ")}>
+          <section className={[CARD, "p-4"].join(" ")}>
+            <div>
+              <div className="text-sm font-semibold text-gray-900">Manual Reports</div>
+              <div className="mt-0.5 text-xs text-gray-500">Open report modules and exports</div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <Link
+                href="/admin/report/report-list"
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50 active:scale-[0.99]"
+              >
+                <span className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-gray-500" />
+                  Report List
+                </span>
+                <span className="grid h-7 w-7 place-items-center rounded-md bg-[#00c065]/10">
+                  <ChevronRight className="h-4 w-4 text-[#00a054]" />
+                </span>
+              </Link>
 
               <Link
                 href="/admin/report/report-overview"
-                className="inline-flex items-center gap-2 rounded-lg bg-[#00c065] px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#00a054] active:scale-[0.98]"
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50 active:scale-[0.99]"
               >
-                Open Overview
-                <ChevronRight className="h-4 w-4" />
+                <span className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-gray-500" />
+                  Dashboard Charts
+                </span>
+                <span className="grid h-7 w-7 place-items-center rounded-md bg-[#00c065]/10">
+                  <ChevronRight className="h-4 w-4 text-[#00a054]" />
+                </span>
               </Link>
             </div>
-          </div>
+          </section>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-              <div className="text-xs font-medium text-gray-500">Total Jobs</div>
-              <div className="mt-1 text-lg font-semibold text-gray-900">{kpi.totalJobs}</div>
+          <section className={[CARD, "p-4"].join(" ")}>
+            <div>
+              <div className="text-sm font-semibold text-gray-900">Quick Links</div>
+              <div className="mt-0.5 text-xs text-gray-500">Most used report actions</div>
             </div>
 
-            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-              <div className="text-xs font-medium text-gray-500">Total Revenue</div>
-              <div className="mt-1 text-lg font-semibold text-gray-900">{currency(kpi.totalRevenue)}</div>
+            <div className="mt-3 space-y-2">
+              {quickLinks.map((it) => (
+                <Link
+                  key={it.id}
+                  href={it.href}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-gray-900">{it.title}</div>
+                    <div className="mt-1 line-clamp-2 text-xs text-gray-500">{it.desc}</div>
+                  </div>
+                  <ChevronRight className="mt-0.5 h-4 w-4 text-gray-400" />
+                </Link>
+              ))}
+              {quickLinks.length === 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-500">
+                  No quick links available.
+                </div>
+              )}
             </div>
 
-            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-              <div className="text-xs font-medium text-gray-500">Total Cost</div>
-              <div className="mt-1 text-lg font-semibold text-gray-900">{currency(kpi.totalCost)}</div>
+            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3 text-xs text-gray-600">
+              Tip: Use <span className="font-semibold text-gray-900">Export CSV</span> to save the current summary for sharing.
             </div>
-
-            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-              <div className="text-xs font-medium text-gray-500">Net Profit</div>
-              <div className="mt-1 text-lg font-semibold text-gray-900">{currency(kpi.netProfit)}</div>
-            </div>
-
-            <div className="sm:col-span-2 rounded-lg border border-[#00c065]/25 bg-[#00c065]/10 p-3">
-              <div className="text-xs font-medium text-gray-600">Profit Margin</div>
-              <div className="mt-1 text-lg font-semibold text-gray-900">{profitMargin}%</div>
-              <div className="mt-1 text-xs font-medium text-[#166534]">
-                Placeholder KPI. Replace with real values from backend later.
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link
-              href="/admin/report/report-list"
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 active:scale-[0.98]"
-            >
-              View Reports List
-              <ChevronRight className="h-4 w-4 text-gray-500" />
-            </Link>
-
-            <Link
-              href="/admin/report/report-overview"
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 active:scale-[0.98]"
-            >
-              View Dashboard Charts
-              <ChevronRight className="h-4 w-4 text-gray-500" />
-            </Link>
-          </div>
-        </section>
-
-        <section className="lg:col-span-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div>
-            <div className="text-sm font-semibold text-gray-900">Manual Reports</div>
-            <div className="mt-0.5 text-xs text-gray-500">Generate or open report modules</div>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <Link
-              href="/admin/report/report-list"
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50 active:scale-[0.99]"
-            >
-              <span>Report List</span>
-              <span className="grid h-7 w-7 place-items-center rounded-md bg-[#00c065]/10">
-                <ChevronRight className="h-4 w-4 text-[#00a054]" />
-              </span>
-            </Link>
-
-            <Link
-              href="/admin/report/report-overview"
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50 active:scale-[0.99]"
-            >
-              <span>Report Overview</span>
-              <span className="grid h-7 w-7 place-items-center rounded-md bg-[#00c065]/10">
-                <ChevronRight className="h-4 w-4 text-[#00a054]" />
-              </span>
-            </Link>
-          </div>
-
-          <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-            <div className="text-xs font-semibold text-gray-900">Backend-ready note</div>
-            <div className="mt-1 text-xs leading-relaxed text-gray-600">
-              This page uses placeholder KPI data. When your API is ready, filter by the selected date range and view, then update the KPIs.
-            </div>
-          </div>
-        </section>
+          </section>
+        </aside>
       </div>
     </div>
   )

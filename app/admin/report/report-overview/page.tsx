@@ -17,7 +17,7 @@ import {
   Bar,
   Legend,
 } from "recharts"
-import { ChevronRight, CalendarDays } from "lucide-react"
+import { ChevronRight } from "lucide-react"
 
 type ReportView = "weekly" | "monthly" | "yearly"
 
@@ -181,6 +181,29 @@ const STAFF_COLORS: Record<string, string> = {
   Paul: "#f59e0b",
 }
 
+function StaffRevenueLegend() {
+  const items = [
+    { key: "Marco", color: STAFF_COLORS.Marco },
+    { key: "Francis", color: STAFF_COLORS.Francis },
+    { key: "Paul", color: STAFF_COLORS.Paul },
+  ]
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-center gap-5 text-xs font-semibold">
+      {items.map((item) => (
+        <div key={item.key} className="flex items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: item.color }}
+            aria-hidden="true"
+          />
+          <span className="text-gray-700">{item.key}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
@@ -218,6 +241,12 @@ function viewLabel(view: ReportView) {
   if (view === "weekly") return "Weekly"
   if (view === "yearly") return "Yearly"
   return "Monthly"
+}
+
+function staffBreakdownLabel(view: ReportView) {
+  if (view === "weekly") return "Daily breakdown of staff contribution"
+  if (view === "monthly") return "Weekly breakdown of staff contribution"
+  return "Monthly breakdown of staff contribution"
 }
 
 function formatRangeLabel(start: Date, end: Date) {
@@ -434,33 +463,28 @@ export default function ReportOverviewPage() {
       </div>
 
       <h1 className="mt-2 text-2xl font-semibold text-gray-900">Report Overview</h1>
-        <div className="mt-3 inline-block rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-2 text-xs">
-          <div className="flex flex-wrap items-center gap-4 text-xs">
-            <div>
-              <span className="text-gray-500">Range:</span>{" "}
-              <span className="font-semibold text-gray-900">{rangeText}</span>
-            </div>
 
-            <div>
-              <span className="text-gray-500">View:</span>{" "}
-              <span className="font-semibold text-gray-900">
-                {view === "weekly"
-                  ? "Weekly"
-                  : view === "yearly"
-                  ? "Yearly"
-                  : "Monthly"}
-              </span>
-            </div>
+      <div className="mt-3 inline-block rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-4 text-xs">
+          <div>
+            <span className="text-gray-500">Range:</span>{" "}
+            <span className="font-semibold text-gray-900">{rangeText}</span>
+          </div>
 
-            <div>
-              <span className="text-gray-500">Last Updated:</span>{" "}
-              <span className="font-semibold text-gray-900">{asOfTime}</span>
-            </div>
+          <div>
+            <span className="text-gray-500">View:</span>{" "}
+            <span className="font-semibold text-gray-900">{viewLabel(view)}</span>
+          </div>
+
+          <div>
+            <span className="text-gray-500">Last Updated:</span>{" "}
+            <span className="font-semibold text-gray-900">{asOfTime}</span>
           </div>
         </div>
+      </div>
+
       <div className="mt-6">
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(520px,1fr)_420px]">
-          {/* Revenue */}
           <section className={`${card} flex min-h-[520px] flex-col`}>
             <div className={cardHeader}>
               <div>
@@ -486,32 +510,31 @@ export default function ReportOverviewPage() {
                     />
                     <Tooltip content={<RevenueLineTooltip />} />
 
-                    {/* Legend vertical top-to-bottom, order follows Lines below */}
                     <Legend
-                        layout="vertical"
-                        verticalAlign="middle"
-                        align="right"
-                        wrapperStyle={{right:-10}}
-                        content={() => (
-                          <div className="flex flex-col gap-2 text-xs font-semibold">
-                            <div className="flex items-center gap-2">
-                              <span className="h-2.5 w-2.5 rounded-full bg-[#00c065]" />
-                              <span className="text-gray-900">Revenue</span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="h-2.5 w-2.5 rounded-full bg-[#f59e0b]" />
-                              <span className="text-gray-900">Cost</span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="h-2.5 w-2.5 rounded-full bg-[#3b82f6]" />
-                              <span className="text-gray-900">Profit</span>
-                            </div>
+                      layout="vertical"
+                      verticalAlign="middle"
+                      align="right"
+                      wrapperStyle={{ right: -10 }}
+                      content={() => (
+                        <div className="flex flex-col gap-2 text-xs font-semibold">
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-[#00c065]" />
+                            <span className="text-gray-900">Revenue</span>
                           </div>
-                        )}
-                      />
-                    {/* IMPORTANT: Line order controls legend order */}
+
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-[#f59e0b]" />
+                            <span className="text-gray-900">Cost</span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-[#3b82f6]" />
+                            <span className="text-gray-900">Profit</span>
+                          </div>
+                        </div>
+                      )}
+                    />
+
                     <Line
                       type="monotone"
                       dataKey="revenue"
@@ -574,37 +597,75 @@ export default function ReportOverviewPage() {
             </div>
           </section>
 
-          {/* Right column */}
           <div className="flex flex-col gap-4">
-            {/* Revenue by Staff */}
             <section className={card}>
               <div className={cardHeader}>
                 <div>
                   <div className={cardTitle}>Revenue by Staff</div>
-                  <div className="mt-1 text-xs text-gray-500">Weekly breakdown of staff contribution</div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {staffBreakdownLabel(view)}
+                  </div>
                 </div>
               </div>
 
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data.staffRevenue.rows} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-                    <YAxis
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
-                    />
-                    <Tooltip content={<StaffBarTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    {data.staffRevenue.staffKeys.map((k) => (
-                      <Bar key={k} dataKey={k} name={k} stackId="rev" fill={STAFF_COLORS[k] ?? "#9ca3af"} />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="px-1">
+                <div className="h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={data.staffRevenue.rows}
+                      margin={{ top: 8, right: 8, left: 18, bottom: 8 }}
+                      barCategoryGap="24%"
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis
+                        dataKey="period"
+                        interval={0}
+                        minTickGap={0}
+                        tick={{ fontSize: 11, fill: "#6b7280" }}
+                        axisLine={{ stroke: "#e5e7eb" }}
+                        tickLine={{ stroke: "#e5e7eb" }}
+                      />
+                      <YAxis
+                        width={40}
+                        tick={{ fontSize: 12, fill: "#6b7280" }}
+                        axisLine={{ stroke: "#e5e7eb" }}
+                        tickLine={{ stroke: "#e5e7eb" }}
+                        tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
+                      />
+                      <Tooltip content={<StaffBarTooltip />} />
+
+                      <Bar
+                        dataKey="Marco"
+                        name="Marco"
+                        stackId="rev"
+                        fill={STAFF_COLORS.Marco}
+                        radius={[0, 0, 0, 0]}
+                        maxBarSize={30}
+                      />
+                      <Bar
+                        dataKey="Francis"
+                        name="Francis"
+                        stackId="rev"
+                        fill={STAFF_COLORS.Francis}
+                        radius={[0, 0, 0, 0]}
+                        maxBarSize={30}
+                      />
+                      <Bar
+                        dataKey="Paul"
+                        name="Paul"
+                        stackId="rev"
+                        fill={STAFF_COLORS.Paul}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={30}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
+
+              <StaffRevenueLegend />
             </section>
 
-            {/* Cost Spread - filled pie */}
             <section className={card}>
               <div className={cardHeader}>
                 <div>
@@ -675,7 +736,6 @@ export default function ReportOverviewPage() {
           </div>
         </div>
 
-        {/* Employee Performance */}
         <section className={`mt-4 ${card}`}>
           <div className={cardHeader}>
             <div>
