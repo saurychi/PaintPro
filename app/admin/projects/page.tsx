@@ -11,9 +11,9 @@ import {
   Loader2,
 } from "lucide-react";
 import { PieChart, Pie, Cell } from "recharts";
-import ProgressMainSection, {
+import JobProgressCard, {
   type ProcessItem,
-} from "@/components/ProgressMainSection";
+} from "@/components/dashboard/jobProgressCard";
 
 const ACCENT = "#00c065";
 const GREEN = "#7ED957";
@@ -1301,7 +1301,7 @@ export default function AdminProjectsPage() {
 
         <div className="mt-6 grid h-[calc(100vh-112px)] grid-cols-1 gap-4 overflow-hidden lg:grid-cols-12 items-stretch">
           <div className="lg:col-span-9 h-full min-h-0 overflow-hidden">
-            <ProgressMainSection
+            <JobProgressCard
               selectedProject={selectedProject}
               loadingDetails={loadingDetails}
               navigating={loadingDetails}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, PieChart } from "lucide-react";
+import { type ProcessItem } from "@/components/dashboard/jobProgressCard";
 
 export type CostSlice = {
   label: string;
@@ -9,10 +10,38 @@ export type CostSlice = {
 };
 
 type Props = {
-  percentComplete: number;
-  currentTaskLabel?: string;
-  costItems: CostSlice[];
+  processItems?: ProcessItem[];
+  loadingDetails?: boolean;
+  projectId?: string | null;
 };
+
+function computeProgressFromItems(items: ProcessItem[]) {
+  let total = 0;
+  let done = 0;
+  let currentLabel = "";
+
+  function walk(item: ProcessItem) {
+    const isLeaf = !item.children || item.children.length === 0;
+    if (isLeaf) {
+      total++;
+      if (item.status === "done") done++;
+      else if (!currentLabel && item.status === "active") {
+        currentLabel = item.title;
+      }
+    } else {
+      for (const child of item.children!) walk(child);
+    }
+  }
+
+  for (const item of items) walk(item);
+
+  if (!currentLabel) {
+    currentLabel = items.find((item) => item.status === "active")?.title ?? "";
+  }
+
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  return { percent, currentLabel: currentLabel || "No active task" };
+}
 
 type SizeMode = "mini" | "short" | "compact" | "normal";
 
@@ -116,15 +145,25 @@ function AnalyticsRing({ percent, mode }: { percent: number; mode: SizeMode }) {
 function AnalyticsView({
   percentComplete,
   currentTaskLabel,
+  loading,
   mode,
 }: {
   percentComplete: number;
   currentTaskLabel?: string;
+  loading?: boolean;
   mode: SizeMode;
 }) {
   const isMini = mode === "mini";
   const isShort = mode === "short";
   const isTight = isMini || isShort;
+
+  if (loading) {
+    return (
+      <div className="flex h-full max-h-full min-h-0 items-center justify-center overflow-hidden rounded-xl border border-emerald-100 bg-emerald-50/20">
+        <span className="text-[12px] text-gray-400">Loading...</span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -250,9 +289,11 @@ function CostDonut({ items, mode }: { items: CostSlice[]; mode: SizeMode }) {
 
 function CostSpreadView({
   items,
+  loading,
   mode,
 }: {
   items: CostSlice[];
+  loading: boolean;
   mode: SizeMode;
 }) {
   const isMini = mode === "mini";
@@ -294,7 +335,17 @@ function CostSpreadView({
       <CostDonut items={items} mode={mode} />
 
       <div className="relative h-full min-h-0 min-w-0 flex-1 self-stretch overflow-hidden">
-        {normalized.length > 0 ? (
+        {loading ? (
+          <div className="flex h-full items-center">
+            <span className="text-[12px] text-gray-400">Loading...</span>
+          </div>
+        ) : normalized.length === 0 || total <= 0 ? (
+          <div className="flex h-full items-center">
+            <span className="text-[12px] text-gray-500">
+              No cost data available.
+            </span>
+          </div>
+        ) : (
           <div
             className={[
               "absolute inset-0 overflow-y-auto overflow-x-hidden",
@@ -347,10 +398,6 @@ function CostSpreadView({
               );
             })}
           </div>
-        ) : (
-          <div className="text-[12px] text-gray-500">
-            No cost data available.
-          </div>
         )}
       </div>
     </div>
@@ -358,9 +405,9 @@ function CostSpreadView({
 }
 
 export default function DashboardInsightCard({
-  percentComplete,
-  currentTaskLabel,
-  costItems,
+  processItems,
+  loadingDetails,
+  projectId,
 }: Props) {
   const sectionRef = useRef<HTMLElement | null>(null);
 
@@ -368,10 +415,22 @@ export default function DashboardInsightCard({
     "analytics",
   );
 
-  const [size, setSize] = useState({
-    width: 0,
-    height: 0,
-  });
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  const { percent: percentComplete, currentLabel: currentTaskLabel } =
+    useMemo(() => {
+      if (!processItems || processItems.length === 0) {
+        return { percent: 0, currentLabel: "No active task" };
+      }
+      return computeProgressFromItems(processItems);
+    }, [processItems]);
+  const [loadingCosts, setLoadingCosts] = useState(false);
+  const [costData, setCostData] = useState<{
+    materialsCost: number;
+    laborCost: number;
+    estimatedCost: number;
+    estimatedProfit: number;
+  } | null>(null);
 
   useEffect(() => {
     const element = sectionRef.current;
@@ -379,17 +438,68 @@ export default function DashboardInsightCard({
 
     const observer = new ResizeObserver(([entry]) => {
       const rect = entry.contentRect;
-
-      setSize({
-        width: rect.width,
-        height: rect.height,
-      });
+      setSize({ width: rect.width, height: rect.height });
     });
 
     observer.observe(element);
-
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    async function fetchCosts() {
+      if (!projectId) {
+        setCostData(null);
+        return;
+      }
+
+      try {
+        setLoadingCosts(true);
+        const response = await fetch(
+          `/api/planning/getProjectCosts?projectId=${projectId}`,
+        );
+        const data = await response.json();
+
+        if (!response.ok) {
+          setCostData(null);
+          return;
+        }
+
+        setCostData({
+          materialsCost: Number(data.materialsCost ?? 0),
+          laborCost: Number(data.laborCost ?? 0),
+          estimatedCost: Number(data.estimatedCost ?? 0),
+          estimatedProfit: Number(data.estimatedProfit ?? 0),
+        });
+      } catch {
+        setCostData(null);
+      } finally {
+        setLoadingCosts(false);
+      }
+    }
+
+    fetchCosts();
+  }, [projectId]);
+
+  const costItems = useMemo<CostSlice[]>(() => {
+    if (!costData) return [];
+
+    const { materialsCost, laborCost, estimatedCost, estimatedProfit } =
+      costData;
+
+    const basePrice = Math.max(
+      0,
+      estimatedCost - materialsCost - laborCost,
+    );
+
+    const slices: CostSlice[] = [
+      { label: "Labor", percent: laborCost },
+      { label: "Materials", percent: materialsCost },
+      { label: "Base Price", percent: basePrice },
+      { label: "Profit", percent: estimatedProfit },
+    ];
+
+    return slices.filter((s) => s.percent > 0);
+  }, [costData]);
 
   const mode = useMemo(
     () => getSizeMode(size.width, size.height),
@@ -470,10 +580,15 @@ export default function DashboardInsightCard({
             <AnalyticsView
               percentComplete={percentComplete}
               currentTaskLabel={currentTaskLabel}
+              loading={loadingDetails}
               mode={mode}
             />
           ) : (
-            <CostSpreadView items={costItems} mode={mode} />
+            <CostSpreadView
+              items={costItems}
+              loading={loadingCosts}
+              mode={mode}
+            />
           )}
         </div>
       </div>

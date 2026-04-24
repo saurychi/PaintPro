@@ -311,26 +311,6 @@ function getStepStatus(
   return "pending";
 }
 
-function getOverallProgress(projectStatus: string) {
-  const normalized = normalizeStatus(projectStatus);
-
-  if (normalized === "cancelled") return 0;
-
-  if (
-    normalized === "completed" ||
-    normalized === "in_progress" ||
-    normalized === "ready_to_start"
-  ) {
-    return 100;
-  }
-
-  const currentIndex = getCurrentWorkflowIndex(projectStatus);
-  const total = WORKFLOW_STEPS.length;
-
-  if (currentIndex <= 0) return 8;
-
-  return Math.max(8, Math.min(100, Math.round((currentIndex / total) * 100)));
-}
 
 function getStatusLabel(projectStatus: string) {
   const status = normalizeStatus(projectStatus);
@@ -980,15 +960,6 @@ export default function DashboardPage() {
     projectMeta.endDatetime,
   ]);
 
-  const progressPercent = getOverallProgress(selectedStatus);
-
-  const currentTaskLabel =
-    processItems.find((item) => item.status === "active")?.title ||
-    processItems
-      .flatMap((item) => item.children ?? [])
-      .find((item) => item.status === "active")?.title ||
-    "No active task";
-
   function toggleProcessRow(id: string) {
     setOpenProcessIds((prev) => {
       const next = new Set(prev);
@@ -1041,13 +1012,6 @@ export default function DashboardPage() {
    */
   const progressColumnWidth = "7fr";
   const sideColumnWidth = "3fr";
-
-  const jobCostSpreadItems = [
-    { label: "Labor", percent: 45 },
-    { label: "Materials", percent: 35 },
-    { label: "Equipment", percent: 10 },
-    { label: "Profit", percent: 10 },
-  ];
 
   return (
     <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
@@ -1112,9 +1076,9 @@ export default function DashboardPage() {
 
             <div className="min-h-0 overflow-hidden">
               <DashboardInsightCard
-                percentComplete={progressPercent}
-                currentTaskLabel={currentTaskLabel}
-                costItems={jobCostSpreadItems}
+                processItems={processItems}
+                loadingDetails={loadingProjects || loadingDetails}
+                projectId={selectedProjectId}
               />
             </div>
           </div>
