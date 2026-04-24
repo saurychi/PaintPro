@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Search, Filter, Plus, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+// ... Keep your type FilterItem, InventoryToolbarProps, and State logic exactly the same ...
 type FilterItem = {
   name: string
   items: string[]
@@ -74,7 +75,8 @@ export function InventoryToolbar({ onSearch, onCreate, onFilterChange }: Invento
             placeholder="Search"
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
-            className="w-full px-4 py-2.5 pl-10 bg-white border border-gray-200 rounded-full text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            // Fixed: Replaced hard borders with border-0 and shadow-sm
+            className="w-full px-4 py-2.5 pl-10 bg-white border-0 shadow-sm rounded-full text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           />
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         </div>
@@ -83,7 +85,7 @@ export function InventoryToolbar({ onSearch, onCreate, onFilterChange }: Invento
         <Button
           type="button"
           onClick={onCreate}
-          className="bg-green-500 hover:bg-green-600 text-white rounded-full px-4 py-2.5 flex items-center gap-2"
+          className="bg-green-500 hover:bg-green-600 text-white rounded-full px-4 py-2.5 flex items-center gap-2 shadow-sm border-0"
         >
           <Plus className="w-4 h-4" />
           New
@@ -94,16 +96,17 @@ export function InventoryToolbar({ onSearch, onCreate, onFilterChange }: Invento
           <button
             type="button"
             onClick={() => setIsFilterOpen((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            // Fixed: Added border-0 and shadow-sm here
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border-0 rounded-lg shadow-sm text-sm text-gray-600 hover:bg-gray-50 focus:outline-none"
           >
             <Filter className="w-4 h-4" />
             Filters
           </button>
 
           {isFilterOpen && (
-            <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+            <div className="absolute right-0 mt-2 w-64 bg-white border-0 rounded-lg shadow-lg z-50 overflow-hidden">
               {filterOptions.map((filter) => (
-                <div key={filter.name} className="border-b last:border-b-0">
+                <div key={filter.name} className="border-b border-gray-100 last:border-b-0">
                   {/* Filter Header */}
                   <button
                     type="button"

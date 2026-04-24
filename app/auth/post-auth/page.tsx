@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 
 type DbUser = {
   id: string
-  role: "client" | "staff" | "manager" | "admin"
+  role: "staff" | "manager" | "admin"
   status: "active" | "inactive" | "pending"
 }
 
@@ -17,6 +17,7 @@ export default function PostAuthPage() {
   useEffect(() => {
     const run = async () => {
       setErr("")
+
       try {
         const { data, error: sessErr } = await supabase.auth.getSession()
         if (sessErr) throw sessErr
@@ -28,6 +29,7 @@ export default function PostAuthPage() {
         }
 
         const userId = session.user.id
+        const email = (session.user.email || "").trim().toLowerCase()
 
         const { data: profile, error: profErr } = await supabase
           .from("users")
@@ -39,16 +41,11 @@ export default function PostAuthPage() {
 
         if (!profile) {
           try {
-            const { data: sess } = await supabase.auth.getSession()
-            const uid = sess.session?.user?.id
-
-            if (uid) {
-              await fetch("/api/auth/purge-uninvited", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: uid }),
-              })
-            }
+            await fetch("/api/auth/purge-uninvited", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId }),
+            })
           } catch (e) {
             console.error("Purge failed:", e)
           } finally {
@@ -64,11 +61,16 @@ export default function PostAuthPage() {
           return
         }
 
-        const email = (session.user.email || "").trim().toLowerCase()
+        if (profile.status === "pending") {
+          router.replace("/auth/setup-profile")
+          return
+        }
+
         if (email) {
           const { data: hasPending, error: invErr } = await supabase.rpc("has_pending_invite", {
             p_email: email,
           })
+
           if (invErr) throw invErr
 
           if (hasPending) {
@@ -87,7 +89,9 @@ export default function PostAuthPage() {
           return
         }
 
-        router.replace("/client")
+        await supabase.auth.signOut()
+        router.replace("/auth/signin?reason=invalid_role")
+        return
       } catch (e: any) {
         console.error(e)
         setErr(e?.message || "Failed to route your account.")
@@ -101,8 +105,8 @@ export default function PostAuthPage() {
     <div className="min-h-svh flex items-center justify-center bg-white px-6">
       <div className="flex flex-col items-center gap-4 text-center">
         <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin" />
-        <p className="text-sm text-gray-600">Setting up your session…</p>
-        {err && <p className="text-sm font-semibold text-red-600">{err}</p>}
+        <p className="text-sm text-gray-600">Setting up your session...</p>
+        {err ? <p className="text-sm font-semibold text-red-600">{err}</p> : null}
       </div>
     </div>
   )

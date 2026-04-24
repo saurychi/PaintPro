@@ -21,16 +21,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         get(name: string) {
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options: any) {
-          cookieStore.set({ name, value, ...options })
-        },
-        remove(name: string, options: any) {
-          try {
-            ;(cookieStore as any).delete({ name, ...options })
-          } catch {
-            cookieStore.delete(name)
-          }
-        },
+        set() {},
+        remove() {},
       },
     }
   )

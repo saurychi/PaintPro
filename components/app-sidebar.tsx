@@ -15,6 +15,9 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  Menu,
+  X,
 } from "lucide-react";
 
 import {
@@ -29,39 +32,116 @@ import {
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 
+type SubItem = {
+  title: string;
+  url: string;
+  key: string;
+  matchUrls?: string[];
+};
+
 type Item = {
   title: string;
   url: string;
   icon: React.ElementType;
   key: string;
+  subItems?: SubItem[];
 };
 
 type Role = "admin" | "manager" | "staff" | "client";
 
 const adminItems: Item[] = [
-  { key: "dashboard", title: "Dashboard", url: "/admin", icon: Home },
+  {
+    key: "dashboard",
+    title: "Dashboard",
+    url: "/admin",
+    icon: Home,
+    subItems: [
+      {
+        key: "create-job",
+        title: "Create Job",
+        url: "/admin/job-creation/basic-details",
+        matchUrls: ["/admin/job-creation"],
+      },
+      {
+        key: "projects",
+        title: "Projects",
+        url: "/admin/projects",
+        matchUrls: ["/admin/projects"],
+      },
+    ],
+  },
   { key: "staff", title: "Staff", url: "/admin/staff", icon: Users },
-  { key: "schedule", title: "Schedule", url: "/admin/schedule", icon: CalendarDays },
+  {
+    key: "schedule",
+    title: "Schedule",
+    url: "/admin/schedule",
+    icon: CalendarDays,
+  },
   { key: "report", title: "Report", url: "/admin/report", icon: BarChart3 },
-  { key: "inventory", title: "Inventory", url: "/admin/inventory", icon: Boxes },
-  { key: "documents", title: "Documents", url: "/admin/documents", icon: FileText },
-  { key: "messages", title: "Messages", url: "/admin/messages", icon: MessageSquare },
-  { key: "settings", title: "Settings", url: "/admin/settings", icon: Settings },
+  {
+    key: "inventory",
+    title: "Inventory",
+    url: "/admin/inventory",
+    icon: Boxes,
+  },
+  {
+    key: "documents",
+    title: "Documents",
+    url: "/admin/documents",
+    icon: FileText,
+  },
+  {
+    key: "messages",
+    title: "Messages",
+    url: "/admin/messages",
+    icon: MessageSquare,
+  },
+  {
+    key: "settings",
+    title: "Settings",
+    url: "/admin/settings",
+    icon: Settings,
+  },
 ];
 
 const staffItems: Item[] = [
   { key: "dashboard", title: "Dashboard", url: "/staff", icon: Home },
   { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
   { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
-  { key: "settings", title: "Settings", url: "/staff/settings", icon: Settings },
+  {
+    key: "settings",
+    title: "Settings",
+    url: "/staff/settings",
+    icon: Settings,
+  },
 ];
 
 const clientItems: Item[] = [
   { key: "report", title: "Report", url: "/client", icon: BarChart3 },
-  { key: "messages", title: "Messages", url: "/client/messages", icon: MessageSquare },
-  { key: "documents", title: "Documents", url: "/client/documents", icon: FileText },
-  { key: "schedule", title: "Schedule", url: "/client/schedule", icon: CalendarDays },
-  { key: "settings", title: "Settings", url: "/client/settings", icon: Settings },
+  {
+    key: "messages",
+    title: "Messages",
+    url: "/client/messages",
+    icon: MessageSquare,
+  },
+  {
+    key: "documents",
+    title: "Documents",
+    url: "/client/documents",
+    icon: FileText,
+  },
+  {
+    key: "schedule",
+    title: "Schedule",
+    url: "/client/schedule",
+    icon: CalendarDays,
+  },
+  {
+    key: "settings",
+    title: "Settings",
+    url: "/client/settings",
+    icon: Settings,
+  },
 ];
 
 const ITEMS_BY_ROLE: Record<Role, Item[]> = {
@@ -75,6 +155,14 @@ function isRouteActive(pathname: string, itemUrl: string) {
   const isRootRoute = itemUrl.split("/").length === 2;
   if (isRootRoute) return pathname === itemUrl;
   return pathname === itemUrl || pathname.startsWith(itemUrl + "/");
+}
+
+function isSubRouteActive(pathname: string, subItem: SubItem) {
+  if (isRouteActive(pathname, subItem.url)) return true;
+
+  return (subItem.matchUrls ?? []).some((matchUrl) => {
+    return pathname === matchUrl || pathname.startsWith(matchUrl + "/");
+  });
 }
 
 type AppSidebarProps = {
@@ -104,7 +192,8 @@ const AVATAR_BG = [
 
 function stableAvatarClass(seed: string) {
   let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < seed.length; i++)
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   return AVATAR_BG[hash % AVATAR_BG.length];
 }
 
@@ -136,6 +225,11 @@ export function AppSidebar({ role }: AppSidebarProps) {
   const menuItems = ITEMS_BY_ROLE[role];
 
   const [user, setUser] = React.useState<AppUser | null>(null);
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [openMenus, setOpenMenus] = React.useState<Record<string, boolean>>({
+    dashboard:
+      pathname === "/admin" || pathname.startsWith("/admin/job-creation"),
+  });
 
   React.useEffect(() => {
     let alive = true;
@@ -161,8 +255,9 @@ export function AppSidebar({ role }: AppSidebarProps) {
         id: authUser.id,
         username: row?.username ?? authUser.user_metadata?.username ?? null,
         email: row?.email ?? authUser.email ?? null,
-        role: row?.role ?? (authUser.user_metadata?.role ?? null),
-        profile_image_url: row?.profile_image_url ?? (authUser.user_metadata?.avatar_url ?? null),
+        role: row?.role ?? authUser.user_metadata?.role ?? null,
+        profile_image_url:
+          row?.profile_image_url ?? authUser.user_metadata?.avatar_url ?? null,
       });
     };
 
@@ -178,147 +273,464 @@ export function AppSidebar({ role }: AppSidebarProps) {
     };
   }, []);
 
-  const displayName = user?.username || (user?.email ? user.email.split("@")[0] : "");
+  const displayName =
+    user?.username || (user?.email ? user.email.split("@")[0] : "");
   const letter = firstLetter(displayName || user?.email);
   const avatarSeed = user?.id || user?.email || displayName || "seed";
   const avatarClass = stableAvatarClass(avatarSeed);
 
   const effectiveRole =
-    (user?.role === "admin" || user?.role === "manager" || user?.role === "staff" || user?.role === "client"
+    (user?.role === "admin" ||
+    user?.role === "manager" ||
+    user?.role === "staff" ||
+    user?.role === "client"
       ? user.role
       : role) || role;
 
+  function toggleMenu(key: string) {
+    setOpenMenus((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }
+
   return (
-    <Sidebar
-      collapsible="icon"
-      className={cn("fixed inset-y-0 left-0 z-40", "border-r border-gray-200/60")}
-    >
+    <>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
-        className={cn(
-          "absolute z-50",
-          "top-4 -right-4",
-          "h-8 w-9",
-          "border border-gray-200/60 bg-white",
-          "grid place-items-center text-gray-400 shadow-sm hover:bg-gray-50",
-          "flex justify-between content-center"
-        )}
-      >
-        <ChevronLeft className="h-5" />
-        <ChevronRight className="h-5" />
+        onClick={() => setMobileOpen(true)}
+        aria-label="Open mobile menu"
+        className="fixed left-4 top-4 z-[60] inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 md:hidden">
+        <Menu className="h-5 w-5" />
       </button>
 
-      <SidebarHeader className="px-4 py-4">
-        <div className={cn("flex items-center", open ? "gap-3" : "justify-center")}>
-          <Image
-            src="/paint_pro_logo.png"
-            alt="Paul Jackman logo"
-            width={36}
-            height={36}
-            className="object-contain"
-            priority
+      {mobileOpen ? (
+        <div className="fixed inset-0 z-[70] md:hidden">
+          <button
+            type="button"
+            aria-label="Close mobile menu overlay"
+            onClick={() => setMobileOpen(false)}
+            className="absolute inset-0 bg-black/35"
           />
 
-          {open && (
-            <div className="leading-tight">
-              <div className="text-xs font-semibold text-gray-700">PAUL</div>
-              <div className="text-xs font-semibold text-gray-700">JACKMAN</div>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 h-px w-full bg-gray-200/60" />
-      </SidebarHeader>
-
-      {/* IMPORTANT: make SidebarContent a full-height flex column so collapsed does not overlap */}
-      <SidebarContent className="flex h-full flex-col px-2 py-4">
-        <SidebarMenu className={cn("space-y-1 flex", open ? "" : "items-center")}>
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = isRouteActive(pathname, item.url);
-
-            return (
-              <SidebarMenuItem key={item.key}>
-                <SidebarMenuButton
-                  asChild
-                  tooltip={item.title}
-                  className={cn(isActive ? "text-white hover:text-[#00BF63]" : "text-gray-500")}
-                >
-                  <Link
-                    href={item.url}
-                    className={cn(
-                      "w-full overflow-visible",
-                      open
-                        ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium"
-                        : cn(
-                            "flex h-14 items-center justify-center rounded-md",
-                            "[&>svg]:!h-5 [&>svg]:!w-5"
-                          ),
-                      isActive && "bg-[#00BF63]"
-                    )}
-                  >
-                    <Icon className={cn(open ? "h-5 w-5" : "!h-5 !w-5")} />
-                    {open && <span className="truncate">{item.title}</span>}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            );
-          })}
-        </SidebarMenu>
-
-        {/* Divider only, no extra container */}
-        <div className="mt-auto px-2 pt-4">
-          <div className="h-px w-full bg-gray-200/60" />
-
-          <div className={cn("mt-4", open ? "flex items-center gap-3" : "grid place-items-center")}>
-            {/* Avatar */}
-            <div
-              className={cn(
-                "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
-                !user?.profile_image_url && avatarClass
-              )}
-              aria-label="User avatar"
-              title={displayName || user?.email || "User"}
-            >
-              {user?.profile_image_url ? (
+          <div className="absolute inset-y-0 left-0 flex w-[280px] max-w-[85vw] flex-col border-r border-gray-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between px-4 py-4">
+              <div className="flex items-center gap-3">
                 <Image
-                  src={user.profile_image_url}
-                  alt="Profile"
-                  fill
-                  className="object-cover"
-                  sizes="36px"
+                  src="/paint_pro_logo.png"
+                  alt="Paul Jackman logo"
+                  width={34}
+                  height={34}
+                  className="object-contain"
+                  priority
                 />
-              ) : (
-                <div className="grid h-full w-full place-items-center text-sm font-semibold">
-                  {letter}
+                <div className="leading-tight">
+                  <div className="text-xs font-semibold text-gray-700">
+                    PAUL
+                  </div>
+                  <div className="text-xs font-semibold text-gray-700">
+                    JACKMAN
+                  </div>
                 </div>
-              )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close mobile menu"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-all duration-200 hover:bg-gray-50">
+                <X className="h-4 w-4" />
+              </button>
             </div>
+
+            <div className="h-px w-full bg-gray-200/60" />
+
+            <div className="flex-1 overflow-y-auto px-3 py-4">
+              <div className="space-y-1">
+                {menuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = isRouteActive(pathname, item.url);
+                  const hasSubItems =
+                    Array.isArray(item.subItems) && item.subItems.length > 0;
+                  const isSubItemActive =
+                    hasSubItems &&
+                    item.subItems!.some((subItem) =>
+                      isSubRouteActive(pathname, subItem),
+                    );
+                  const isExpanded = Boolean(openMenus[item.key]);
+
+                  return (
+                    <div key={item.key}>
+                      {hasSubItems ? (
+                        <div>
+                          <div
+                            className={cn(
+                              "flex items-center rounded-xl transition-all duration-200",
+                              isActive || isSubItemActive
+                                ? "bg-[#00BF63] text-white shadow-sm"
+                                : "text-gray-600 hover:bg-gray-50",
+                            )}>
+                            <Link
+                              href={item.url}
+                              onClick={() => setMobileOpen(false)}
+                              className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-sm font-medium">
+                              <Icon className="h-5 w-5 shrink-0" />
+                              <span className="truncate">{item.title}</span>
+                            </Link>
+
+                            <button
+                              type="button"
+                              onClick={() => toggleMenu(item.key)}
+                              className={cn(
+                                "mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md transition-all duration-200",
+                                isActive || isSubItemActive
+                                  ? "text-white/90 hover:bg-white/10"
+                                  : "text-gray-500 hover:bg-gray-100",
+                              )}
+                              aria-label={
+                                isExpanded
+                                  ? `Collapse ${item.title}`
+                                  : `Expand ${item.title}`
+                              }>
+                              <ChevronDown
+                                className={cn(
+                                  "h-4 w-4 transition-transform duration-300",
+                                  isExpanded ? "rotate-180" : "rotate-0",
+                                )}
+                              />
+                            </button>
+                          </div>
+
+                          <div
+                            className={cn(
+                              "ml-4 overflow-hidden border-l border-gray-200 pl-3 transition-all duration-300 ease-out",
+                              isExpanded
+                                ? "mt-1 max-h-40 opacity-100"
+                                : "max-h-0 opacity-0",
+                            )}>
+                            <div className="space-y-1 py-1">
+                              {item.subItems!.map((subItem) => {
+                                const subActive = isSubRouteActive(
+                                  pathname,
+                                  subItem,
+                                );
+
+                                return (
+                                  <Link
+                                    key={subItem.key}
+                                    href={subItem.url}
+                                    onClick={() => setMobileOpen(false)}
+                                    className={cn(
+                                      "flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                                      subActive
+                                        ? "bg-[#00BF63]/10 text-[#00BF63]"
+                                        : "text-gray-500 hover:bg-gray-50",
+                                    )}>
+                                    {subItem.title}
+                                  </Link>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <Link
+                          href={item.url}
+                          onClick={() => setMobileOpen(false)}
+                          className={cn(
+                            "flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200",
+                            isActive
+                              ? "bg-[#00BF63] text-white shadow-sm"
+                              : "text-gray-600 hover:bg-gray-50",
+                          )}>
+                          <Icon className="h-5 w-5 shrink-0" />
+                          <span className="truncate">{item.title}</span>
+                        </Link>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200/60 px-4 py-4">
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
+                    !user?.profile_image_url && avatarClass,
+                  )}>
+                  {user?.profile_image_url ? (
+                    <Image
+                      src={user.profile_image_url}
+                      alt="Profile"
+                      fill
+                      className="object-cover"
+                      sizes="36px"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-sm font-semibold">
+                      {letter}
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-gray-900">
+                    {displayName || "User"}
+                  </div>
+                  <div className="truncate text-xs text-gray-500">
+                    {user?.email || ""}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <Sidebar
+        collapsible="icon"
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 max-md:hidden",
+          "border-r border-gray-200/60",
+        )}>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
+          className={cn(
+            "absolute z-50 max-md:hidden",
+            "top-4 -right-4",
+            "h-8 w-9",
+            "border border-gray-200/60 bg-white",
+            "grid place-items-center text-gray-400 shadow-sm",
+            "transition-all duration-200 ease-out hover:scale-105 hover:bg-gray-50 hover:shadow-md active:scale-95",
+            "flex justify-between content-center",
+          )}>
+          <ChevronLeft className="h-5 transition-transform duration-200" />
+          <ChevronRight className="h-5 transition-transform duration-200" />
+        </button>
+
+        <SidebarHeader className="px-4 py-4">
+          <div
+            className={cn(
+              "flex items-center",
+              open ? "gap-3" : "justify-center",
+            )}>
+            <Image
+              src="/paint_pro_logo.png"
+              alt="Paul Jackman logo"
+              width={36}
+              height={36}
+              className="object-contain"
+              priority
+            />
 
             {open && (
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-gray-900">
-                  {displayName || "User"}
-                </div>
-                <div className="truncate text-xs text-gray-500">{user?.email || ""}</div>
-
-                <div className="mt-2">
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
-                      roleBadgeClass(effectiveRole)
-                    )}
-                  >
-                    {effectiveRole.toUpperCase()}
-                  </span>
+              <div className="leading-tight">
+                <div className="text-xs font-semibold text-gray-700">PAUL</div>
+                <div className="text-xs font-semibold text-gray-700">
+                  JACKMAN
                 </div>
               </div>
             )}
           </div>
-        </div>
-      </SidebarContent>
-    </Sidebar>
+
+          <div className="mt-4 h-px w-full bg-gray-200/60" />
+        </SidebarHeader>
+
+        {/* IMPORTANT: make SidebarContent a full-height flex column so collapsed does not overlap */}
+        <SidebarContent className="flex h-full flex-col px-2 py-4">
+          <SidebarMenu
+            className={cn(
+              "space-y-1 flex",
+              open ? "w-full flex-col" : "items-center",
+            )}>
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = isRouteActive(pathname, item.url);
+              const hasSubItems =
+                open &&
+                Array.isArray(item.subItems) &&
+                item.subItems.length > 0;
+              const isSubItemActive =
+                hasSubItems &&
+                item.subItems!.some((subItem) =>
+                  isSubRouteActive(pathname, subItem),
+                );
+              const isExpanded = Boolean(openMenus[item.key]);
+
+              return (
+                <SidebarMenuItem
+                  key={item.key}
+                  className={cn(open ? "w-full" : "")}>
+                  {hasSubItems ? (
+                    <div className="w-full">
+                      <div
+                        className={cn(
+                          "flex h-10 items-center rounded-md transition-all duration-200 ease-out",
+                          "hover:scale-[1.01]",
+                          isActive || isSubItemActive
+                            ? "bg-[#00BF63] text-white shadow-sm"
+                            : "text-gray-500 hover:bg-gray-50 hover:shadow-sm",
+                        )}>
+                        <Link
+                          href={item.url}
+                          className="flex min-w-0 flex-1 items-center gap-3 px-3 text-sm font-medium transition-all duration-200">
+                          <Icon className="h-5 w-5 shrink-0" />
+                          <span className="truncate">{item.title}</span>
+                        </Link>
+
+                        <button
+                          type="button"
+                          onClick={() => toggleMenu(item.key)}
+                          className={cn(
+                            "mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-out",
+                            "hover:scale-105 active:scale-95",
+                            isActive || isSubItemActive
+                              ? "text-white/90 hover:bg-white/10"
+                              : "text-gray-500 hover:bg-gray-100",
+                          )}
+                          aria-label={
+                            isExpanded
+                              ? `Collapse ${item.title}`
+                              : `Expand ${item.title}`
+                          }>
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 transition-transform duration-300 ease-out",
+                              isExpanded ? "rotate-180" : "rotate-0",
+                            )}
+                          />
+                        </button>
+                      </div>
+
+                      <div
+                        className={cn(
+                          "mt-1 ml-4 overflow-hidden border-l border-gray-200 pl-3 transition-all duration-300 ease-out",
+                          isExpanded
+                            ? "max-h-40 opacity-100 translate-y-0"
+                            : "max-h-0 opacity-0 -translate-y-1",
+                        )}>
+                        <div className="space-y-1 py-1">
+                          {item.subItems!.map((subItem) => {
+                            const subActive = isSubRouteActive(
+                              pathname,
+                              subItem,
+                            );
+
+                            return (
+                              <Link
+                                key={subItem.key}
+                                href={subItem.url}
+                                className={cn(
+                                  "flex h-9 items-center rounded-md px-3 text-sm font-medium transition-all duration-200 ease-out",
+                                  "hover:translate-x-1 hover:scale-[1.01]",
+                                  subActive
+                                    ? "bg-[#00BF63]/10 text-[#00BF63]"
+                                    : "text-gray-500 hover:bg-gray-50",
+                                )}>
+                                {subItem.title}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <SidebarMenuButton
+                      asChild
+                      tooltip={item.title}
+                      className={cn(
+                        isActive
+                          ? "text-white hover:text-[#00BF63]"
+                          : "text-gray-500",
+                      )}>
+                      <Link
+                        href={item.url}
+                        className={cn(
+                          "w-full overflow-visible transition-all duration-200 ease-out",
+                          open
+                            ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium hover:scale-[1.01]"
+                            : cn(
+                                "flex h-14 items-center justify-center rounded-md hover:scale-105",
+                                "[&>svg]:h-5! [&>svg]:w-5!",
+                              ),
+                          isActive
+                            ? "bg-[#00BF63] text-white shadow-sm"
+                            : "hover:bg-gray-50 hover:shadow-sm",
+                        )}>
+                        <Icon
+                          className={cn(
+                            open ? "h-5 w-5" : "h-5! w-5!",
+                            "transition-transform duration-200",
+                          )}
+                        />
+                        {open && <span className="truncate">{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  )}
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+
+          {/* Divider only, no extra container */}
+          <div className="mt-auto px-2 pt-4">
+            <div className="h-px w-full bg-gray-200/60" />
+
+            <div
+              className={cn(
+                "mt-4",
+                open ? "flex items-center gap-3" : "grid place-items-center",
+              )}>
+              {/* Avatar */}
+              <div
+                className={cn(
+                  "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
+                  !user?.profile_image_url && avatarClass,
+                )}
+                aria-label="User avatar"
+                title={displayName || user?.email || "User"}>
+                {user?.profile_image_url ? (
+                  <Image
+                    src={user.profile_image_url}
+                    alt="Profile"
+                    fill
+                    className="object-cover"
+                    sizes="36px"
+                  />
+                ) : (
+                  <div className="grid h-full w-full place-items-center text-sm font-semibold">
+                    {letter}
+                  </div>
+                )}
+              </div>
+
+              {open && (
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-gray-900">
+                    {displayName || "User"}
+                  </div>
+                  <div className="truncate text-xs text-gray-500">
+                    {user?.email || ""}
+                  </div>
+
+                  <div className="mt-2">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                        roleBadgeClass(effectiveRole),
+                      )}>
+                      {effectiveRole.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </SidebarContent>
+      </Sidebar>
+    </>
   );
 }

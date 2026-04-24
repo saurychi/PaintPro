@@ -1,223 +1,224 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useRef, useState } from "react";
+import { ChevronRight, Loader2, Plus } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
+import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
+import AddMaterialModal from "@/components/project-creation/AddMaterialModal";
 
 type StepStatus = "done" | "active" | "pending";
 
 type MaterialItem = {
   id: string;
-  status: StepStatus;
-
-  // view card
   name: string;
-  idNo: string;
   quantity: number;
-  unitCost: string;
-  totalCost: string;
-  imageUrl: string;
-
-  // edit card fields
-  materialLabel: string;
-  editQuantity: number;
-  editTotalCost: string;
-  editImageUrl: string;
+  unitCost: number;
+  estimatedCost: number;
 };
 
 type ServiceGroup = {
   id: string;
   title: string;
   status: StepStatus;
+  projectTaskId: string;
   children: MaterialItem[];
 };
 
-const GREEN = "#7ED957";
-const GREEN_SOFT = "#DFF6D5";
-const BORDER = "border-gray-300";
-
-type EditDraft = {
-  materialLabel: string;
-  quantity: number;
+type MaterialOption = {
+  id: string;
+  name: string;
+  unitCost: number;
 };
 
-const SERVICES: ServiceGroup[] = [
-  {
-    id: "svc-wallpaper",
-    title: "Wallpapering",
-    status: "active",
-    children: [
-      {
-        id: "mat-wall-1",
-        status: "done",
-        name: "Taubmans Endure Interior – Native Ivy (4L)",
-        idNo: "#001-005-05A-001",
-        quantity: 2,
-        unitCost: "$25",
-        totalCost: "$50",
-        imageUrl:
-          "https://images.unsplash.com/photo-1586864387967-d02ef85d93e8?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Gilly’s Liquid Beeswax Polish (250ml)",
-        editQuantity: 2,
-        editTotalCost: "$100",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1580915411954-282cb1a5d780?auto=format&fit=crop&w=240&q=70",
-      },
-      {
-        id: "mat-wall-2",
-        status: "pending",
-        name: "Dulux Wash & Wear – White on White (10L)",
-        idNo: "#001-006-11B-009",
-        quantity: 1,
-        unitCost: "$89",
-        totalCost: "$89",
-        imageUrl:
-          "https://images.unsplash.com/photo-1616628188550-808b75d69d0b?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Wallpaper Adhesive – Heavy Duty (5kg)",
-        editQuantity: 1,
-        editTotalCost: "$35",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1615485737651-580a6f2d8d5c?auto=format&fit=crop&w=240&q=70",
-      },
-      {
-        id: "mat-wall-3",
-        status: "active",
-        name: "Painter’s Masking Tape – 48mm (3 rolls)",
-        idNo: "#009-221-77T-013",
-        quantity: 1,
-        unitCost: "$12",
-        totalCost: "$12",
-        imageUrl:
-          "https://images.unsplash.com/photo-1611095564985-8970c5d3a9e4?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Edge Sealer – Clear (500ml)",
-        editQuantity: 1,
-        editTotalCost: "$18",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1586201375761-83865001e31b?auto=format&fit=crop&w=240&q=70",
-      },
-    ],
-  },
-  {
-    id: "svc-spray",
-    title: "Spray or Brush Roll Finish",
-    status: "pending",
-    children: [
-      {
-        id: "mat-spray-1",
-        status: "pending",
-        name: "Boysen Latex Paint – Meadow Green (4L)",
-        idNo: "#002-100-03G-120",
-        quantity: 3,
-        unitCost: "$21",
-        totalCost: "$63",
-        imageUrl:
-          "https://images.unsplash.com/photo-1562259929-b4e1fd3aef09?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Paint Thinner (1L)",
-        editQuantity: 1,
-        editTotalCost: "$7",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1616627988040-6e2f615e8c2e?auto=format&fit=crop&w=240&q=70",
-      },
-      {
-        id: "mat-spray-2",
-        status: "pending",
-        name: "Roller Set – 9 inch (with tray)",
-        idNo: "#003-301-09R-001",
-        quantity: 1,
-        unitCost: "$15",
-        totalCost: "$15",
-        imageUrl:
-          "https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Extension Pole – 2m",
-        editQuantity: 1,
-        editTotalCost: "$14",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=240&q=70",
-      },
-    ],
-  },
-  {
-    id: "svc-prep",
-    title: "Surface Preparation",
-    status: "done",
-    children: [
-      {
-        id: "mat-prep-1",
-        status: "done",
-        name: "Wall Putty – Quick Dry (2kg)",
-        idNo: "#004-410-02P-020",
-        quantity: 2,
-        unitCost: "$6",
-        totalCost: "$12",
-        imageUrl:
-          "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Sandpaper Pack – 120 grit (10 pcs)",
-        editQuantity: 1,
-        editTotalCost: "$5",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1581579186898-2c32f1d7a1a3?auto=format&fit=crop&w=240&q=70",
-      },
-      {
-        id: "mat-prep-2",
-        status: "done",
-        name: "Drop Cloth – Heavy Duty (3x4m)",
-        idNo: "#004-420-DC-002",
-        quantity: 1,
-        unitCost: "$10",
-        totalCost: "$10",
-        imageUrl:
-          "https://images.unsplash.com/photo-1616628188550-808b75d69d0b?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Painter’s Gloves (pair)",
-        editQuantity: 2,
-        editTotalCost: "$4",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1583947215259-38e31be8751f?auto=format&fit=crop&w=240&q=70",
-      },
-    ],
-  },
-  {
-    id: "svc-cleanup",
-    title: "Cleanup and Handover",
-    status: "pending",
-    children: [
-      {
-        id: "mat-clean-1",
-        status: "pending",
-        name: "Trash Bags – Contractor Grade (pack)",
-        idNo: "#008-900-TB-001",
-        quantity: 1,
-        unitCost: "$8",
-        totalCost: "$8",
-        imageUrl:
-          "https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=240&q=70",
-        materialLabel: "Floor Cleaner Concentrate (1L)",
-        editQuantity: 1,
-        editTotalCost: "$9",
-        editImageUrl:
-          "https://images.unsplash.com/photo-1586201375761-83865001e31b?auto=format&fit=crop&w=240&q=70",
-      },
-    ],
-  },
-];
+const ACCENT = "#00c065";
+const ACCENT_HOVER = "#00a054";
+const ACCENT_SOFT = "#e6f9ef";
+const ACCENT_BORDER = "#b7efcf";
+const BORDER = "border-gray-200";
 
 export default function MaterialsAssignment() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId") || "";
 
-  const [services, setServices] = useState<ServiceGroup[]>(SERVICES);
+  const [services, setServices] = useState<ServiceGroup[]>([]);
+  const [loadingMaterials, setLoadingMaterials] = useState(true);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
 
-  // expanded by default
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(services.map((s) => s.id))
+  const [materialModalOpen, setMaterialModalOpen] = useState(false);
+  const [activeMainTaskId, setActiveMainTaskId] = useState<string>("");
+  const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
+  const [loadingMaterialOptions, setLoadingMaterialOptions] = useState(false);
+
+  const [jobNo, setJobNo] = useState("—");
+  const [siteName, setSiteName] = useState("Project details unavailable");
+  const [isDirty, setIsDirty] = useState(false);
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"next" | "back" | null>(
+    null,
   );
+  const [isNavigatingNext, setIsNavigatingNext] = useState(false);
 
-  const [editingStepId, setEditingStepId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, EditDraft>>({});
+  const undoStackRef = useRef<ServiceGroup[][]>([]);
+  const redoStackRef = useRef<ServiceGroup[][]>([]);
 
-  const materialOptions = useMemo(() => {
-    const s = new Set<string>();
-    services.forEach((g) => g.children.forEach((c) => s.add(c.materialLabel)));
-    return Array.from(s);
-  }, [services]);
+  function cloneServicesState(value: ServiceGroup[]) {
+    return value.map((group) => ({
+      ...group,
+      children: group.children.map((item) => ({ ...item })),
+    }));
+  }
+
+  function updateServicesWithHistory(
+    updater: (prev: ServiceGroup[]) => ServiceGroup[],
+  ) {
+    setServices((prev) => {
+      const prevSnapshot = cloneServicesState(prev);
+      const next = updater(prev);
+      const nextSnapshot = cloneServicesState(next);
+
+      const prevSerialized = JSON.stringify(prevSnapshot);
+      const nextSerialized = JSON.stringify(nextSnapshot);
+
+      if (prevSerialized !== nextSerialized) {
+        undoStackRef.current.push(prevSnapshot);
+        redoStackRef.current = [];
+      }
+
+      return next;
+    });
+  }
+
+  function handleUndoServices() {
+    if (undoStackRef.current.length === 0) return;
+
+    setServices((current) => {
+      const currentSnapshot = cloneServicesState(current);
+      const previousSnapshot = undoStackRef.current.pop();
+
+      if (!previousSnapshot) return current;
+
+      redoStackRef.current.push(currentSnapshot);
+      return previousSnapshot;
+    });
+  }
+
+  useEffect(() => {
+    async function loadProjectTaskMaterials() {
+      if (!projectId) {
+        setLoadingMaterials(false);
+        return;
+      }
+
+      try {
+        setLoadingMaterials(true);
+
+        const response = await fetch(
+          `/api/planning/getProjectTaskMaterials?projectId=${projectId}`,
+        );
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to load project materials.");
+        }
+
+        setJobNo(data?.project?.project_code || "—");
+        setSiteName(data?.project?.title || "Project details unavailable");
+
+        const rows = Array.isArray(data?.materials) ? data.materials : [];
+        const projectTasks = Array.isArray(data?.projectTasks)
+          ? data.projectTasks
+          : [];
+
+        const groupedMap = new Map<string, ServiceGroup>();
+
+        for (const row of projectTasks) {
+          const groupId = row.main_task_id || row.project_task_id;
+
+          groupedMap.set(groupId, {
+            id: groupId,
+            title: row.main_task_name || "Main Task",
+            status: "pending",
+            projectTaskId: row.project_task_id,
+            children: [],
+          });
+        }
+
+        for (const row of rows) {
+          const groupId = row.main_task_id || row.project_task_id;
+          const existingGroup = groupedMap.get(groupId);
+
+          if (existingGroup) {
+            existingGroup.children.push({
+              id: row.project_task_material_id,
+              name: row.material_name,
+              quantity: Number(row.quantity ?? 0),
+              unitCost: Number(row.material_unit_cost ?? 0),
+              estimatedCost: Number(row.estimated_cost ?? 0),
+            });
+            continue;
+          }
+
+          groupedMap.set(groupId, {
+            id: groupId,
+            title: row.main_task_name || "Main Task",
+            status: "pending",
+            projectTaskId: row.project_task_id,
+            children: [
+              {
+                id: row.project_task_material_id,
+                name: row.material_name,
+                quantity: Number(row.quantity ?? 0),
+                unitCost: Number(row.material_unit_cost ?? 0),
+                estimatedCost: Number(row.estimated_cost ?? 0),
+              },
+            ],
+          });
+        }
+
+        const groupedServices = Array.from(groupedMap.values());
+
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+      } catch (error: any) {
+        toast.error(error?.message || "Failed to load project materials.");
+      } finally {
+        setLoadingMaterials(false);
+      }
+    }
+
+    loadProjectTaskMaterials();
+  }, [projectId]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+
+      const isTypingElement =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        target?.isContentEditable;
+
+      if (isTypingElement) return;
+
+      const isUndoShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "z";
+
+      if (!isUndoShortcut) return;
+
+      event.preventDefault();
+      handleUndoServices();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const toggleGroup = (groupId: string) => {
     setExpanded((prev) => {
@@ -226,283 +227,571 @@ export default function MaterialsAssignment() {
       else next.add(groupId);
       return next;
     });
-    setEditingStepId(null);
   };
 
-  const startEdit = (item: MaterialItem) => {
-    setEditingStepId(item.id);
-    setDrafts((prev) => {
-      if (prev[item.id]) return prev;
-      return {
-        ...prev,
-        [item.id]: {
-          materialLabel: item.materialLabel,
-          quantity: item.editQuantity,
-        },
-      };
-    });
-  };
+  function handleOpenCreateTaskModal() {
+    setCreateTaskModalOpen(true);
+  }
 
-  const setDraft = (id: string, patch: Partial<EditDraft>) => {
-    setDrafts((prev) => ({
-      ...prev,
-      [id]: {
-        materialLabel: prev[id]?.materialLabel ?? "",
-        quantity: prev[id]?.quantity ?? 1,
-        ...patch,
-      },
-    }));
-  };
+  function handleCloseCreateTaskModal() {
+    setCreateTaskModalOpen(false);
+  }
 
-  const doneEditUI = () => setEditingStepId(null);
+  async function handleCreateTask(payload: {
+    name: string;
+    sortOrder: string;
+    subTasks: {
+      description: string;
+      sortOrder: string;
+      materialIds: string[];
+      equipmentIds: string[];
+    }[];
+  }) {
+    console.log("Create task payload:", payload);
+    setCreateTaskModalOpen(false);
+  }
 
-  const deleteItemUI = (id: string) => {
-    // UI only: remove from state so it feels real
-    setServices((prev) =>
-      prev.map((g) => ({ ...g, children: g.children.filter((c) => c.id !== id) }))
+  async function handleOpenAddMaterialModal(groupId: string) {
+    setActiveMainTaskId(groupId);
+    setMaterialModalOpen(true);
+
+    try {
+      setLoadingMaterialOptions(true);
+
+      const response = await fetch("/api/planning/getSubTaskResourceOptions");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to load material options.");
+      }
+
+      const options = Array.isArray(data?.materials)
+        ? data.materials.map((item: any) => ({
+            id: item.id,
+            name: item.name,
+            unitCost: Number(item.unit_cost ?? 0),
+          }))
+        : [];
+
+      setMaterialOptions(options);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load material options.");
+    } finally {
+      setLoadingMaterialOptions(false);
+    }
+  }
+
+  function handleCloseAddMaterialModal() {
+    setMaterialModalOpen(false);
+    setActiveMainTaskId("");
+  }
+
+  function handleAddMaterialToGroup(
+    material: MaterialOption,
+    quantity: number,
+  ) {
+    if (!activeMainTaskId) {
+      toast.error("No main task selected.");
+      return;
+    }
+
+    const safeQuantity = Number(quantity);
+    if (!Number.isFinite(safeQuantity) || safeQuantity <= 0) {
+      toast.error("Quantity must be greater than 0.");
+      return;
+    }
+
+    const estimatedCost = Number(material.unitCost || 0) * safeQuantity;
+
+    updateServicesWithHistory((prev) =>
+      prev.map((group) => {
+        if (group.id !== activeMainTaskId) return group;
+
+        return {
+          ...group,
+          children: [
+            ...group.children,
+            {
+              id: `local_${material.id}_${Date.now()}`,
+              name: material.name,
+              quantity: safeQuantity,
+              unitCost: Number(material.unitCost || 0),
+              estimatedCost,
+            },
+          ],
+        };
+      }),
     );
-    setEditingStepId(null);
-  };
+
+    setExpanded((prev) => new Set(prev).add(activeMainTaskId));
+    setIsDirty(true);
+  }
+
+  function handleUpdateMaterialQuantity(
+    materialRowId: string,
+    quantity: number,
+  ) {
+    if (!activeMainTaskId) return;
+
+    const safeQuantity = Number(quantity);
+    if (!Number.isFinite(safeQuantity) || safeQuantity <= 0) return;
+
+    updateServicesWithHistory((prev) =>
+      prev.map((group) => {
+        if (group.id !== activeMainTaskId) return group;
+
+        return {
+          ...group,
+          children: group.children.map((item) => {
+            if (item.id !== materialRowId) return item;
+
+            const nextEstimatedCost = Number(item.unitCost || 0) * safeQuantity;
+
+            return {
+              ...item,
+              quantity: safeQuantity,
+              estimatedCost: nextEstimatedCost,
+            };
+          }),
+        };
+      }),
+    );
+
+    setIsDirty(true);
+  }
+
+  function handleRemoveMaterialFromGroup(materialRowId: string) {
+    if (!activeMainTaskId) {
+      toast.error("No main task selected.");
+      return;
+    }
+
+    updateServicesWithHistory((prev) =>
+      prev.map((group) => {
+        if (group.id !== activeMainTaskId) return group;
+
+        return {
+          ...group,
+          children: group.children.filter((item) => item.id !== materialRowId),
+        };
+      }),
+    );
+
+    setIsDirty(true);
+    toast.success("Material removed.");
+  }
+
+  async function updateProjectStatus(status: string) {
+    if (!projectId) {
+      toast.error("Missing project ID.");
+      return false;
+    }
+
+    try {
+      const response = await fetch("/api/planning/updateProjectStatus", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId,
+          status,
+        }),
+      });
+
+      let data: any = null;
+
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+          `Failed to update project status. (${response.status})`;
+
+        toast.error(message);
+        return false;
+      }
+
+      return true;
+    } catch (error: any) {
+      toast.error(
+        error?.message || "Something went wrong while updating project status.",
+      );
+      return false;
+    }
+  }
+
+  function requestLeave(action: "next" | "back") {
+    if (!isDirty) {
+      void handleConfirmSave(false, action);
+      return;
+    }
+
+    if (action !== "next") {
+      setIsNavigatingNext(false);
+    }
+
+    setPendingAction(action);
+    setShowSaveConfirm(true);
+  }
+
+  async function handleConfirmSave(
+    shouldSave: boolean,
+    forcedAction?: "next" | "back",
+  ) {
+    const action = forcedAction ?? pendingAction;
+
+    setShowSaveConfirm(false);
+
+    if (!action) return;
+
+    if (shouldSave) {
+      toast.message(
+        "Material save is not connected to the database yet. Only project status will be updated.",
+      );
+    }
+
+    const nextStatus =
+      action === "next" ? "equipment_pending" : "sub_task_pending";
+
+    const updated = await updateProjectStatus(nextStatus);
+    if (!updated) {
+      setIsNavigatingNext(false);
+      return;
+    }
+
+    setIsDirty(false);
+    setPendingAction(null);
+
+    if (action === "next") {
+      router.push(
+        `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
+      );
+      return;
+    }
+
+    setIsNavigatingNext(false);
+
+    router.push(
+      `/admin/job-creation/sub-task-assignment?projectId=${projectId}`,
+    );
+  }
+
+  function handleNext() {
+    setIsNavigatingNext(true);
+    requestLeave("next");
+  }
+
+  function handleGoBack() {
+    requestLeave("back");
+  }
 
   return (
     <div className="w-full h-screen overflow-hidden bg-white">
       <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
         {/* header */}
         <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
-          <span>Job</span>
-          <ChevronRight className="h-5 w-5 text-gray-300 shrink-0" aria-hidden />
-          <span>Main Task Materials</span>
+          <span>Project</span>
+          <ChevronRight
+            className="h-5 w-5 text-gray-300 shrink-0"
+            aria-hidden
+          />
+          <span>Materials</span>
         </div>
 
-        {/* main card - SAME as Sub Task page */}
-        <div className="flex-1 min-h-0 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
-          <div className="px-6 pt-4 pb-3">
-            <div className="text-[14px] font-semibold text-gray-900">Sub Task Assignment</div>
-          </div>
+        <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div
+              className="h-1 w-full shrink-0"
+              style={{ backgroundColor: ACCENT }}
+            />
 
-          {/* scroll area inside card */}
-          <div className="flex-1 min-h-0 px-6 pb-4 overflow-hidden">
-            <div className="h-full overflow-y-auto pr-3 green-scrollbar">
-              <div className="space-y-3">
-                {services.map((g) => {
-                  const isOpen = expanded.has(g.id);
+            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: ACCENT }}
+                      aria-hidden="true"
+                    />
+                    <p className="text-sm font-semibold text-gray-900">
+                      Materials Assignment
+                    </p>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Review and organize materials under each main task.
+                  </p>
+                </div>
 
-                  return (
-                    <div key={g.id} className={`rounded-md border ${BORDER} bg-white overflow-hidden`}>
-                      {/* main task header (unchanged) */}
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(g.id)}
-                        className={`w-full flex items-center justify-between px-5 py-3 text-left ${
-                          isOpen ? "bg-[#F7FBF5]" : "bg-white"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                  Task Setup
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
+              <div className="h-full overflow-y-auto pr-2 green-scrollbar">
+                <div className="space-y-2.5">
+                  {loadingMaterials ? (
+                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                      Loading materials...
+                    </div>
+                  ) : services.length === 0 ? (
+                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                      No materials found for this project.
+                    </div>
+                  ) : (
+                    services.map((g) => {
+                      const isOpen = expanded.has(g.id);
+
+                      return (
+                        <div
+                          key={g.id}
+                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
                           <div
-                            className={`h-9 w-[4px] rounded-full ${isOpen ? "opacity-100" : "opacity-0"}`}
-                            style={{ backgroundColor: GREEN }}
-                          />
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleGroup(g.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                toggleGroup(g.id);
+                              }
+                            }}
+                            className={`w-full cursor-pointer px-4 py-3 text-left transition ${
+                              isOpen ? "bg-emerald-50/40" : "bg-white"
+                            }`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <div
+                                  className={`h-9 w-1 rounded-full ${isOpen ? "opacity-100" : "opacity-0"}`}
+                                  style={{ backgroundColor: ACCENT }}
+                                />
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[13px] font-semibold text-gray-900 truncate">
-                                {g.title}
-                              </span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="truncate text-[13px] font-semibold text-gray-900">
+                                      {g.title}
+                                    </span>
 
-                              {isOpen && (
-                                <span className="text-[10px] font-bold text-gray-700 bg-white border border-gray-200 rounded px-2 py-[2px]">
-                                  MAIN TASK
-                                </span>
+                                    {isOpen && (
+                                      <span className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                        MAIN TASK
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="mt-0.5 text-[11px] text-gray-500">
+                                    {g.children.length} item
+                                    {g.children.length === 1 ? "" : "s"}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex shrink-0 items-center">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleOpenAddMaterialModal(g.id);
+                                  }}
+                                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 text-[11px] font-semibold transition hover:brightness-95"
+                                  style={{
+                                    borderColor: ACCENT_BORDER,
+                                    backgroundColor: ACCENT_SOFT,
+                                    color: ACCENT,
+                                  }}>
+                                  <Plus className="h-3.5 w-3.5" />
+                                  Add Material
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {isOpen && (
+                            <div className="px-5 pb-4">
+                              {g.children.length === 0 ? (
+                                <div className="rounded-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-500">
+                                  No materials found for this main task.
+                                </div>
+                              ) : (
+                                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                                  <div className="divide-y divide-gray-200">
+                                    {g.children.map((item) => (
+                                      <div key={item.id} className="px-4 py-3">
+                                        <div className="grid grid-cols-[minmax(0,1fr)_110px_150px] items-center gap-4 text-[13px]">
+                                          <div className="min-w-0">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                              Material
+                                            </div>
+                                            <div className="truncate font-medium text-gray-900">
+                                              {item.name}
+                                            </div>
+                                          </div>
+
+                                          <div className="text-right">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                              Quantity
+                                            </div>
+                                            <div className="font-medium text-gray-800">
+                                              {String(item.quantity)}
+                                            </div>
+                                          </div>
+
+                                          <div className="text-right">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                              Estimated Cost
+                                            </div>
+                                            <div className="font-medium text-gray-800">
+                                              ₱
+                                              {Number(
+                                                item.estimatedCost || 0,
+                                              ).toLocaleString()}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
                             </div>
-
-                            {isOpen && (
-                              <div className="text-[11px] text-gray-500 mt-[2px]">
-                                {g.children.length} item{g.children.length === 1 ? "" : "s"}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <span
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md shrink-0"
-                          style={{ backgroundColor: GREEN_SOFT }}
-                        >
-                          {isOpen ? (
-                            <ChevronUp className="h-5 w-5 text-gray-800" />
-                          ) : (
-                            <ChevronDown className="h-5 w-5 text-gray-800" />
                           )}
-                        </span>
-                      </button>
-
-                      {/* items */}
-                      {isOpen && (
-                        <div className="px-5 pb-4">
-                          <div className="space-y-3">
-                            {g.children.map((item) => {
-                              const isEditing = editingStepId === item.id;
-                              const draft = drafts[item.id];
-
-                              return (
-                                <div key={item.id} className="pl-8">
-                                  {!isEditing ? (
-                                    // VIEW CARD (same spacing + image)
-                                    <div className={`rounded-md border ${BORDER} bg-white px-5 py-4`}>
-                                      <div className="flex items-start justify-between gap-4">
-                                        <div className="flex items-start gap-5">
-                                          <div className="h-20 w-20 rounded-md border border-gray-200 bg-white overflow-hidden shrink-0">
-                                            <img
-                                              src={item.imageUrl}
-                                              alt={item.name}
-                                              className="h-full w-full object-cover"
-                                            />
-                                          </div>
-
-                                          <div className="grid grid-cols-[90px_1fr_110px_1fr] gap-y-2 gap-x-6 text-[13px]">
-                                            <Label>Name:</Label>
-                                            <Value className="max-w-[360px]">{item.name}</Value>
-
-                                            <Label>ID#:</Label>
-                                            <Value>{item.idNo}</Value>
-
-                                            <Label>Quantity:</Label>
-                                            <Value>{String(item.quantity)}</Value>
-
-                                            <Label>Unit Cost:</Label>
-                                            <Value>{item.unitCost}</Value>
-
-                                            <Label>Total Cost:</Label>
-                                            <Value>{item.totalCost}</Value>
-                                          </div>
-                                        </div>
-
-                                        <button
-                                          type="button"
-                                          onClick={() => startEdit(item)}
-                                          className="h-8 w-[200px] rounded-md text-[13px] font-semibold shrink-0 self-end"
-                                          style={{ backgroundColor: GREEN_SOFT, color: "#4FAE2A" }}
-                                        >
-                                          Edit
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    // EDIT CARD (same style + image)
-                                    <div className={`rounded-md border ${BORDER} bg-white px-6 py-5`}>
-                                      <div className="flex items-start gap-6">
-                                        <div className="h-24 w-24 rounded-md border border-gray-200 bg-white overflow-hidden shrink-0">
-                                          <img
-                                            src={item.editImageUrl}
-                                            alt={item.materialLabel}
-                                            className="h-full w-full object-cover"
-                                          />
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                          <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-                                            <div className="col-span-2 flex items-center gap-4">
-                                              <Label className="w-[90px]">Material:</Label>
-
-                                              <div className="relative w-full max-w-[420px]">
-                                                <select
-                                                  value={draft?.materialLabel ?? item.materialLabel}
-                                                  onChange={(e) =>
-                                                    setDraft(item.id, { materialLabel: e.target.value })
-                                                  }
-                                                  className="appearance-none h-10 w-full rounded-md border border-gray-300 bg-white px-3 pr-10 text-[13px] text-gray-800 outline-none"
-                                                >
-                                                  {materialOptions.map((opt) => (
-                                                    <option key={opt} value={opt}>
-                                                      {opt}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                                              </div>
-                                            </div>
-
-                                            <div className="col-span-1 flex items-center gap-4">
-                                              <Label className="w-[90px]">Quantity:</Label>
-                                              <input
-                                                type="number"
-                                                min={1}
-                                                value={String(draft?.quantity ?? item.editQuantity)}
-                                                onChange={(e) =>
-                                                  setDraft(item.id, { quantity: Number(e.target.value || 1) })
-                                                }
-                                                className="h-10 w-[120px] rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none"
-                                              />
-                                            </div>
-
-                                            <div className="col-span-1 flex items-center gap-4">
-                                              <Label className="w-[90px]">Total Cost:</Label>
-                                              <Value>{item.editTotalCost}</Value>
-                                            </div>
-
-                                            <div className="col-span-2 flex items-end justify-end gap-3 pt-2">
-                                              <button
-                                                type="button"
-                                                onClick={doneEditUI}
-                                                className="h-10 w-[140px] rounded-md text-[13px] font-semibold"
-                                                style={{ backgroundColor: GREEN_SOFT, color: "#4FAE2A" }}
-                                              >
-                                                Done
-                                              </button>
-
-                                              <button
-                                                type="button"
-                                                onClick={() => deleteItemUI(item.id)}
-                                                className="h-10 w-[160px] rounded-md bg-[#FAD6D6] text-[13px] font-semibold text-[#D33A3A]"
-                                              >
-                                                Delete
-                                              </button>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-
-                            {g.children.length === 0 && (
-                              <div className="pl-8 text-[13px] text-gray-400">No materials yet.</div>
-                            )}
-                          </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="h-6" />
+              </div>
+            </div>
+          </section>
+
+          <aside className="h-full min-h-0 flex flex-col gap-4">
+            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+              <div className="px-4 py-4">
+                <div className="text-[16px] font-semibold text-gray-900">
+                  {jobNo}
+                </div>
+                <div className="mt-1 text-[12px] text-gray-500">{siteName}</div>
               </div>
 
-              <div className="h-6" />
+              <div className="border-t border-gray-200 px-4 py-4">
+                <button
+                  type="button"
+                  onClick={handleOpenCreateTaskModal}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-[12px] font-semibold transition hover:brightness-95"
+                  style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                  <Plus className="h-4 w-4" />
+                  Create Task
+                </button>
+              </div>
             </div>
-          </div>
+
+            <div className="min-h-0 flex-1">
+              <JobCreationTimeline currentStep="materials" />
+            </div>
+          </aside>
         </div>
 
-        {/* bottom actions */}
-        <div className="shrink-0 flex items-center justify-end gap-5">
+        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
           <button
             type="button"
-            onClick={() => router.push("/admin/job-creation/overview")}
-            className="h-10 w-[260px] rounded-md text-[13px] font-semibold"
-            style={{ backgroundColor: GREEN_SOFT, color: "#4FAE2A" }}
-          >
-            Next
+            onClick={handleGoBack}
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95">
+            Go Back
           </button>
 
           <button
             type="button"
-            onClick={() => router.back()}
-            className="h-10 w-[260px] rounded-md bg-[#E9E9E9] text-[13px] font-semibold text-gray-700"
-          >
-            Go Back
+            onClick={handleNext}
+            disabled={isNavigatingNext}
+            className="inline-flex h-10 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-white transition duration-150 hover:opacity-85 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70"
+            style={{ backgroundColor: ACCENT }}>
+            {isNavigatingNext ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              "Next"
+            )}
           </button>
         </div>
       </div>
+
+      {showSaveConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-200 px-5 py-4">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Save changes?
+              </h3>
+              <p className="mt-1 text-sm text-gray-600">
+                Do you want to save your materials changes before leaving?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSaveConfirm(false);
+                  setPendingAction(null);
+                  setIsNavigatingNext(false);
+                }}
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleConfirmSave(false)}
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                Don't Save
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleConfirmSave(true)}
+                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-[12px] font-semibold text-white hover:brightness-95"
+                style={{ backgroundColor: ACCENT }}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <CreateTaskModal
+        open={createTaskModalOpen}
+        onClose={handleCloseCreateTaskModal}
+        onSave={handleCreateTask}
+      />
+
+      <AddMaterialModal
+        open={materialModalOpen}
+        mainTaskTitle={
+          services.find((group) => group.id === activeMainTaskId)?.title ||
+          "Main Task"
+        }
+        existingMaterials={
+          services.find((group) => group.id === activeMainTaskId)?.children ||
+          []
+        }
+        materialOptions={materialOptions}
+        loadingOptions={loadingMaterialOptions}
+        onClose={handleCloseAddMaterialModal}
+        onAddMaterial={handleAddMaterialToGroup}
+        onUpdateMaterialQuantity={handleUpdateMaterialQuantity}
+        onRemoveMaterial={handleRemoveMaterialFromGroup}
+      />
 
       <style jsx global>{`
         .green-scrollbar::-webkit-scrollbar {
@@ -513,12 +802,12 @@ export default function MaterialsAssignment() {
           border-radius: 999px;
         }
         .green-scrollbar::-webkit-scrollbar-thumb {
-          background: ${GREEN};
+          background: ${ACCENT};
           border-radius: 999px;
           border: 2px solid #eaf7e4;
         }
         .green-scrollbar {
-          scrollbar-color: ${GREEN} #eaf7e4;
+          scrollbar-color: ${ACCENT} #eaf7e4;
           scrollbar-width: thin;
         }
       `}</style>
@@ -533,7 +822,11 @@ function Label({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <div className={`text-[13px] font-semibold text-gray-700 ${className}`}>{children}</div>;
+  return (
+    <div className={`text-[13px] font-semibold text-gray-700 ${className}`}>
+      {children}
+    </div>
+  );
 }
 
 function Value({
@@ -543,5 +836,9 @@ function Value({
   children?: React.ReactNode;
   className?: string;
 }) {
-  return <div className={`text-[13px] text-gray-400 ${className}`}>{children ?? ""}</div>;
+  return (
+    <div className={`text-[13px] text-gray-400 ${className}`}>
+      {children ?? ""}
+    </div>
+  );
 }
