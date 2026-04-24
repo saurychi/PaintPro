@@ -1,5 +1,6 @@
 import localFont from "next/font/local";
 import { Toaster } from "@/components/ui/sonner"
+import "./globals.css";
 
 const paintProFont = localFont({
   src: "../public/fonts/Nunito-VariableFont_wght.ttf",
@@ -20,7 +21,13 @@ export default function RootLayout({
     <html lang="en" className={`${paintProFont.variable}`}>
       <body>
         {children}
-        <Toaster />
+        <Toaster
+          position="bottom-right"
+          closeButton
+          toastOptions={{
+            className: "pointer-events-auto z-[99999]",
+          }}
+        />
       </body>
     </html>
   );

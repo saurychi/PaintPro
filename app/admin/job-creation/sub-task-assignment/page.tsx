@@ -1,17 +1,31 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ChevronRight} from "lucide-react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  Loader2,
+  Plus,
+  X,
+} from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
+import SubTaskPickerModal from "@/components/project-creation/SubTaskPickerModal";
+import CreateSubTaskModal from "@/components/project-creation/CreateSubTaskModal";
+import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
 
 type StepStatus = "done" | "active" | "pending";
 
-export type ServiceStep = {
+type ServiceStep = {
   id: string;
+  subTaskId: string;
   title: string;
+  sortOrder: number;
   scheduledAt?: string;
   finishedAt?: string;
-  status: StepStatus;
+  status: "pending" | "active" | "done";
   assignedTo?: string;
 };
 
@@ -24,9 +38,10 @@ export type ServiceGroup = {
   children: ServiceStep[];
 };
 
-const GREEN = "#7ED957";
-const GREEN_SOFT = "#DFF6D5";
-const BORDER = "border-gray-300";
+const ACCENT = "#00c065";
+const ACCENT_HOVER = "#00a054";
+const ACCENT_SOFT = "#e6f9ef";
+const BORDER = "border-gray-200";
 
 type EditDraft = {
   assignedTo: string;
@@ -35,183 +50,10 @@ type EditDraft = {
   scheduledISO: string; // datetime-local value: "YYYY-MM-DDTHH:mm"
 };
 
-const SERVICES: ServiceGroup[] = [
-  {
-    id: "svc-spray",
-    title: "Spray or Brush Roll Finish",
-    scheduledAt: "01 July 2024, 9:30 AM",
-    finishedAt: undefined,
-    status: "active",
-    children: [
-      {
-        id: "svc-spray-1",
-        title: "Prepare paint needed",
-        scheduledAt: "01 July 2024, 9:30 AM",
-        finishedAt: "01 July 2024, 9:45 AM",
-        assignedTo: "Marco Dela Cruz",
-        status: "done",
-      },
-      {
-        id: "svc-spray-2",
-        title: "Apply base coat on left side wall",
-        scheduledAt: "01 July 2024, 9:45 AM",
-        finishedAt: "01 July 2024, 10:10 AM",
-        assignedTo: "Marco Dela Cruz",
-        status: "done",
-      },
-      {
-        id: "svc-spray-3",
-        title: "Apply second coat on left side wall",
-        scheduledAt: "01 July 2024, 10:10 AM",
-        finishedAt: undefined,
-        status: "active",
-        assignedTo: "Marco Dela Cruz",
-      },
-      {
-        id: "svc-spray-4",
-        title: "Clean and prep tools post-application",
-        scheduledAt: "01 July 2024, 10:30 AM",
-        finishedAt: undefined,
-        status: "pending",
-      },
-    ],
-  },
-  {
-    id: "svc-wallpaper",
-    title: "Wallpapering",
-    scheduledAt: "01 July 2024, 11:15 AM",
-    finishedAt: undefined,
-    status: "pending",
-    children: [
-      {
-        id: "svc-wallpaper-1",
-        title: "Measure and mark wall for wallpaper alignment",
-        scheduledAt: "01 July 2024, 11:15 AM",
-        finishedAt: undefined,
-        status: "pending",
-      },
-      {
-        id: "svc-wallpaper-2",
-        title: "Apply wallpaper to left side wall section",
-        scheduledAt: "01 July 2024, 11:40 AM",
-        finishedAt: undefined,
-        status: "pending",
-      },
-      {
-        id: "svc-wallpaper-3",
-        title: "Trim edges and seal corners",
-        scheduledAt: "01 July 2024, 12:05 PM",
-        finishedAt: undefined,
-        status: "pending",
-      },
-    ],
-  },
-  {
-    id: "svc-prep",
-    title: "Surface Preparation",
-    scheduledAt: "01 July 2024, 8:15 AM",
-    finishedAt: undefined,
-    status: "done",
-    children: [
-      {
-        id: "svc-prep-1",
-        title: "Cover floor and furniture with drop cloths",
-        scheduledAt: "01 July 2024, 8:15 AM",
-        finishedAt: "01 July 2024, 8:30 AM",
-        assignedTo: "Marco Dela Cruz",
-        status: "done",
-      },
-      {
-        id: "svc-prep-2",
-        title: "Patch small wall holes and sand smooth",
-        scheduledAt: "01 July 2024, 8:30 AM",
-        finishedAt: "01 July 2024, 9:10 AM",
-        assignedTo: "Marco Dela Cruz",
-        status: "done",
-      },
-    ],
-  },
-  {
-    id: "svc-cleanup",
-    title: "Cleanup and Handover",
-    scheduledAt: "01 July 2024, 4:30 PM",
-    finishedAt: undefined,
-    status: "pending",
-    children: [
-      {
-        id: "svc-cleanup-1",
-        title: "Remove masking tape and protective covers",
-        scheduledAt: "01 July 2024, 4:30 PM",
-        finishedAt: undefined,
-        status: "pending",
-      },
-      {
-        id: "svc-cleanup-2",
-        title: "Final inspection and client walkthrough",
-        scheduledAt: "01 July 2024, 5:00 PM",
-        finishedAt: undefined,
-        status: "pending",
-      },
-    ],
-  },
-];
-
-function monthToIndex(m: string) {
-  const months: Record<string, number> = {
-    january: 1,
-    february: 2,
-    march: 3,
-    april: 4,
-    may: 5,
-    june: 6,
-    july: 7,
-    august: 8,
-    september: 9,
-    october: 10,
-    november: 11,
-    december: 12,
-  };
-  return months[m.toLowerCase()] ?? 0;
-}
-
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-// "01 July 2024, 11:15 AM" -> "2024-07-01T11:15"
-function prettyToISO(pretty?: string) {
-  if (!pretty) return "";
-  const parts = pretty.split(",");
-  if (parts.length < 2) return "";
-  const left = parts[0].trim();
-  const right = parts[1].trim();
-
-  const leftParts = left.split(" ").filter(Boolean);
-  if (leftParts.length < 3) return "";
-  const day = Number(leftParts[0]);
-  const month = monthToIndex(leftParts[1]);
-  const year = Number(leftParts[2]);
-
-  const timeParts = right.split(" ").filter(Boolean);
-  if (timeParts.length < 2) return "";
-  const hm = timeParts[0];
-  const ampm = timeParts[1].toUpperCase();
-  const hmParts = hm.split(":");
-  if (hmParts.length < 2) return "";
-
-  let hour = Number(hmParts[0]);
-  const minute = Number(hmParts[1]);
-
-  if (ampm === "PM" && hour < 12) hour += 12;
-  if (ampm === "AM" && hour === 12) hour = 0;
-
-  if (!year || !month || !day) return "";
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "";
-
-  return `${year}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}`;
-}
-
-// "2024-07-01T11:15" -> "01 July 2024, 11:15 AM"
 function isoToPretty(iso?: string) {
   if (!iso) return "";
   const [datePart, timePart] = iso.split("T");
@@ -254,27 +96,501 @@ function isoToPretty(iso?: string) {
 
 export default function SubTaskAssignment() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId") || "";
 
-  const [services] = useState<ServiceGroup[]>(SERVICES);
+  const [services, setServices] = useState<ServiceGroup[]>([]);
+  const [loadingSubTasks, setLoadingSubTasks] = useState(true);
+  const [projectCode, setProjectCode] = useState("");
+  const [projectTitle, setProjectTitle] = useState("");
 
-  // Expanded by default
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(services.map((s) => s.id))
-  );
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const [editingStepId, setEditingStepId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, EditDraft>>({});
+  const [servicesHistory, setServicesHistory] = useState<ServiceGroup[][]>([]);
+  const [pendingAction, setPendingAction] = useState<
+    "next" | "back" | "browserBack" | null
+  >(null);
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const allowBrowserBackRef = useRef(false);
 
-  // Only names that exist in data
-  const peopleOptions = useMemo(() => {
-    const s = new Set<string>();
-    services.forEach((g) =>
-      g.children.forEach((c) => {
-        if (c.assignedTo) s.add(c.assignedTo);
-      })
-    );
-    return Array.from(s);
+  const [subTaskCatalog, setSubTaskCatalog] = useState<
+    Record<
+      string,
+      {
+        mainTaskTitle: string;
+        subTasks: { id: string; name: string; sortOrder: number }[];
+      }
+    >
+  >({});
+
+  const [pickerOpenForMainTaskId, setPickerOpenForMainTaskId] = useState<
+    string | null
+  >(null);
+  const [pickerSelectedIds, setPickerSelectedIds] = useState<string[]>([]);
+  const [createSubTaskModalOpen, setCreateSubTaskModalOpen] = useState(false);
+  const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
+  const [isNavigatingNext, setIsNavigatingNext] = useState(false);
+
+  useEffect(() => {
+    async function loadProjectSubTasks() {
+      if (!projectId) {
+        toast.error("Missing project ID.");
+        setLoadingSubTasks(false);
+        return;
+      }
+
+      try {
+        setLoadingSubTasks(true);
+
+        const response = await fetch(
+          `/api/planning/getProjectSubTasks?projectId=${projectId}`,
+        );
+
+        console.log("[SubTaskAssignment] response status:", response.status);
+
+        const data = await response.json();
+
+        console.log("[SubTaskAssignment] route response data:", data);
+
+        if (!response.ok) {
+          throw new Error(
+            [
+              data?.error || "Failed to load project subtasks.",
+              data?.details || "",
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          );
+        }
+
+        const rows = Array.isArray(data?.projectSubTasks)
+          ? data.projectSubTasks
+          : [];
+
+        setProjectCode(data?.project?.project_code ?? "");
+        setProjectTitle(data?.project?.title ?? "");
+
+        console.log("[SubTaskAssignment] rows from route:", rows);
+
+        const groupedMap = new Map<string, ServiceGroup>();
+
+        for (const row of rows) {
+          const mainTask = row?.project_task?.main_task;
+          const subTask = row?.sub_task;
+
+          console.log("[SubTaskAssignment] row transform check:", {
+            row,
+            mainTask,
+            subTask,
+          });
+
+          if (!mainTask || !subTask) continue;
+
+          const groupId = mainTask.main_task_id;
+
+          if (!groupedMap.has(groupId)) {
+            groupedMap.set(groupId, {
+              id: groupId,
+              title: mainTask.name,
+              scheduledAt: undefined,
+              finishedAt: undefined,
+              status: "pending",
+              children: [],
+            });
+          }
+
+          groupedMap.get(groupId)!.children.push({
+            id: row.project_sub_task_id,
+            subTaskId: row.sub_task_id,
+            title: subTask.description,
+            sortOrder: Number(subTask.sort_order ?? 0),
+            scheduledAt: row.scheduled_start_datetime
+              ? isoToPretty(String(row.scheduled_start_datetime).slice(0, 16))
+              : undefined,
+            finishedAt: row.actual_end_datetime
+              ? isoToPretty(String(row.actual_end_datetime).slice(0, 16))
+              : undefined,
+            status:
+              row.status === "done" ||
+              row.status === "active" ||
+              row.status === "pending"
+                ? row.status
+                : "pending",
+            assignedTo: row.assigned_user?.username ?? "",
+          });
+        }
+
+        const groupedServices = Array.from(groupedMap.values()).map(
+          (group) => ({
+            ...group,
+            children: [...group.children].sort((a, b) => {
+              const sortDiff = a.sortOrder - b.sortOrder;
+              if (sortDiff !== 0) return sortDiff;
+              return a.title.localeCompare(b.title);
+            }),
+          }),
+        );
+
+        console.log("[SubTaskAssignment] groupedServices:", groupedServices);
+
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+      } catch (error: any) {
+        toast.error(error?.message || "Failed to load project subtasks.");
+      } finally {
+        setLoadingSubTasks(false);
+      }
+    }
+
+    loadProjectSubTasks();
+  }, [projectId]);
+
+  function pushServicesHistory() {
+    setServicesHistory((prev) => [...prev, structuredClone(services)]);
+  }
+
+  function undoSubTaskChanges() {
+    setServicesHistory((prev) => {
+      if (prev.length === 0) return prev;
+
+      const nextHistory = [...prev];
+      const previousServices = nextHistory.pop();
+
+      if (previousServices) {
+        setServices(previousServices);
+        setIsDirty(true);
+      }
+
+      return nextHistory;
+    });
+  }
+
+  function requestLeave(action: "next" | "back" | "browserBack") {
+    if (!isDirty) {
+      setPendingAction(action);
+
+      if (action === "next") {
+        window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
+        return;
+      }
+
+      setIsNavigatingNext(false);
+
+      if (action === "back") {
+        window.location.href = `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
+        return;
+      }
+
+      if (action === "browserBack") {
+        allowBrowserBackRef.current = true;
+        window.history.back();
+        return;
+      }
+
+      return;
+    }
+
+    if (action !== "next") {
+      setIsNavigatingNext(false);
+    }
+
+    setPendingAction(action);
+    setShowSaveConfirm(true);
+  }
+
+  function handleNext() {
+    setIsNavigatingNext(true);
+    requestLeave("next");
+  }
+
+  function handleOpenCreateSubTaskModal() {
+    setCreateSubTaskModalOpen(true);
+  }
+
+  function handleCloseCreateSubTaskModal() {
+    setCreateSubTaskModalOpen(false);
+  }
+
+  function handleGoBack() {
+    requestLeave("back");
+  }
+
+  async function handleConfirmSave(shouldSave: boolean) {
+    const action = pendingAction;
+    setShowSaveConfirm(false);
+    setPendingAction(null);
+
+    if (!action) return;
+
+    if (shouldSave) {
+      const response = await fetch("/api/planning/updateProjectStatus", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId,
+          status: action === "back" ? "main_task_pending" : "materials_pending",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setIsNavigatingNext(false);
+        toast.error(data?.error || "Failed to update project status.");
+        return;
+      }
+
+      setIsDirty(false);
+    }
+
+    if (action === "next") {
+      window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
+      return;
+    }
+
+    setIsNavigatingNext(false);
+
+    if (action === "back") {
+      window.location.href = `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
+      return;
+    }
+
+    if (action === "browserBack") {
+      allowBrowserBackRef.current = true;
+      window.history.back();
+      return;
+    }
+  }
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const isUndo =
+        (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z";
+
+      if (!isUndo) return;
+
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+
+      if (isTyping) return;
+
+      event.preventDefault();
+      undoSubTaskChanges();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [services]);
+
+  useEffect(() => {
+    window.history.pushState(null, "", window.location.href);
+
+    function handlePopState() {
+      if (allowBrowserBackRef.current) return;
+
+      if (!isDirty) {
+        allowBrowserBackRef.current = true;
+        window.history.back();
+        return;
+      }
+
+      window.history.pushState(null, "", window.location.href);
+      requestLeave("browserBack");
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isDirty]);
+
+  useEffect(() => {
+    async function loadSubTaskCatalog() {
+      if (!projectId) return;
+
+      try {
+        const response = await fetch(
+          `/api/planning/getProjectMainTaskSubTaskCatalog?projectId=${projectId}`,
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to load sub task catalog.");
+        }
+
+        const rows = Array.isArray(data?.catalog) ? data.catalog : [];
+
+        const mapped = rows.reduce(
+          (acc: any, row: any) => {
+            const subTasks = Array.isArray(row.subTasks) ? row.subTasks : [];
+
+            acc[row.mainTaskId] = {
+              mainTaskTitle: row.mainTaskTitle ?? "",
+              subTasks: [...subTasks]
+                .map((item: any) => ({
+                  id: item.id,
+                  name: item.name,
+                  sortOrder: Number(item.sortOrder ?? item.sort_order ?? 0),
+                }))
+                .sort((a, b) => {
+                  const sortDiff = a.sortOrder - b.sortOrder;
+                  if (sortDiff !== 0) return sortDiff;
+                  return a.name.localeCompare(b.name);
+                }),
+            };
+            return acc;
+          },
+          {} as Record<
+            string,
+            {
+              mainTaskTitle: string;
+              subTasks: { id: string; name: string; sortOrder: number }[];
+            }
+          >,
+        );
+
+        setSubTaskCatalog(mapped);
+      } catch (error: any) {
+        toast.error(error?.message || "Failed to load sub task catalog.");
+      }
+    }
+
+    loadSubTaskCatalog();
+  }, [projectId]);
+
+  function handleOpenSubTaskPicker(mainTaskId: string) {
+    const group = services.find((item) => item.id === mainTaskId);
+    if (!group) return;
+
+    setPickerSelectedIds(group.children.map((child) => child.subTaskId));
+    setPickerOpenForMainTaskId(mainTaskId);
+  }
+
+  function handleTogglePickerSubTask(subTask: { id: string; name: string }) {
+    setPickerSelectedIds((prev) =>
+      prev.includes(subTask.id)
+        ? prev.filter((id) => id !== subTask.id)
+        : [subTask.id, ...prev],
+    );
+  }
+
+  function handleCloseSubTaskPicker() {
+    setPickerOpenForMainTaskId(null);
+    setPickerSelectedIds([]);
+  }
+
+  async function handleCreateCatalogSubTask(payload: {
+    description: string;
+    sortOrder: string;
+    defaultEquipmentIds: string[];
+    defaultMaterialIds: string[];
+  }) {
+    if (!pickerOpenForMainTaskId) return;
+
+    const response = await fetch("/api/planning/createSubTaskCatalogItem", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mainTaskId: pickerOpenForMainTaskId,
+        description: payload.description,
+        sortOrder: payload.sortOrder,
+        defaultEquipmentIds: payload.defaultEquipmentIds,
+        defaultMaterialIds: payload.defaultMaterialIds,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      toast.error(data?.error || "Failed to create sub task.");
+      return;
+    }
+
+    setSubTaskCatalog((prev) => {
+      const current = prev[pickerOpenForMainTaskId];
+      if (!current) return prev;
+
+      return {
+        ...prev,
+        [pickerOpenForMainTaskId]: {
+          ...current,
+          subTasks: [
+            {
+              id: data.subTask.sub_task_id,
+              name: data.subTask.description,
+              sortOrder: Number(
+                data.subTask.sort_order ?? payload.sortOrder ?? 0,
+              ),
+            },
+            ...current.subTasks,
+          ].sort((a, b) => {
+            const sortDiff = a.sortOrder - b.sortOrder;
+            if (sortDiff !== 0) return sortDiff;
+            return a.name.localeCompare(b.name);
+          }),
+        },
+      };
+    });
+
+    toast.success("Sub task created.");
+  }
+
+  function handleSaveSubTaskPicker() {
+    if (!pickerOpenForMainTaskId) return;
+
+    const catalogEntry = subTaskCatalog[pickerOpenForMainTaskId];
+    const catalogSubTasks = catalogEntry?.subTasks ?? [];
+
+    pushServicesHistory();
+
+    setServices((prev) =>
+      prev.map((group) => {
+        if (group.id !== pickerOpenForMainTaskId) return group;
+
+        const selectedSet = new Set(pickerSelectedIds);
+
+        const orderedChildren = catalogSubTasks
+          .filter((subTask) => selectedSet.has(subTask.id))
+          .map((subTask): ServiceStep => {
+            const existing = group.children.find(
+              (child) => child.subTaskId === subTask.id,
+            );
+
+            return (
+              existing ?? {
+                id: `temp-${subTask.id}`,
+                subTaskId: subTask.id,
+                title: subTask.name,
+                sortOrder: subTask.sortOrder,
+                scheduledAt: "",
+                finishedAt: "",
+                status: "pending",
+                assignedTo: "",
+              }
+            );
+          });
+
+        return {
+          ...group,
+          children: [...orderedChildren].sort((a, b) => {
+            const sortDiff = a.sortOrder - b.sortOrder;
+            if (sortDiff !== 0) return sortDiff;
+            return a.title.localeCompare(b.title);
+          }),
+        };
+      }),
+    );
+
+    setIsDirty(true);
+    handleCloseSubTaskPicker();
+  }
 
   function toggleGroup(groupId: string) {
     setExpanded((prev) => {
@@ -283,49 +599,44 @@ export default function SubTaskAssignment() {
       else next.add(groupId);
       return next;
     });
-    setEditingStepId(null);
   }
 
-  function startEdit(step: ServiceStep) {
-    setEditingStepId(step.id);
-    setDrafts((prev) => {
-      if (prev[step.id]) return prev;
-      return {
-        ...prev,
-        [step.id]: {
-          assignedTo: step.assignedTo ?? "",
-          description: step.title ?? "",
-          payment: "",
-          scheduledISO: prettyToISO(step.scheduledAt),
-        },
-      };
-    });
+  function handleOpenCreateTaskModal() {
+    setCreateTaskModalOpen(true);
   }
 
-  function setDraft(stepId: string, patch: Partial<EditDraft>) {
-    setDrafts((prev) => ({
-      ...prev,
-      [stepId]: {
-        assignedTo: prev[stepId]?.assignedTo ?? "",
-        description: prev[stepId]?.description ?? "",
-        payment: prev[stepId]?.payment ?? "",
-        scheduledISO: prev[stepId]?.scheduledISO ?? "",
-        ...patch,
-      },
-    }));
+  function handleCloseCreateTaskModal() {
+    setCreateTaskModalOpen(false);
   }
 
-  function doneEditUI() {
-    setEditingStepId(null);
+  async function handleCreateTask(payload: {
+    name: string;
+    sortOrder: string;
+    subTasks: {
+      description: string;
+      sortOrder: string;
+      materialIds: string[];
+      equipmentIds: string[];
+    }[];
+  }) {
+    toast.message("Create Task is not connected to the database yet.");
   }
 
-  function deleteSubtaskUI(stepId: string) {
-    setDrafts((prev) => {
-      const copy = { ...prev };
-      delete copy[stepId];
-      return copy;
-    });
-    setEditingStepId(null);
+  function handleRemoveSelectedSubTask(mainTaskId: string, subTaskId: string) {
+    pushServicesHistory();
+
+    setServices((prev) =>
+      prev.map((group) => {
+        if (group.id !== mainTaskId) return group;
+
+        return {
+          ...group,
+          children: group.children.filter((child) => child.id !== subTaskId),
+        };
+      }),
+    );
+
+    setIsDirty(true);
   }
 
   return (
@@ -333,237 +644,307 @@ export default function SubTaskAssignment() {
       <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
         {/* header */}
         <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
-          <span>Job</span>
-          <ChevronRight className="h-5 w-5 text-gray-300 shrink-0" aria-hidden />
+          <span>Project</span>
+          <ChevronRight
+            className="h-5 w-5 text-gray-300 shrink-0"
+            aria-hidden
+          />
           <span>Sub Task Assignment</span>
         </div>
 
-        {/* main card */}
-        <div className="flex-1 min-h-0 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col">
-          <div className="px-6 pt-4 pb-3">
-            <div className="text-[14px] font-semibold text-gray-900">Sub Task Assignment</div>
-          </div>
+        <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div
+              className="h-1 w-full shrink-0"
+              style={{ backgroundColor: ACCENT }}
+            />
 
-          {/* scroll area inside card */}
-          <div className="flex-1 min-h-0 px-6 pb-4 overflow-hidden">
-            <div className="h-full overflow-y-auto pr-3 green-scrollbar">
-              <div className="space-y-3">
-                {services.map((g) => {
-                  const isOpen = expanded.has(g.id);
+            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: ACCENT }}
+                      aria-hidden="true"
+                    />
+                    <p className="text-sm font-semibold text-gray-900">
+                      Sub Task Assignment
+                    </p>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Review and organize the subtasks under each main task.
+                  </p>
+                </div>
 
-                  return (
-                    <div key={g.id} className={`rounded-md border ${BORDER} bg-white overflow-hidden`}>
-                      {/* main task header with emphasis when open */}
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(g.id)}
-                        className={`w-full flex items-center justify-between px-5 py-3 text-left ${
-                          isOpen ? "bg-[#F7FBF5]" : "bg-white"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                  Task Setup
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
+              <div className="h-full overflow-y-auto pr-2 green-scrollbar">
+                <div className="space-y-2.5">
+                  {loadingSubTasks ? (
+                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                      Loading subtasks...
+                    </div>
+                  ) : services.length === 0 ? (
+                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                      No subtasks found for this project.
+                    </div>
+                  ) : (
+                    services.map((g) => {
+                      const isOpen = expanded.has(g.id);
+
+                      return (
+                        <div
+                          key={g.id}
+                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
                           <div
-                            className={`h-9 w-[4px] rounded-full ${isOpen ? "opacity-100" : "opacity-0"}`}
-                            style={{ backgroundColor: GREEN }}
-                          />
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleGroup(g.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                toggleGroup(g.id);
+                              }
+                            }}
+                            className={`flex w-full items-center justify-between px-4 py-3 text-left transition cursor-pointer ${
+                              isOpen ? "bg-emerald-50/40" : "bg-white"
+                            }`}>
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div
+                                className={`h-9 w-[4px] rounded-full ${isOpen ? "opacity-100" : "opacity-0"}`}
+                                style={{ backgroundColor: ACCENT }}
+                              />
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[13px] font-semibold text-gray-900 truncate">
-                                {g.title}
-                              </span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate text-[13px] font-semibold text-gray-900">
+                                    {g.title}
+                                  </span>
 
-                              {isOpen && (
-                                <span className="text-[10px] font-bold text-gray-700 bg-white border border-gray-200 rounded px-2 py-[2px]">
-                                  MAIN TASK
-                                </span>
-                              )}
+                                  {isOpen && (
+                                    <span className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-[2px] text-[10px] font-semibold text-emerald-700">
+                                      MAIN TASK
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="mt-[2px] text-[11px] text-gray-500">
+                                  {g.children.length} sub task
+                                  {g.children.length === 1 ? "" : "s"}
+                                </div>
+                              </div>
                             </div>
 
-                            {isOpen && (
-                              <div className="text-[11px] text-gray-500 mt-[2px]">
-                                {g.children.length} sub task{g.children.length === 1 ? "" : "s"}
-                              </div>
-                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenSubTaskPicker(g.id);
+                              }}
+                              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-[12px] font-semibold transition hover:brightness-95 shrink-0"
+                              style={{
+                                backgroundColor: ACCENT_SOFT,
+                                color: ACCENT,
+                              }}>
+                              <Plus className="h-4 w-4" />
+                              Add
+                            </button>
                           </div>
-                        </div>
 
-                        <span
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md shrink-0"
-                          style={{ backgroundColor: GREEN_SOFT }}
-                        >
-                          {isOpen ? (
-                            <ChevronUp className="h-5 w-5 text-gray-800" />
-                          ) : (
-                            <ChevronDown className="h-5 w-5 text-gray-800" />
-                          )}
-                        </span>
-                      </button>
+                          {isOpen && (
+                            <div className="px-5 pb-4">
+                              {g.children.length === 0 ? (
+                                <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-500">
+                                  No selected sub tasks for this main task.
+                                </div>
+                              ) : (
+                                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                                  <div className="divide-y divide-gray-200">
+                                    {g.children.map((step, index) => (
+                                      <div
+                                        key={step.id}
+                                        className="flex items-center gap-3 px-4 py-3">
+                                        <div className="inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-gray-50 px-2 text-[11px] font-semibold text-gray-600">
+                                          {index + 1}
+                                        </div>
 
-                      {/* subtasks */}
-                      {isOpen && (
-                        <div className="px-5 pb-4">
-                          <div className="space-y-3">
-                            {g.children.map((step) => {
-                              const isEditing = editingStepId === step.id;
-                              const draft = drafts[step.id];
-
-                              const assignedTo = step.assignedTo ?? "";
-                              const description = step.title ?? "";
-                              const scheduledPretty = step.scheduledAt ?? "";
-
-                              return (
-                                <div key={step.id} className="pl-8">
-                                  {!isEditing ? (
-                                    <div className={`rounded-md border ${BORDER} bg-white px-5 py-4`}>
-                                      <div className="flex items-start justify-between gap-4">
-                                        <div className="grid grid-cols-[140px_1fr_180px_1fr] gap-y-2 gap-x-6 text-[13px]">
-                                          <Label>Assigned to:</Label>
-                                          <Value>{assignedTo}</Value>
-
-                                          <Label>Description:</Label>
-                                          <Value className="max-w-[520px]">{description}</Value>
-
-                                          <Label>Cost:</Label>
-                                          <Value />
-
-                                          <Label>Scheduled Date &amp; Time:</Label>
-                                          <Value>{scheduledPretty}</Value>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="truncate text-[13px] font-medium text-gray-800">
+                                            {step.title}
+                                          </div>
                                         </div>
 
                                         <button
                                           type="button"
-                                          onClick={() => startEdit(step)}
-                                          className="h-8 w-[200px] rounded-md text-[13px] font-semibold shrink-0"
-                                          style={{ backgroundColor: GREEN_SOFT, color: "#4FAE2A" }}
-                                        >
-                                          Edit
+                                          onClick={() =>
+                                            handleRemoveSelectedSubTask(
+                                              g.id,
+                                              step.id,
+                                            )
+                                          }
+                                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-500 transition duration-150 hover:bg-red-100 hover:text-red-600 active:scale-95"
+                                          aria-label="Remove sub task"
+                                          title="Remove">
+                                          <X className="h-4 w-4" />
                                         </button>
                                       </div>
-                                    </div>
-                                  ) : (
-                                    <div className={`rounded-md border ${BORDER} bg-white px-6 py-5`}>
-                                      <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-                                        <div className="col-span-1">
-                                          <Label>Assigned to:</Label>
-                                          <div className="relative mt-1 w-full max-w-[320px]">
-                                            <select
-                                              value={draft?.assignedTo ?? ""}
-                                              onChange={(e) =>
-                                                setDraft(step.id, { assignedTo: e.target.value })
-                                              }
-                                              className="appearance-none h-10 w-full rounded-md border border-gray-300 bg-white px-3 pr-10 text-[13px] text-gray-800 outline-none"
-                                            >
-                                              <option value="" />
-                                              {peopleOptions.map((p) => (
-                                                <option key={p} value={p}>
-                                                  {p}
-                                                </option>
-                                              ))}
-                                            </select>
-                                            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                                          </div>
-                                        </div>
-
-                                        <div className="col-span-1">
-                                          <Label>Scheduled Date &amp; Time</Label>
-                                          <div className="mt-1 w-full max-w-[340px]">
-                                            <input
-                                              type="datetime-local"
-                                              value={draft?.scheduledISO ?? ""}
-                                              onChange={(e) =>
-                                                setDraft(step.id, { scheduledISO: e.target.value })
-                                              }
-                                              className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none"
-                                            />
-                                            <div className="text-[11px] text-gray-500 mt-1">
-                                              Preview:{" "}
-                                              <span className="text-gray-700">
-                                                {isoToPretty(draft?.scheduledISO) || scheduledPretty}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        <div className="col-span-2">
-                                          <Label>Description:</Label>
-                                          <textarea
-                                            value={draft?.description ?? description}
-                                            onChange={(e) =>
-                                              setDraft(step.id, { description: e.target.value })
-                                            }
-                                            className="mt-1 h-[90px] w-full resize-none rounded-md border border-gray-300 bg-white px-3 py-2 text-[13px] text-gray-800 outline-none"
-                                          />
-                                        </div>
-
-                                        <div className="col-span-1">
-                                          <Label>Payment:</Label>
-                                          <input
-                                            value={draft?.payment ?? ""}
-                                            onChange={(e) =>
-                                              setDraft(step.id, { payment: e.target.value })
-                                            }
-                                            className="mt-1 h-10 w-full max-w-[340px] rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none"
-                                            placeholder=""
-                                          />
-                                        </div>
-
-                                        <div className="col-span-1 flex items-end justify-end gap-3">
-                                          <button
-                                            type="button"
-                                            onClick={doneEditUI}
-                                            className="h-10 w-[140px] rounded-md text-[13px] font-semibold"
-                                            style={{ backgroundColor: GREEN_SOFT, color: "#4FAE2A" }}
-                                          >
-                                            Done
-                                          </button>
-
-                                          <button
-                                            type="button"
-                                            onClick={() => deleteSubtaskUI(step.id)}
-                                            className="h-10 w-[160px] rounded-md bg-[#FAD6D6] text-[13px] font-semibold text-[#D33A3A]"
-                                          >
-                                            Delete
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
+                                    ))}
+                                  </div>
                                 </div>
-                              );
-                            })}
-                          </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="h-6" />
+              </div>
+            </div>
+          </section>
+
+          <aside className="h-full min-h-0 flex flex-col gap-4">
+            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+              <div className="px-4 py-4">
+                <div className="text-[16px] font-semibold text-gray-900">
+                  Sub Task Assignment
+                </div>
+                <div className="mt-1 text-[12px] text-gray-500">
+                  Review and organize the subtasks under each main task.
+                </div>
               </div>
 
-              <div className="h-6" />
+              <div className="border-t border-gray-200 px-4 py-4">
+                <button
+                  type="button"
+                  onClick={handleOpenCreateTaskModal}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-[12px] font-semibold transition hover:brightness-95"
+                  style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                  <Plus className="h-4 w-4" />
+                  Create Task
+                </button>
+              </div>
             </div>
-          </div>
+
+            <div className="min-h-0 flex-1">
+              <JobCreationTimeline currentStep="sub_task" />
+            </div>
+          </aside>
         </div>
 
-        <div className="shrink-0 flex items-center justify-end gap-5">
+        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
           <button
             type="button"
-            onClick={() => router.push("/admin/job-creation/materials-assignment")}
-            className="h-10 w-[220px] rounded-md text-[13px] font-semibold"
-            style={{ backgroundColor: GREEN_SOFT, color: "#4FAE2A" }}
-          >
-            Next
+            onClick={handleGoBack}
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95">
+            Go Back
           </button>
 
           <button
             type="button"
-            onClick={() => history.back()}
-            className="h-10 w-[220px] rounded-md bg-[#E9E9E9] text-[13px] font-semibold text-gray-700"
-          >
-            Go Back
+            onClick={handleNext}
+            disabled={isNavigatingNext}
+            className="inline-flex h-10 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-white transition duration-150 hover:opacity-85 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70"
+            style={{ backgroundColor: ACCENT }}>
+            {isNavigatingNext ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              "Next"
+            )}
           </button>
         </div>
       </div>
+
+      {showSaveConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-200 px-5 py-4">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Save changes?
+              </h3>
+              <p className="mt-1 text-sm text-gray-600">
+                Do you want to save your sub task changes to the database before
+                leaving this page?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSaveConfirm(false);
+                  setPendingAction(null);
+                  setIsNavigatingNext(false);
+                }}
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleConfirmSave(false)}
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                Don't Save
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleConfirmSave(true)}
+                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-[12px] font-semibold text-white hover:brightness-95"
+                style={{ backgroundColor: ACCENT }}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <SubTaskPickerModal
+        open={!!pickerOpenForMainTaskId}
+        mainTaskTitle={
+          pickerOpenForMainTaskId
+            ? (subTaskCatalog[pickerOpenForMainTaskId]?.mainTaskTitle ?? "")
+            : ""
+        }
+        subTasks={
+          pickerOpenForMainTaskId
+            ? (subTaskCatalog[pickerOpenForMainTaskId]?.subTasks ?? [])
+            : []
+        }
+        selectedIds={pickerSelectedIds}
+        onToggle={handleTogglePickerSubTask}
+        onClose={handleCloseSubTaskPicker}
+        onSave={handleSaveSubTaskPicker}
+        onOpenCreateModal={handleOpenCreateSubTaskModal}
+      />
+
+      <CreateSubTaskModal
+        open={createSubTaskModalOpen}
+        mainTaskTitle={
+          pickerOpenForMainTaskId
+            ? (subTaskCatalog[pickerOpenForMainTaskId]?.mainTaskTitle ?? "")
+            : ""
+        }
+        onClose={handleCloseCreateSubTaskModal}
+        onCreate={handleCreateCatalogSubTask}
+      />
+
+      <CreateTaskModal
+        open={createTaskModalOpen}
+        onClose={handleCloseCreateTaskModal}
+        onSave={handleCreateTask}
+      />
 
       <style jsx global>{`
         .green-scrollbar::-webkit-scrollbar {
@@ -574,12 +955,12 @@ export default function SubTaskAssignment() {
           border-radius: 999px;
         }
         .green-scrollbar::-webkit-scrollbar-thumb {
-          background: ${GREEN};
+          background: ${ACCENT};
           border-radius: 999px;
           border: 2px solid #eaf7e4;
         }
         .green-scrollbar {
-          scrollbar-color: ${GREEN} #eaf7e4;
+          scrollbar-color: ${ACCENT} #eaf7e4;
           scrollbar-width: thin;
         }
       `}</style>
@@ -588,7 +969,9 @@ export default function SubTaskAssignment() {
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <div className="text-[13px] font-semibold text-gray-700">{children}</div>;
+  return (
+    <div className="text-[13px] font-semibold text-gray-700">{children}</div>
+  );
 }
 
 function Value({
@@ -598,5 +981,9 @@ function Value({
   children?: React.ReactNode;
   className?: string;
 }) {
-  return <div className={`text-[13px] text-gray-400 ${className}`}>{children ?? ""}</div>;
+  return (
+    <div className={`text-[13px] text-gray-400 ${className}`}>
+      {children ?? ""}
+    </div>
+  );
 }

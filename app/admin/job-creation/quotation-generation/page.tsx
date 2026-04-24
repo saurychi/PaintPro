@@ -1,0 +1,320 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import { ChevronRight, Download, Loader2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+
+type StatusType = "Not yet Approved" | "Approved";
+
+type ProjectOverviewResponse = {
+  project: {
+    project_id: string;
+    project_code: string | null;
+    title: string | null;
+    description: string | null;
+    site_address: string | null;
+    status: string | null;
+    estimated_budget: number | null;
+    estimated_cost: number | null;
+    estimated_profit: number | null;
+  };
+};
+
+function formatCurrency(value: number | null | undefined) {
+  const safeValue = Number(value ?? 0);
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    maximumFractionDigits: 2,
+  }).format(safeValue);
+}
+
+export default function JobQuotation() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId") || "";
+
+  const [status, setStatus] = useState<StatusType>("Not yet Approved");
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [isGoingBack, setIsGoingBack] = useState(false);
+  const [project, setProject] = useState<
+    ProjectOverviewResponse["project"] | null
+  >(null);
+
+  const statusStyles = useMemo(() => {
+    if (status === "Approved") {
+      return { bg: "#E6F9DD", border: "#BDE7AF", text: "#4FAE2A" };
+    }
+    return { bg: "#FAD6D6", border: "#F3A7A7", text: "#D33A3A" };
+  }, [status]);
+
+  async function updateProjectStatus(nextStatus: string) {
+    const response = await fetch("/api/planning/updateProjectStatus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectId,
+        status: nextStatus,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        [data?.error, data?.details].filter(Boolean).join(": ") ||
+          "Failed to update project status.",
+      );
+    }
+  }
+
+  useEffect(() => {
+    async function loadProject() {
+      if (!projectId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+
+        const response = await fetch(
+          `/api/planning/getProjectOverview?projectId=${projectId}`,
+        );
+        const data = (await response.json()) as ProjectOverviewResponse & {
+          error?: string;
+          details?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(
+            [data?.error, data?.details].filter(Boolean).join(": ") ||
+              "Failed to load quotation project data.",
+          );
+        }
+
+        setProject(data.project);
+
+        setStatus(
+          data.project?.status === "ready_to_start"
+            ? "Approved"
+            : "Not yet Approved",
+        );
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadProject();
+  }, [projectId]);
+
+  async function toggleStatus() {
+    if (!projectId || updatingStatus) return;
+
+    const nextUiStatus: StatusType =
+      status === "Approved" ? "Not yet Approved" : "Approved";
+
+    const nextProjectStatus =
+      nextUiStatus === "Approved" ? "ready_to_start" : "quotation_pending";
+
+    try {
+      setUpdatingStatus(true);
+      await updateProjectStatus(nextProjectStatus);
+      setStatus(nextUiStatus);
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: nextProjectStatus,
+            }
+          : prev,
+      );
+      toast.success("Quotation status updated.");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to update quotation status.");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (!projectId) return;
+
+    try {
+      setDownloading(true);
+
+      const response = await fetch(
+        `/api/quotation/pdf?projectId=${encodeURIComponent(projectId)}&download=1`,
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to download quotation PDF.",
+        );
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `quotation-${projectId}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      alert("Failed to download quotation PDF.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const previewSrc = projectId
+    ? `/api/quotation/html?projectId=${encodeURIComponent(projectId)}`
+    : "";
+
+  return (
+    <div className="w-full h-screen overflow-hidden bg-white">
+      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+            <span>Project</span>
+            <ChevronRight
+              className="h-5 w-5 text-gray-300 shrink-0"
+              aria-hidden
+            />
+            <span>Quotation</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleStatus}
+            disabled={updatingStatus || !projectId}
+            className="inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+            style={{
+              backgroundColor: statusStyles.bg,
+              borderColor: statusStyles.border,
+              color: statusStyles.text,
+            }}
+            aria-label="Toggle approval status">
+            {updatingStatus ? "Updating..." : status}
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 grid grid-cols-12 gap-5">
+          <div className="col-span-12 lg:col-span-8 min-h-0">
+            <div className="h-full min-h-0 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+              <div className="h-full min-h-0 p-4">
+                {loading ? (
+                  <div className="h-full rounded-lg border border-gray-200 bg-[#F7F7F7] flex items-center justify-center">
+                    <div className="text-center">
+                      <Loader2 className="h-5 w-5 animate-spin text-gray-500 mx-auto" />
+                      <div className="mt-2 text-[12px] text-gray-500">
+                        Loading quotation preview...
+                      </div>
+                    </div>
+                  </div>
+                ) : !projectId ? (
+                  <div className="h-full rounded-lg border border-gray-200 bg-[#F7F7F7] flex items-center justify-center text-[12px] text-gray-500">
+                    Missing project ID.
+                  </div>
+                ) : (
+                  <iframe
+                    src={previewSrc}
+                    title="Quotation Preview"
+                    className="h-full w-full rounded-lg border border-gray-200 bg-white"
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="col-span-12 lg:col-span-4 min-h-0 flex flex-col gap-5">
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5">
+              <div className="text-[13px] font-semibold text-gray-900">
+                Quotation Details
+              </div>
+
+              <div className="mt-4 space-y-3 text-[12px] text-gray-600">
+                <div>
+                  <div className="text-gray-500">Project Code</div>
+                  <div className="mt-1 font-semibold text-gray-900">
+                    {project?.project_code || "No Code"}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-gray-500">Project Title</div>
+                  <div className="mt-1 font-semibold text-gray-900">
+                    {project?.title || "Untitled Project"}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-gray-500">Budget</div>
+                  <div className="mt-1 font-semibold text-gray-900">
+                    {formatCurrency(project?.estimated_budget)}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={downloading || !projectId}
+                className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:opacity-70"
+                style={{ backgroundColor: "#00c065" }}>
+                {downloading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Downloading...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Download PDF
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="hidden lg:block flex-1" />
+          </div>
+        </div>
+
+        <div className="shrink-0 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!projectId || isGoingBack) return;
+
+              try {
+                setIsGoingBack(true);
+                await updateProjectStatus("overview_pending");
+                router.push(
+                  `/admin/job-creation/overview?projectId=${projectId}`,
+                );
+              } catch (error: any) {
+                toast.error(error?.message || "Failed to go back.");
+                setIsGoingBack(false);
+              }
+            }}
+            disabled={isGoingBack}
+            className="inline-flex h-10 min-w-[220px] items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-5 text-[13px] font-semibold text-[#4FAE2A] transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70">
+            {isGoingBack ? "Going Back..." : "Go Back"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -5,7 +5,13 @@ import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { cn } from "@/lib/utils"
 
-function AdminShell({ children, role }: { children: React.ReactNode; role: "admin" | "manager" }) {
+function AdminShell({
+  children,
+  role,
+}: {
+  children: React.ReactNode
+  role: "admin" | "manager"
+}) {
   const { open } = useSidebar()
 
   return (
@@ -16,7 +22,10 @@ function AdminShell({ children, role }: { children: React.ReactNode; role: "admi
         className={cn(
           "min-h-screen min-w-0 overflow-auto",
           "transition-[padding-left] duration-300 ease-in-out",
-          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
+          "pl-0",
+          open
+            ? "md:pl-[var(--sidebar-width)]"
+            : "md:pl-[var(--sidebar-width-icon)]",
         )}
       >
         {children}
