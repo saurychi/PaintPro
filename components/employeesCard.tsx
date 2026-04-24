@@ -44,6 +44,24 @@ function StatusDot({ status }: { status: EmployeeStatus }) {
   return <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />;
 }
 
+function StatusBadge({ status }: { status: EmployeeStatus }) {
+  const label = getStatusLabel(status);
+  const isAvailable = label === "Available";
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+        isAvailable
+          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+          : "bg-red-50 text-red-600 ring-1 ring-red-100",
+      ].join(" ")}>
+      <StatusDot status={status} />
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
 function getStatusLabel(status: EmployeeStatus) {
   if (status === "Worked") return "Available";
   if (status === "On-leave") return "Unavailable";
@@ -196,15 +214,17 @@ export default function EmployeesCard({
     <section
       ref={sectionRef}
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-      <div className="shrink-0 border-b border-gray-200 px-5 py-4">
+      <div className="h-1 w-full shrink-0 bg-[#00c065]" />
+
+      <div className="shrink-0 border-b border-gray-200 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-[15px] font-semibold leading-5 text-gray-900">
+            <h3 className="text-[14px] font-semibold leading-5 text-gray-900">
               {title}
             </h3>
 
             {!isMini ? (
-              <p className="mt-1 text-[12px] leading-5 text-gray-500">
+              <p className="mt-1 text-[11px] leading-4 text-gray-500">
                 {availableCount} available, {unavailableCount} unavailable today
               </p>
             ) : null}
@@ -216,32 +236,31 @@ export default function EmployeesCard({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 p-3">
-        <div className="flex h-full min-h-0 flex-col rounded-xl border border-gray-200 bg-white shadow-sm">
-          {!isMini ? (
-            <div className="grid shrink-0 grid-cols-[86px_minmax(0,1fr)] gap-3 border-b border-gray-200 px-4 py-3 text-[10px] font-medium uppercase tracking-[0.12em] text-gray-400">
-              <div>Status</div>
-              <div>Staff</div>
-            </div>
-          ) : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {!isMini ? (
+          <div className="grid shrink-0 grid-cols-[100px_minmax(0,1fr)] gap-3 border-b border-gray-200 px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.12em] text-gray-400">
+            <div>Status</div>
+            <div>Staff</div>
+          </div>
+        ) : null}
 
+        <div className="min-h-0 flex-1 overflow-hidden">
           <div
             className={[
-              "min-h-0 flex-1 overflow-y-auto",
-              isCompact ? "px-2 py-2" : "px-3 py-3",
+              "h-full min-h-0 flex-1 overflow-y-auto",
+              isCompact ? "px-4 py-2" : "px-5 py-2.5",
               "[&::-webkit-scrollbar]:w-2",
-              "[&::-webkit-scrollbar-track]:rounded-full",
-              "[&::-webkit-scrollbar-track]:bg-emerald-100",
+              "[&::-webkit-scrollbar-track]:bg-transparent",
               "[&::-webkit-scrollbar-thumb]:rounded-full",
               "[&::-webkit-scrollbar-thumb]:bg-emerald-500",
               "[&::-webkit-scrollbar-thumb]:hover:bg-emerald-600",
             ].join(" ")}
             style={{
               scrollbarWidth: "thin",
-              scrollbarColor: "#10B981 #D1FAE5",
+              scrollbarColor: "#10B981 transparent",
             }}>
             {error ? (
-              <div className="flex h-full min-h-[80px] items-center justify-center px-3 text-center text-xs text-red-600">
+              <div className="flex h-full min-h-20 items-center justify-center px-3 text-center text-xs text-red-600">
                 {error}
               </div>
             ) : loading ? (
@@ -249,18 +268,18 @@ export default function EmployeesCard({
                 {Array.from({ length: isMini ? 2 : 4 }).map((_, index) => (
                   <div
                     key={index}
-                    className="grid grid-cols-[86px_minmax(0,1fr)] items-center gap-3">
+                    className="grid grid-cols-[100px_minmax(0,1fr)] items-center gap-3">
                     <div className="h-4 w-16 animate-pulse rounded bg-gray-200" />
                     <div className="h-10 animate-pulse rounded-lg bg-gray-200" />
                   </div>
                 ))}
               </div>
             ) : employees.length === 0 ? (
-              <div className="flex h-full min-h-[80px] items-center justify-center px-3 text-center text-xs text-gray-500">
+              <div className="flex h-full min-h-20 items-center justify-center px-3 text-center text-xs text-gray-500">
                 No active staff found.
               </div>
             ) : (
-              <div className={isCompact ? "space-y-2" : "space-y-2.5"}>
+              <div>
                 {employees.map((employee) => {
                   const statusLabel = getStatusLabel(employee.status);
 
@@ -269,32 +288,27 @@ export default function EmployeesCard({
                       key={employee.id}
                       className={
                         isMini
-                          ? "rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm"
-                          : "grid grid-cols-[86px_minmax(0,1fr)] items-center gap-3"
+                          ? "border-b border-gray-100 px-2 py-2.5 last:border-b-0"
+                          : "grid grid-cols-[100px_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 px-0 py-3 last:border-b-0"
                       }>
-                      <div
-                        className={[
-                          "flex min-w-0 items-center gap-2 text-xs",
-                          statusLabel === "Available"
-                            ? "text-gray-700"
-                            : "text-gray-500",
-                        ].join(" ")}>
-                        <StatusDot status={employee.status} />
+                      <div className="flex min-w-0 items-center">
                         {!isMini ? (
-                          <span className="truncate">{statusLabel}</span>
+                          <StatusBadge status={employee.status} />
                         ) : null}
                       </div>
 
                       <div
                         className={[
-                          "flex min-w-0 items-center gap-3 rounded-lg border border-gray-200 bg-white shadow-sm",
-                          isCompact ? "px-3 py-2" : "px-4 py-2.5",
+                          "flex min-w-0 items-center gap-3",
                           isMini ? "mt-2" : "",
                         ].join(" ")}>
                         <div
                           className={[
-                            "shrink-0 overflow-hidden rounded-md bg-gray-100",
-                            isCompact ? "h-7 w-7" : "h-8 w-8",
+                            "flex shrink-0 items-center justify-center overflow-hidden rounded-full ring-1",
+                            statusLabel === "Available"
+                              ? "bg-emerald-50 text-emerald-700 ring-emerald-100"
+                              : "bg-gray-100 text-gray-500 ring-gray-200",
+                            isCompact ? "h-8 w-8" : "h-9 w-9",
                           ].join(" ")}>
                           {employee.avatarUrl ? (
                             <img
@@ -303,26 +317,39 @@ export default function EmployeesCard({
                               className="h-full w-full object-cover"
                             />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-gray-500">
+                            <div
+                              className={[
+                                "flex h-full w-full items-center justify-center font-semibold",
+                                statusLabel === "Available"
+                                  ? "text-emerald-700"
+                                  : "text-gray-500",
+                                "text-[11px]",
+                              ].join(" ")}>
                               {getInitials(employee.name)}
                             </div>
                           )}
                         </div>
 
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div
                             className={[
                               "truncate font-semibold text-gray-900",
-                              isCompact ? "text-[12px]" : "text-sm",
+                              isCompact ? "text-[12px]" : "text-[13px]",
                             ].join(" ")}>
                             {employee.name}
                           </div>
 
-                          {employee.role && !isMini ? (
-                            <div className="truncate text-[10px] leading-3 text-gray-500">
-                              {employee.role}
-                            </div>
-                          ) : null}
+                          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                            {employee.role && !isMini ? (
+                              <div className="truncate text-[10px] leading-4 text-gray-500">
+                                {employee.role}
+                              </div>
+                            ) : null}
+
+                            {isMini ? (
+                              <StatusBadge status={employee.status} />
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     </div>
