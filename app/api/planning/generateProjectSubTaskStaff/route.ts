@@ -4,7 +4,12 @@ import {
   getRequiredEmployeeCountFromEstimatedHours,
   suggestEmployeesForTasks,
 } from "@/lib/planning/employeeAssignment";
-import type { EmployeeHint, EmployeeAssignmentScore } from "@/lib/planning/aiContext";
+type EmployeeAssignmentScore = {
+  employee: EmployeeHint;
+  score: number;
+};
+
+import type { EmployeeHint } from "@/lib/planning/aiContext";
 
 function toSpecialties(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -143,10 +148,20 @@ export async function POST(request: Request) {
       }),
     );
 
-    const mainTaskName =
-      projectSubTask?.project_task?.main_task?.name || "Main Task";
-    const subTaskTitle =
-      projectSubTask?.sub_task?.description || "Sub Task";
+    const projectTaskRelation = Array.isArray(projectSubTask?.project_task)
+      ? projectSubTask.project_task[0]
+      : projectSubTask?.project_task;
+
+    const mainTaskRelation = Array.isArray(projectTaskRelation?.main_task)
+      ? projectTaskRelation.main_task[0]
+      : projectTaskRelation?.main_task;
+
+    const subTaskRelation = Array.isArray(projectSubTask?.sub_task)
+      ? projectSubTask.sub_task[0]
+      : projectSubTask?.sub_task;
+
+    const mainTaskName = mainTaskRelation?.name || "Main Task";
+    const subTaskTitle = subTaskRelation?.description || "Sub Task";
 
     const estimatedHours = Number(projectSubTask?.estimated_hours ?? 0);
     const requiredEmployeeCount =
