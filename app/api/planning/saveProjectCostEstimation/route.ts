@@ -48,6 +48,8 @@ export async function POST(request: Request) {
       .update({
         estimated_cost: summary?.totalCost ?? 0,
         estimated_budget: summary?.quotationTotal ?? 0,
+        materials_cost: summary?.materialTotal ?? 0,
+        labor_cost: summary?.laborTotal ?? 0,
         markup_rate: Number(markupRate),
         updated_at: new Date().toISOString(),
       })

@@ -104,6 +104,7 @@ export async function GET(request: NextRequest) {
         project_task_id: row.project_task_id,
         main_task_id: row.project_task?.main_task_id ?? "",
         main_task_name: row.project_task?.main_task?.name ?? "",
+        material_id: row.material?.material_id ?? "",
         material_name: row.material?.name ?? "",
         material_unit_cost: Number(row.material?.unit_cost ?? 0),
         quantity: row.estimated_quantity ?? 0,

@@ -157,6 +157,7 @@ export default function ProjectSchedulePage() {
   >(null);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
+  const [isNavigatingBack, setIsNavigatingBack] = useState(false);
   const [isSavingFromModal, setIsSavingFromModal] = useState(false);
 
   const allowBrowserBackRef = useRef(false);
@@ -376,18 +377,39 @@ export default function ProjectSchedulePage() {
     });
   }
 
+  async function updateProjectStatus(status: string) {
+    const response = await fetch("/api/planning/updateProjectStatus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, status }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      toast.error(data?.error || "Failed to update project status.");
+      return false;
+    }
+    return true;
+  }
+
   function requestLeave(action: "next" | "back" | "browserBack") {
     if (!isDirty) {
       if (action === "next") {
         setIsNavigatingNext(true);
-        router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
+        void handleConfirmSave(true, "next");
         return;
       }
 
       if (action === "back") {
-        router.push(
-          `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
-        );
+        void (async () => {
+          const ok = await updateProjectStatus("equipment_pending");
+          if (!ok) {
+            setIsNavigatingBack(false);
+            return;
+          }
+          suppressLeaveGuardRef.current = true;
+          allowBrowserBackRef.current = true;
+          router.push(`/admin/job-creation/equipment-assignment?projectId=${projectId}`);
+        })();
         return;
       }
 
@@ -414,13 +436,18 @@ export default function ProjectSchedulePage() {
   }
 
   function handleGoBack() {
+    if (!isDirty) {
+      setIsNavigatingBack(true);
+    }
     requestLeave("back");
   }
 
-  async function handleConfirmSave(shouldSave: boolean) {
-    const action = pendingAction;
-    setShowSaveConfirm(false);
-    setPendingAction(null);
+  async function handleConfirmSave(shouldSave: boolean, overrideAction?: "next" | "back" | "browserBack") {
+    const action = overrideAction ?? pendingAction;
+    if (!overrideAction) {
+      setShowSaveConfirm(false);
+      setPendingAction(null);
+    }
 
     if (!action) return;
 
@@ -848,8 +875,13 @@ export default function ProjectSchedulePage() {
           <button
             type="button"
             onClick={handleGoBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95">
-            Go Back
+            disabled={isNavigatingBack}
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            {isNavigatingBack ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              "Go Back"
+            )}
           </button>
 
           <button

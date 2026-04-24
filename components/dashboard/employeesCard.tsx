@@ -216,15 +216,15 @@ export default function EmployeesCard({
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="h-1 w-full shrink-0 bg-[#00c065]" />
 
-      <div className="shrink-0 border-b border-gray-200 px-4 py-3">
+      <div className="shrink-0 border-b border-gray-200 px-4 py-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-[14px] font-semibold leading-5 text-gray-900">
+            <h3 className="text-[13px] font-semibold leading-5 text-gray-900">
               {title}
             </h3>
 
             {!isMini ? (
-              <p className="mt-1 text-[11px] leading-4 text-gray-500">
+              <p className="mt-0.5 text-[10px] leading-4 text-gray-500">
                 {availableCount} available, {unavailableCount} unavailable today
               </p>
             ) : null}
@@ -238,7 +238,7 @@ export default function EmployeesCard({
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {!isMini ? (
-          <div className="grid shrink-0 grid-cols-[100px_minmax(0,1fr)] gap-3 border-b border-gray-200 px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.12em] text-gray-400">
+          <div className="grid shrink-0 grid-cols-[96px_minmax(0,1fr)] gap-3 border-b border-gray-200 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.12em] text-gray-400">
             <div>Status</div>
             <div>Staff</div>
           </div>
@@ -248,7 +248,7 @@ export default function EmployeesCard({
           <div
             className={[
               "h-full min-h-0 flex-1 overflow-y-auto",
-              isCompact ? "px-4 py-2" : "px-5 py-2.5",
+              isCompact ? "px-4 py-1.5" : "px-4 py-2",
               "[&::-webkit-scrollbar]:w-2",
               "[&::-webkit-scrollbar-track]:bg-transparent",
               "[&::-webkit-scrollbar-thumb]:rounded-full",
@@ -268,7 +268,7 @@ export default function EmployeesCard({
                 {Array.from({ length: isMini ? 2 : 4 }).map((_, index) => (
                   <div
                     key={index}
-                    className="grid grid-cols-[100px_minmax(0,1fr)] items-center gap-3">
+                    className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
                     <div className="h-4 w-16 animate-pulse rounded bg-gray-200" />
                     <div className="h-10 animate-pulse rounded-lg bg-gray-200" />
                   </div>
@@ -289,7 +289,7 @@ export default function EmployeesCard({
                       className={
                         isMini
                           ? "border-b border-gray-100 px-2 py-2.5 last:border-b-0"
-                          : "grid grid-cols-[100px_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 px-0 py-3 last:border-b-0"
+                          : "grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 px-0 py-2.5 last:border-b-0"
                       }>
                       <div className="flex min-w-0 items-center">
                         {!isMini ? (
@@ -308,7 +308,7 @@ export default function EmployeesCard({
                             statusLabel === "Available"
                               ? "bg-emerald-50 text-emerald-700 ring-emerald-100"
                               : "bg-gray-100 text-gray-500 ring-gray-200",
-                            isCompact ? "h-8 w-8" : "h-9 w-9",
+                            isCompact ? "h-7 w-7" : "h-8 w-8",
                           ].join(" ")}>
                           {employee.avatarUrl ? (
                             <img
@@ -334,14 +334,14 @@ export default function EmployeesCard({
                           <div
                             className={[
                               "truncate font-semibold text-gray-900",
-                              isCompact ? "text-[12px]" : "text-[13px]",
+                              isCompact ? "text-[12px]" : "text-[12.5px]",
                             ].join(" ")}>
                             {employee.name}
                           </div>
 
                           <div className="mt-0.5 flex min-w-0 items-center gap-2">
                             {employee.role && !isMini ? (
-                              <div className="truncate text-[10px] leading-4 text-gray-500">
+                              <div className="truncate text-[10px] leading-3 text-gray-500">
                                 {employee.role}
                               </div>
                             ) : null}

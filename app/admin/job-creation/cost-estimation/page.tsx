@@ -201,7 +201,21 @@ export default function CostEstimationPage() {
 
   function requestLeave(action: "back" | "next") {
     if (!isDirty) {
-      void handleConfirmSave(false, action);
+      if (action === "next") {
+        void handleConfirmSave(true, "next");
+      } else {
+        void (async () => {
+          try {
+            await updateProjectStatus("employee_assignment_pending");
+            router.push(
+              `/admin/job-creation/employee-assignment?projectId=${projectId}`,
+            );
+          } catch (error: any) {
+            setIsNavigating(null);
+            toast.error(error?.message || "Failed to update project status.");
+          }
+        })();
+      }
       return;
     }
 

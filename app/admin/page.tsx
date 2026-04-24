@@ -3,10 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import CurrentJobCard from "../../components/currentJobCard";
-import EmployeesCard from "../../components/employeesCard";
-import AnalyticsCard from "../../components/analyticsCard";
-import JobProgressCard from "../../components/jobProgressCard";
+import CurrentJobCard, {
+  CurrentJobOption,
+} from "../../components/dashboard/currentJobCard";
+import EmployeesCard from "../../components/dashboard/employeesCard";
+import JobProgressCard from "../../components/dashboard/jobProgressCard";
+import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
+import JobNumberCard from "@/components/jobNumberCard";
+import NotificationsCard from "@/components/notificationsCard";
 
 type StepVisualStatus = "done" | "active" | "pending";
 
@@ -175,6 +179,50 @@ function formatDateTime(value?: string | null) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function readProjectStart(project: RawProject) {
+  return readString(
+    project.scheduledStartDatetime,
+    (project as Record<string, unknown>).start_datetime,
+    (project as Record<string, unknown>).startDatetime,
+    (project as Record<string, unknown>).scheduled_start_datetime,
+  );
+}
+
+function readProjectEnd(project: RawProject) {
+  return readString(
+    project.scheduledEndDatetime,
+    (project as Record<string, unknown>).end_datetime,
+    (project as Record<string, unknown>).endDatetime,
+    (project as Record<string, unknown>).scheduled_end_datetime,
+  );
+}
+
+function isProjectOnDate(project: RawProject, selectedDate: string) {
+  const start = readProjectStart(project);
+  const end = readProjectEnd(project);
+
+  if (!start && !end) return false;
+
+  const dayStart = new Date(`${selectedDate}T00:00:00`);
+  const dayEnd = new Date(`${selectedDate}T23:59:59`);
+
+  const startDate = start ? new Date(start) : null;
+  const endDate = end ? new Date(end) : startDate;
+
+  if (!startDate || Number.isNaN(startDate.getTime())) return false;
+  if (!endDate || Number.isNaN(endDate.getTime())) return false;
+
+  return startDate <= dayEnd && endDate >= dayStart;
 }
 
 function diffHours(start?: string | null, end?: string | null) {
@@ -765,6 +813,9 @@ export default function DashboardPage() {
 
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [selectedDashboardDate, setSelectedDashboardDate] = useState(() =>
+    formatDateInputValue(),
+  );
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
@@ -872,6 +923,33 @@ export default function DashboardPage() {
     loadProjectOverview();
   }, [selectedProjectId]);
 
+  const projectsForSelectedDate = useMemo(() => {
+    const matchingProjects = projects.filter((project) =>
+      isProjectOnDate(project, selectedDashboardDate),
+    );
+
+    return matchingProjects.length > 0 ? matchingProjects : projects;
+  }, [projects, selectedDashboardDate]);
+
+  useEffect(() => {
+    if (projectsForSelectedDate.length === 0) {
+      setSelectedProjectId(null);
+      setSelectedProject(null);
+      return;
+    }
+
+    const selectedStillValid = projectsForSelectedDate.some(
+      (project) => project.id === selectedProjectId,
+    );
+
+    if (selectedStillValid) return;
+
+    const nextProject = projectsForSelectedDate[0];
+
+    setSelectedProjectId(nextProject.id);
+    setSelectedProject(nextProject);
+  }, [projectsForSelectedDate, selectedProjectId]);
+
   const selectedStatus =
     selectedProject?.rawStatus || selectedProject?.status || "";
 
@@ -941,54 +1019,106 @@ export default function DashboardPage() {
     );
   }
 
+  function handleDashboardProjectChange(projectId: string) {
+    const nextProject = projects.find((project) => project.id === projectId);
+
+    if (!nextProject) return;
+
+    setSelectedProjectId(nextProject.id);
+    setSelectedProject(nextProject);
+  }
+
+  /**
+   * Dashboard layout percentages.
+   * Change only these values when adjusting the top/bottom dashboard height.
+   */
+  const dashboardTopHeight = "12fr";
+  const dashboardBottomHeight = "88fr";
+
+  /**
+   * Bottom section layout percentages.
+   * Change these if you want Progress / Right Panel to be wider or smaller.
+   */
+  const progressColumnWidth = "7fr";
+  const sideColumnWidth = "3fr";
+
+  const jobCostSpreadItems = [
+    { label: "Labor", percent: 45 },
+    { label: "Materials", percent: 35 },
+    { label: "Equipment", percent: 10 },
+    { label: "Profit", percent: 10 },
+  ];
+
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50 px-6 py-5">
+    <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
       <h1 className="shrink-0 text-2xl font-semibold leading-8 text-gray-900">
         Dashboard
       </h1>
 
-      <div className="mt-5 grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-hidden xl:grid-cols-[minmax(0,70%)_minmax(300px,30%)]">
-        <div className="min-h-0 overflow-hidden">
-          <JobProgressCard
-            selectedProject={selectedProject}
-            loadingDetails={loadingProjects || loadingDetails}
-            navigating={loadingProjects || loadingDetails}
-            processItems={processItems}
-            openProcessIds={openProcessIds}
-            openSubtaskIds={openSubtaskIds}
-            toggleProcessRow={toggleProcessRow}
-            toggleSubtaskRow={toggleSubtaskRow}
-            handleStartMainTasks={handleStartMainTasks}
+      <div
+        className="mt-[1.2%] grid min-h-0 overflow-hidden"
+        style={{
+          gridTemplateRows: `${dashboardTopHeight} minmax(0, ${dashboardBottomHeight})`,
+          rowGap: "2.2%",
+        }}>
+        {/* Top section */}
+        <section className="min-h-0 overflow-hidden">
+          <CurrentJobCard
+            statusLabel={getStatusLabel(selectedStatus)}
+            jobNo={
+              selectedProject?.projectCode ||
+              selectedProject?.project_code ||
+              "No project code"
+            }
+            siteName={selectedProject?.title || "No selected project"}
+            selectedDate={selectedDashboardDate}
+            projects={projectsForSelectedDate as CurrentJobOption[]}
+            selectedProjectId={selectedProjectId}
+            onDateChange={setSelectedDashboardDate}
+            onProjectChange={handleDashboardProjectChange}
+            onCreateJob={() => router.push("/admin/job-creation/basic-details")}
           />
-        </div>
+        </section>
 
-        <div className="grid min-h-0 grid-rows-[20%_40%_40%] gap-5 overflow-hidden">
+        {/* Bottom section */}
+        <section
+          className="grid min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-none"
+          style={{
+            gridTemplateColumns: `${progressColumnWidth} ${sideColumnWidth}`,
+            columnGap: "1.2%",
+          }}>
           <div className="min-h-0 overflow-hidden">
-            <CurrentJobCard
-              statusLabel={getStatusLabel(selectedStatus)}
-              jobNo={
-                selectedProject?.projectCode ||
-                selectedProject?.project_code ||
-                "No project code"
-              }
-              siteName={selectedProject?.title || "No selected project"}
-              onCreateJob={() =>
-                router.push("/admin/job-creation/basic-details")
-              }
+            <JobProgressCard
+              selectedProject={selectedProject}
+              loadingDetails={loadingProjects || loadingDetails}
+              navigating={loadingProjects || loadingDetails}
+              processItems={processItems}
+              openProcessIds={openProcessIds}
+              openSubtaskIds={openSubtaskIds}
+              toggleProcessRow={toggleProcessRow}
+              toggleSubtaskRow={toggleSubtaskRow}
+              handleStartMainTasks={handleStartMainTasks}
             />
           </div>
 
-          <div className="min-h-0 overflow-hidden">
-            <EmployeesCard />
-          </div>
+          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-[2%] overflow-hidden">
+            <div className="min-h-0 overflow-hidden">
+              <EmployeesCard />
+            </div>
 
-          <div className="min-h-0 overflow-hidden">
-            <AnalyticsCard
-              percentComplete={progressPercent}
-              currentTaskLabel={currentTaskLabel}
-            />
+            <div className="min-h-0 overflow-hidden">
+              <NotificationsCard notifications={[]} />
+            </div>
+
+            <div className="min-h-0 overflow-hidden">
+              <DashboardInsightCard
+                percentComplete={progressPercent}
+                currentTaskLabel={currentTaskLabel}
+                costItems={jobCostSpreadItems}
+              />
+            </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

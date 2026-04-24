@@ -131,6 +131,7 @@ export default function SubTaskAssignment() {
   const [createSubTaskModalOpen, setCreateSubTaskModalOpen] = useState(false);
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
+  const [isNavigatingBack, setIsNavigatingBack] = useState(false);
 
   useEffect(() => {
     async function loadProjectSubTasks() {
@@ -268,17 +269,16 @@ export default function SubTaskAssignment() {
 
   function requestLeave(action: "next" | "back" | "browserBack") {
     if (!isDirty) {
-      setPendingAction(action);
-
       if (action === "next") {
-        window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
+        setIsNavigatingNext(true);
+        void handleConfirmSave(true, "next");
         return;
       }
 
       setIsNavigatingNext(false);
 
       if (action === "back") {
-        window.location.href = `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
+        void handleConfirmSave(true, "back");
         return;
       }
 
@@ -313,13 +313,18 @@ export default function SubTaskAssignment() {
   }
 
   function handleGoBack() {
+    if (!isDirty) {
+      setIsNavigatingBack(true);
+    }
     requestLeave("back");
   }
 
-  async function handleConfirmSave(shouldSave: boolean) {
-    const action = pendingAction;
-    setShowSaveConfirm(false);
-    setPendingAction(null);
+  async function handleConfirmSave(shouldSave: boolean, overrideAction?: "next" | "back" | "browserBack") {
+    const action = overrideAction ?? pendingAction;
+    if (!overrideAction) {
+      setShowSaveConfirm(false);
+      setPendingAction(null);
+    }
 
     if (!action) return;
 
@@ -339,6 +344,7 @@ export default function SubTaskAssignment() {
 
       if (!response.ok) {
         setIsNavigatingNext(false);
+        setIsNavigatingBack(false);
         toast.error(data?.error || "Failed to update project status.");
         return;
       }
@@ -844,8 +850,13 @@ export default function SubTaskAssignment() {
           <button
             type="button"
             onClick={handleGoBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95">
-            Go Back
+            disabled={isNavigatingBack}
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            {isNavigatingBack ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              "Go Back"
+            )}
           </button>
 
           <button

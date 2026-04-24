@@ -1,55 +1,89 @@
-"use client"
+"use client";
 
-import CurrentJobCard from "../../components/jobNumberCard"
-import EmployeesCard, { Employee } from "../../components/employeesCard"
-import NotificationsCard, { NotificationItem } from "../../components/notificationsCard"
-import AnalyticsCard from "../../components/analyticsCard"
-import JobCostSpreadCard, { CostSlice } from "../../components/jobCostSpreadCard"
-import JobProgressCard from "../../components/jobProgressCard"
-import { useRouter } from "next/navigation"
+import CurrentJobCard from "../../components/jobNumberCard";
+import EmployeesCard, {
+  Employee,
+} from "../../components/dashboard/employeesCard";
+import NotificationsCard, {
+  NotificationItem,
+} from "../../components/notificationsCard";
+import AnalyticsCard from "../../components/analyticsCard";
+import JobCostSpreadCard, {
+  CostSlice,
+} from "../../components/jobCostSpreadCard";
+import JobProgressCard from "../../components/dashboard/jobProgressCard";
+import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
   const router = useRouter();
 
   const employees: Employee[] = [
-    { id: "e1", name: "Marco Dela Cruz", role: "Painter", status: "Worked", avatarUrl: "/avatars/1.jpg" },
-    { id: "e2", name: "Ramon Santos", role: "Painter", status: "On-leave", avatarUrl: "/avatars/2.jpg" },
-    { id: "e3", name: "Jessa Mendoza", role: "Painter", status: "Worked", avatarUrl: "/avatars/3.jpg" },
-  ]
+    {
+      id: "e1",
+      name: "Marco Dela Cruz",
+      role: "Painter",
+      status: "Worked",
+      avatarUrl: "/avatars/1.jpg",
+    },
+    {
+      id: "e2",
+      name: "Ramon Santos",
+      role: "Painter",
+      status: "On-leave",
+      avatarUrl: "/avatars/2.jpg",
+    },
+    {
+      id: "e3",
+      name: "Jessa Mendoza",
+      role: "Painter",
+      status: "Worked",
+      avatarUrl: "/avatars/3.jpg",
+    },
+  ];
 
   const notifications: NotificationItem[] = [
-    { id: "n1", title: "The client changed their p...", subtitle: "Ramon Dela Cruz", isUnread: true },
-    { id: "n2", title: "The client changed their p...", subtitle: "Marco Dela Cruz", isUnread: false },
-  ]
+    {
+      id: "n1",
+      title: "The client changed their p...",
+      subtitle: "Ramon Dela Cruz",
+      isUnread: true,
+    },
+    {
+      id: "n2",
+      title: "The client changed their p...",
+      subtitle: "Marco Dela Cruz",
+      isUnread: false,
+    },
+  ];
 
   const costSpread: CostSlice[] = [
     { label: "Labor Cost", percent: 30 },
     { label: "Transportation Cost", percent: 30 },
     { label: "Materials Cost", percent: 30 },
     { label: "Nigger Cost", percent: 10 },
-  ]
+  ];
 
   // ... (Keep your existing types for ServiceGroup/ServiceStep) ...
-  type ServiceStepStatus = "done" | "active" | "pending"
+  type ServiceStepStatus = "done" | "active" | "pending";
 
   type ServiceStep = {
-    id: string
-    title: string
-    scheduledAt?: string
-    finishedAt?: string
-    status: ServiceStepStatus
-    assignedTo?: string
-    materialsNeeded?: string
-  }
+    id: string;
+    title: string;
+    scheduledAt?: string;
+    finishedAt?: string;
+    status: ServiceStepStatus;
+    assignedTo?: string;
+    materialsNeeded?: string;
+  };
 
   type ServiceGroup = {
-    id: string
-    title: string
-    scheduledAt?: string
-    finishedAt?: string
-    status: ServiceStepStatus
-    children: ServiceStep[]
-  }
+    id: string;
+    title: string;
+    scheduledAt?: string;
+    finishedAt?: string;
+    status: ServiceStepStatus;
+    children: ServiceStep[];
+  };
 
   const services: ServiceGroup[] = [
     {
@@ -118,14 +152,13 @@ export default function DashboardPage() {
         },
       ],
     },
-  ]
+  ];
 
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold text-gray-900">Job #</h1>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12 items-stretch">
-
         <div className="lg:col-span-3 h-[200px]">
           <CurrentJobCard
             statusLabel="Work in progress"
@@ -161,7 +194,10 @@ export default function DashboardPage() {
 
         <div className="lg:col-span-3 h-[390px] min-h-0 flex flex-col justify-between">
           <div className="flex-1 min-h-0">
-            <AnalyticsCard percentComplete={45} currentTaskLabel="Spray or Brush Roll Finish" />
+            <AnalyticsCard
+              percentComplete={45}
+              currentTaskLabel="Spray or Brush Roll Finish"
+            />
           </div>
 
           <div className="flex-1 min-h-0">
@@ -170,5 +206,5 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

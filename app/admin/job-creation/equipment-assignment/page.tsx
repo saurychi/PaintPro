@@ -57,6 +57,7 @@ export default function EquipmentAssignmentPage() {
   >(null);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
+  const [isNavigatingBack, setIsNavigatingBack] = useState(false);
   const [isSavingFromModal, setIsSavingFromModal] = useState(false);
 
   const allowBrowserBackRef = useRef(false);
@@ -233,14 +234,21 @@ export default function EquipmentAssignmentPage() {
     if (!isDirty) {
       if (action === "next") {
         setIsNavigatingNext(true);
-        window.location.href =
-          `/admin/job-creation/project-schedule?projectId=${projectId}`;
+        void handleConfirmSave(true, "next");
         return;
       }
 
       if (action === "back") {
-        window.location.href =
-          `/admin/job-creation/materials-assignment?projectId=${projectId}`;
+        void (async () => {
+          const ok = await updateProjectStatus("materials_pending");
+          if (!ok) {
+            setIsNavigatingBack(false);
+            return;
+          }
+          suppressLeaveGuardRef.current = true;
+          allowBrowserBackRef.current = true;
+          window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
+        })();
         return;
       }
 
@@ -267,13 +275,18 @@ export default function EquipmentAssignmentPage() {
   }
 
   function handleGoBack() {
+    if (!isDirty) {
+      setIsNavigatingBack(true);
+    }
     requestLeave("back");
   }
 
-  async function handleConfirmSave(shouldSave: boolean) {
-    const action = pendingAction;
-    setShowSaveConfirm(false);
-    setPendingAction(null);
+  async function handleConfirmSave(shouldSave: boolean, overrideAction?: "next" | "back" | "browserBack") {
+    const action = overrideAction ?? pendingAction;
+    if (!overrideAction) {
+      setShowSaveConfirm(false);
+      setPendingAction(null);
+    }
 
     if (!action) return;
 
@@ -319,7 +332,7 @@ export default function EquipmentAssignmentPage() {
         },
         body: JSON.stringify({
           projectId,
-          status: action === "back" ? "materials_pending" : "project_schedule_pending",
+          status: action === "back" ? "materials_pending" : "schedule_pending",
         }),
       });
 
@@ -493,6 +506,20 @@ export default function EquipmentAssignmentPage() {
     );
 
     setIsDirty(true);
+  }
+
+  async function updateProjectStatus(status: string) {
+    const response = await fetch("/api/planning/updateProjectStatus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, status }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      toast.error(data?.error || "Failed to update project status.");
+      return false;
+    }
+    return true;
   }
 
   const totalAssignedEquipment = useMemo(() => {
@@ -749,9 +776,14 @@ export default function EquipmentAssignmentPage() {
           <button
             type="button"
             onClick={handleGoBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95"
+            disabled={isNavigatingBack}
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
           >
-            Go Back
+            {isNavigatingBack ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              "Go Back"
+            )}
           </button>
 
           <button
