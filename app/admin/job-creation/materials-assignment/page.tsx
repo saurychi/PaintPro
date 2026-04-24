@@ -12,6 +12,7 @@ type StepStatus = "done" | "active" | "pending";
 
 type MaterialItem = {
   id: string;
+  materialId: string;
   name: string;
   quantity: number;
   unitCost: number;
@@ -61,6 +62,7 @@ export default function MaterialsAssignment() {
     null,
   );
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
+  const [isNavigatingBack, setIsNavigatingBack] = useState(false);
 
   const undoStackRef = useRef<ServiceGroup[][]>([]);
   const redoStackRef = useRef<ServiceGroup[][]>([]);
@@ -154,6 +156,7 @@ export default function MaterialsAssignment() {
           if (existingGroup) {
             existingGroup.children.push({
               id: row.project_task_material_id,
+              materialId: row.material_id ?? "",
               name: row.material_name,
               quantity: Number(row.quantity ?? 0),
               unitCost: Number(row.material_unit_cost ?? 0),
@@ -170,6 +173,7 @@ export default function MaterialsAssignment() {
             children: [
               {
                 id: row.project_task_material_id,
+                materialId: row.material_id ?? "",
                 name: row.material_name,
                 quantity: Number(row.quantity ?? 0),
                 unitCost: Number(row.material_unit_cost ?? 0),
@@ -313,6 +317,7 @@ export default function MaterialsAssignment() {
             ...group.children,
             {
               id: `local_${material.id}_${Date.now()}`,
+              materialId: material.id,
               name: material.name,
               quantity: safeQuantity,
               unitCost: Number(material.unitCost || 0),
@@ -427,6 +432,7 @@ export default function MaterialsAssignment() {
 
   function requestLeave(action: "next" | "back") {
     if (!isDirty) {
+      if (action === "next") setIsNavigatingNext(true);
       void handleConfirmSave(false, action);
       return;
     }
@@ -450,9 +456,35 @@ export default function MaterialsAssignment() {
     if (!action) return;
 
     if (shouldSave) {
-      toast.message(
-        "Material save is not connected to the database yet. Only project status will be updated.",
+      const groups = services.map((group) => ({
+        projectTaskId: group.projectTaskId,
+        materials: group.children.map((item) => ({
+          materialId: item.materialId,
+          quantity: item.quantity,
+          estimatedCost: item.estimatedCost,
+        })),
+      }));
+
+      const saveResponse = await fetch(
+        "/api/planning/saveProjectTaskMaterials",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, groups }),
+        },
       );
+
+      const saveData = await saveResponse.json();
+
+      if (!saveResponse.ok) {
+        setIsNavigatingNext(false);
+        setIsNavigatingBack(false);
+        toast.error(saveData?.error || "Failed to save materials.");
+        return;
+      }
+
+      setIsDirty(false);
+      toast.success("Materials saved.");
     }
 
     const nextStatus =
@@ -461,10 +493,10 @@ export default function MaterialsAssignment() {
     const updated = await updateProjectStatus(nextStatus);
     if (!updated) {
       setIsNavigatingNext(false);
+      setIsNavigatingBack(false);
       return;
     }
 
-    setIsDirty(false);
     setPendingAction(null);
 
     if (action === "next") {
@@ -475,7 +507,7 @@ export default function MaterialsAssignment() {
     }
 
     setIsNavigatingNext(false);
-
+    setIsNavigatingBack(false);
     router.push(
       `/admin/job-creation/sub-task-assignment?projectId=${projectId}`,
     );
@@ -487,6 +519,9 @@ export default function MaterialsAssignment() {
   }
 
   function handleGoBack() {
+    if (!isDirty) {
+      setIsNavigatingBack(true);
+    }
     requestLeave("back");
   }
 
@@ -704,8 +739,13 @@ export default function MaterialsAssignment() {
           <button
             type="button"
             onClick={handleGoBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95">
-            Go Back
+            disabled={isNavigatingBack}
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            {isNavigatingBack ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              "Go Back"
+            )}
           </button>
 
           <button

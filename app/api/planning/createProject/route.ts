@@ -1149,6 +1149,8 @@ export async function POST(req: Request) {
     .update({
       estimated_cost: estimation.summary.totalCost,
       estimated_budget: estimation.summary.quotationTotal,
+      materials_cost: estimation.summary.materialTotal,
+      labor_cost: estimation.summary.laborTotal,
       markup_rate: 30,
       updated_at: new Date().toISOString(),
     })

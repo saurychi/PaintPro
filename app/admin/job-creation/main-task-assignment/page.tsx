@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, Plus, X, Loader2 } from "lucide-react";
+import { ChevronRight, Plus, X, Loader2, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
@@ -12,6 +12,7 @@ const ACCENT_HOVER = "#00a054";
 const ACCENT_SOFT = "#e6f9ef";
 const ACCENT_BORDER = "#b7efcf";
 const BORDER = "border-gray-200";
+
 
 type Task = {
   id: string;
@@ -36,6 +37,7 @@ export default function MainTaskAssignment() {
   const [loadingProject, setLoadingProject] = useState(true);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [refreshingTasks, setRefreshingTasks] = useState(false);
 
   const [selected, setSelected] = useState<Task[]>([]);
 
@@ -112,17 +114,35 @@ export default function MainTaskAssignment() {
       equipmentIds: string[];
     }[];
   }) {
-    toast.message("Create Task is not connected to the database yet.");
+    const response = await fetch("/api/planning/createMainTask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-    setSelected((prev) => [
-      ...prev,
-      {
-        id: makeId("custom"),
-        name: payload.name,
-      },
-    ]);
+    const data = await response.json();
 
+    if (!response.ok) {
+      const message =
+        [data?.error, data?.details].filter(Boolean).join(": ") ||
+        "Failed to create task.";
+      toast.error(message);
+      throw new Error(message);
+    }
+
+    const newTask: Task = {
+      id: data.mainTask.main_task_id,
+      name: data.mainTask.name,
+    };
+
+    pushSelectedHistory();
+    setSelected((prev) => {
+      if (prev.some((item) => item.id === newTask.id)) return prev;
+      return [newTask, ...prev];
+    });
     setIsDirty(true);
+    toast.success(`Task "${newTask.name}" created.`);
+    loadAllMainTasks({ silent: true });
   }
 
   function undoSelectedTasks() {
@@ -148,7 +168,7 @@ export default function MainTaskAssignment() {
 
   function requestLeave(action: "next" | "back" | "browserBack") {
     if (!isDirty) {
-      void handleConfirmSave(false, action);
+      void handleConfirmSave(action === "next", action);
       return;
     }
 
@@ -306,42 +326,47 @@ export default function MainTaskAssignment() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  useEffect(() => {
-    async function loadAllMainTasks() {
-      try {
+  async function loadAllMainTasks(opts?: { silent?: boolean }) {
+    try {
+      if (opts?.silent) {
+        setRefreshingTasks(true);
+      } else {
         setLoadingTasks(true);
-
-        const response = await fetch("/api/planning/getMainTasks", {
-          method: "GET",
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            [data?.error || "Failed to load main tasks.", data?.details || ""]
-              .filter(Boolean)
-              .join("\n\n"),
-          );
-        }
-
-        const rows = Array.isArray(data?.mainTasks) ? data.mainTasks : [];
-
-        const mapped: Task[] = rows
-          .map((item: any) => ({
-            id: item.main_task_id,
-            name: item.name,
-          }))
-          .filter((item: Task) => item.id && item.name);
-
-        setAllTasks(mapped);
-      } catch (error: any) {
-        toast.error(error?.message || "Failed to load main tasks.");
-      } finally {
-        setLoadingTasks(false);
       }
-    }
 
+      const response = await fetch("/api/planning/getMainTasks", {
+        method: "GET",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error || "Failed to load main tasks.", data?.details || ""]
+            .filter(Boolean)
+            .join("\n\n"),
+        );
+      }
+
+      const rows = Array.isArray(data?.mainTasks) ? data.mainTasks : [];
+
+      const mapped: Task[] = rows
+        .map((item: any) => ({
+          id: item.main_task_id,
+          name: item.name,
+        }))
+        .filter((item: Task) => item.id && item.name);
+
+      setAllTasks(mapped);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load main tasks.");
+    } finally {
+      setLoadingTasks(false);
+      setRefreshingTasks(false);
+    }
+  }
+
+  useEffect(() => {
     loadAllMainTasks();
   }, []);
 
@@ -549,13 +574,34 @@ export default function MainTaskAssignment() {
 
                 <div className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white flex flex-col">
                   <div className="border-b border-gray-200 px-4 py-3">
-                    <div className="grid grid-cols-[88px_1fr] gap-4">
-                      <div className="text-[12px] font-semibold text-gray-700">
-                        Actions
+                    <div className="flex items-center gap-4">
+                      <div className="grid flex-1 grid-cols-[88px_1fr] gap-4">
+                        <div className="text-[12px] font-semibold text-gray-700">
+                          Actions
+                        </div>
+                        <div className="text-[12px] font-semibold text-gray-700">
+                          Main Tasks
+                        </div>
                       </div>
-                      <div className="text-[12px] font-semibold text-gray-700">
-                        Main Tasks
-                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => loadAllMainTasks({ silent: true })}
+                        disabled={refreshingTasks || loadingTasks}
+                        title="Refresh task list"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-40 hover:brightness-95"
+                        style={{
+                          borderColor: ACCENT_BORDER,
+                          backgroundColor: ACCENT_SOFT,
+                          color: ACCENT,
+                        }}>
+                        <RefreshCw
+                          className={[
+                            "h-3.5 w-3.5",
+                            refreshingTasks ? "animate-spin" : "",
+                          ].join(" ")}
+                        />
+                      </button>
                     </div>
                   </div>
 
