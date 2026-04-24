@@ -1,56 +1,50 @@
 "use client";
 
-import React, { Fragment, useMemo } from "react";
-import { Disclosure, Transition } from "@headlessui/react";
-import { ChevronDown, Plus } from "lucide-react";
+import React, { Fragment } from "react";
+import { Transition } from "@headlessui/react";
+import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
-export type StepStatus = "done" | "active" | "pending";
+export type StepVisualStatus = "done" | "active" | "pending";
 
-export type ServiceStep = {
+export type ProcessDetail = {
+  employees: string[];
+  estimatedHours: string;
+};
+
+export type ProcessItem = {
   id: string;
   title: string;
-  scheduledAt?: string;
-  finishedAt?: string;
-  status: StepStatus;
-  assignedTo?: string;
-  materialsNeeded?: string;
-  actionLabel?: string;
+  status: StepVisualStatus;
+  startLabel: string;
+  endLabel: string;
+  children?: ProcessItem[];
+  detail?: ProcessDetail;
 };
 
-export type ServiceGroup = {
-  id: string;
-  title: string;
-  scheduledAt?: string;
-  finishedAt?: string;
-  status: StepStatus;
-  children: ServiceStep[];
-};
-
-type EmbeddedHandlers = {
-  onDownpayment?: () => void;
-  onStartJob?: () => void;
-  onCreateInvoice?: () => void;
-  onAddPayment?: () => void;
-  onEmployeeManagement?: () => void;
-  onConcludeJob?: () => void;
-};
-
-type Props = EmbeddedHandlers & {
+type Props = {
   title?: string;
-  services: ServiceGroup[];
-  onSeeMore?: (stepId: string) => void;
+  selectedProject: unknown | null;
+  loadingDetails: boolean;
+  navigating?: boolean;
+  processItems: ProcessItem[];
+  openProcessIds: Set<string>;
+  openSubtaskIds: Set<string>;
+  toggleProcessRow: (id: string) => void;
+  toggleSubtaskRow: (id: string) => void;
+  handleStartMainTasks: () => void;
+  className?: string;
 };
 
 const GREEN = "#7ED957";
 const SCROLL_TRACK = "#EAF7E4";
 
-function statusLabel(status: StepStatus) {
+function statusLabel(status: StepVisualStatus) {
   if (status === "done") return "Completed";
   if (status === "active") return "Working on it...";
   return "Not started";
 }
 
-function StepIcon({ status }: { status: StepStatus }) {
+function StepIcon({ status }: { status: StepVisualStatus }) {
   if (status === "done") {
     return (
       <span
@@ -60,6 +54,7 @@ function StepIcon({ status }: { status: StepStatus }) {
       </span>
     );
   }
+
   if (status === "active") {
     return (
       <span
@@ -68,6 +63,7 @@ function StepIcon({ status }: { status: StepStatus }) {
       />
     );
   }
+
   return (
     <span className="h-5 w-5 rounded-full border-2 border-gray-300 bg-white" />
   );
@@ -78,7 +74,7 @@ function GroupProgressRing({
   doneCount,
   totalCount,
 }: {
-  status: StepStatus;
+  status: StepVisualStatus;
   doneCount: number;
   totalCount: number;
 }) {
@@ -94,8 +90,6 @@ function GroupProgressRing({
   const dash = pct * c;
   const gap = c - dash;
 
-  const track = "#E5E7EB";
-
   return (
     <div className="relative h-[22px] w-[22px]">
       <svg
@@ -108,9 +102,10 @@ function GroupProgressRing({
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={track}
+          stroke="#E5E7EB"
           strokeWidth={stroke}
         />
+
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -137,183 +132,132 @@ function GroupProgressRing({
   );
 }
 
-type Group = {
-  id: string;
-  title: string;
-  scheduledAt?: string;
-  finishedAt?: string;
-  status: StepStatus;
-  children: ServiceStep[];
-  embedded?: boolean;
-};
+function ProgressSkeleton() {
+  return (
+    <div className="space-y-2 px-3 py-3">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div
+          key={index}
+          className="grid grid-cols-12 items-center gap-3 rounded-lg px-2 py-3">
+          <div className="col-span-1">
+            <div className="h-5 w-5 animate-pulse rounded-full bg-gray-200" />
+          </div>
+
+          <div className="col-span-5">
+            <div className="h-4 w-full max-w-[220px] animate-pulse rounded bg-gray-200" />
+          </div>
+
+          <div className="col-span-3">
+            <div className="h-4 w-28 animate-pulse rounded bg-gray-200" />
+          </div>
+
+          <div className="col-span-3">
+            <div className="h-4 w-24 animate-pulse rounded bg-gray-200" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function JobProgressCard({
   title = "Progress",
-  services,
-  onSeeMore,
-
-  onDownpayment,
-  onStartJob,
-  onCreateInvoice,
-  onAddPayment,
-  onEmployeeManagement,
-  onConcludeJob,
+  selectedProject,
+  loadingDetails,
+  navigating = false,
+  processItems,
+  openProcessIds,
+  openSubtaskIds,
+  toggleProcessRow,
+  toggleSubtaskRow,
+  handleStartMainTasks,
+  className = "",
 }: Props) {
-  const embedded: Group[] = useMemo(
-    () => [
-      {
-        id: "start-of-work",
-        title: "Start of Work",
-        status: "done",
-        scheduledAt: "01 July 2024, 9:00 AM",
-        finishedAt: "01 July 2024, 9:30 AM",
-        embedded: true,
-        children: [
-          {
-            id: "start-downpayment",
-            title: "Manage Downpayment",
-            status: "done",
-            scheduledAt: "01 July 2024, 9:00 AM",
-            finishedAt: "01 July 2024, 9:10 AM",
-            actionLabel: "Change",
-          },
-          {
-            id: "start-job",
-            title: "Start Job",
-            status: "done",
-            scheduledAt: "01 July 2024, 9:15 AM",
-            finishedAt: "01 July 2024, 9:30 AM",
-            actionLabel: "Start Job",
-          },
-        ],
-      },
-      {
-        id: "manage-end-of-work",
-        title: "Manage End of Work",
-        status: "pending",
-        scheduledAt: "01 July 2024, 2:45 PM",
-        finishedAt: "Working on it...",
-        embedded: true,
-        children: [
-          {
-            id: "end-invoice",
-            title: "Invoice Generation",
-            status: "active",
-            scheduledAt: "01 July 2024, 2:45 PM",
-            finishedAt: "Working on it...",
-            actionLabel: "Create Invoice",
-          },
-          {
-            id: "end-payment",
-            title: "Receiving Payment",
-            status: "pending",
-            scheduledAt: "01 July 2024, 2:55 PM",
-            finishedAt: "Working on it...",
-            actionLabel: "Add Payment",
-          },
-          {
-            id: "end-employees",
-            title: "Employee Management",
-            status: "pending",
-            scheduledAt: "01 July 2024, 3:05 PM",
-            finishedAt: "Working on it...",
-            actionLabel: "See More",
-          },
-        ],
-      },
-      {
-        id: "conclude-job",
-        title: "Conclude Job",
-        status: "pending",
-        scheduledAt: "01 July 2024, 3:15 PM",
-        finishedAt: "Working on it...",
-        embedded: true,
-        children: [
-          {
-            id: "conclude-final",
-            title: "Conclude Job",
-            status: "pending",
-            scheduledAt: "01 July 2024, 3:15 PM",
-            finishedAt: "Working on it...",
-            actionLabel: "Conclude Job",
-          },
-        ],
-      },
-    ],
-    [],
-  );
-
-  const groups: Group[] = useMemo(() => {
-    const serviceGroups: Group[] = (services ?? []).map((s) => ({
-      id: s.id,
-      title: s.title,
-      scheduledAt: s.scheduledAt,
-      finishedAt: s.finishedAt,
-      status: s.status,
-      children: s.children ?? [],
-      embedded: false,
-    }));
-
-    return [embedded[0], ...serviceGroups, embedded[1], embedded[2]];
-  }, [services, embedded]);
-
-  function runEmbedded(stepId: string) {
-    if (stepId === "start-downpayment") return onDownpayment?.();
-    if (stepId === "start-job") return onStartJob?.();
-    if (stepId === "end-invoice") return onCreateInvoice?.();
-    if (stepId === "end-payment") return onAddPayment?.();
-    if (stepId === "end-employees") return onEmployeeManagement?.();
-    if (stepId === "conclude-final") return onConcludeJob?.();
-    return undefined;
-  }
-
   return (
-    <section className="h-full min-h-0 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+    <section
+      className={[
+        "flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm",
+        className,
+      ].join(" ")}>
+      <div className="h-1 w-full shrink-0 rounded-t-xl bg-[#00c065]" />
+
+      <div className="shrink-0 border-b border-gray-200 px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-semibold leading-5 text-gray-900">
+              {title}
+            </h2>
+
+            <p className="mt-1 text-[12px] leading-5 text-gray-500">
+              Track service flow, scheduled dates, and task completion.
+            </p>
+          </div>
+
+          {navigating ? (
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-gray-400" />
+          ) : null}
+        </div>
       </div>
 
-      <div className="mt-3 hidden grid-cols-12 gap-2 text-xs font-semibold text-gray-300 md:grid">
+      <div className="hidden shrink-0 grid-cols-12 gap-3 border-b border-gray-200 px-4 py-4 text-[11px] font-medium uppercase tracking-[0.12em] text-gray-400 md:grid">
         <div className="col-span-1">Status</div>
         <div className="col-span-5">Service</div>
         <div className="col-span-3">Scheduled Date &amp; Time</div>
         <div className="col-span-3">Finished Date &amp; Time</div>
       </div>
 
-      <div className="mt-2 flex-1 min-h-0 rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div
-          className={[
-            "h-full min-h-0 overflow-y-auto",
-            "px-3 py-2",
-            "[&::-webkit-scrollbar]:w-2",
-            "[&::-webkit-scrollbar-track]:rounded-full",
-            "[&::-webkit-scrollbar-track]:bg-[#EAF7E4]",
-            "[&::-webkit-scrollbar-thumb]:rounded-full",
-            "[&::-webkit-scrollbar-thumb]:bg-[#7ED957]",
-          ].join(" ")}
-          style={{
-            scrollbarWidth: "thin",
-            scrollbarColor: `${GREEN} ${SCROLL_TRACK}`,
-          }}>
-          <div className="divide-y divide-gray-100">
-            {groups.map((g, gIdx) => {
-              const hasChildren = (g.children?.length ?? 0) > 0;
-              const doneCount = (g.children ?? []).filter(
-                (x) => x.status === "done",
-              ).length;
-              const totalCount = (g.children ?? []).length;
+      <div className="min-h-0 flex-1 p-3">
+        <div className="flex h-full min-h-0 flex-col rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div
+            className={[
+              "min-h-0 flex-1 overflow-y-auto",
+              "px-3 py-3",
+              "[&::-webkit-scrollbar]:w-2",
+              "[&::-webkit-scrollbar-track]:rounded-full",
+              "[&::-webkit-scrollbar-track]:bg-[#EAF7E4]",
+              "[&::-webkit-scrollbar-thumb]:rounded-full",
+              "[&::-webkit-scrollbar-thumb]:bg-[#7ED957]",
+            ].join(" ")}
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: `${GREEN} ${SCROLL_TRACK}`,
+            }}>
+            {!selectedProject ? (
+              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-gray-500">
+                Select a project to view its process flow.
+              </div>
+            ) : loadingDetails ? (
+              <ProgressSkeleton />
+            ) : processItems.length === 0 ? (
+              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-gray-500">
+                No progress steps yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {processItems.map((group) => {
+                  const hasChildren = Boolean(group.children?.length);
+                  const open = openProcessIds.has(group.id);
 
-              return (
-                <Disclosure key={g.id} defaultOpen={gIdx === 0}>
-                  {({ open }) => (
-                    <div className="py-2">
-                      <Disclosure.Button
+                  const doneCount = (group.children ?? []).filter(
+                    (child) => child.status === "done",
+                  ).length;
+
+                  const totalCount = group.children?.length ?? 0;
+
+                  return (
+                    <div key={group.id} className="py-2">
+                      <button
+                        type="button"
                         disabled={!hasChildren}
+                        onClick={() => {
+                          if (hasChildren) {
+                            toggleProcessRow(group.id);
+                          }
+                        }}
                         className={[
-                          "w-full text-left rounded-lg hover:bg-gray-50",
+                          "w-full rounded-lg px-3 py-3 text-left hover:bg-gray-50",
                           hasChildren ? "cursor-pointer" : "cursor-default",
                           "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-                          "px-2 py-2",
                         ].join(" ")}
                         style={
                           hasChildren
@@ -327,7 +271,7 @@ export default function JobProgressCard({
                             <div className="relative h-6">
                               <div className="absolute left-0 top-0">
                                 <GroupProgressRing
-                                  status={g.status}
+                                  status={group.status}
                                   doneCount={doneCount}
                                   totalCount={totalCount}
                                 />
@@ -354,15 +298,15 @@ export default function JobProgressCard({
                                   <div
                                     className={[
                                       "truncate text-sm font-medium",
-                                      g.status === "pending"
+                                      group.status === "pending"
                                         ? "text-gray-700"
                                         : "text-gray-900",
                                     ].join(" ")}>
-                                    {g.title}
+                                    {group.title}
                                   </div>
 
                                   <span className="shrink-0 text-xs text-gray-400">
-                                    {statusLabel(g.status)}
+                                    {statusLabel(group.status)}
                                   </span>
                                 </div>
                               </div>
@@ -371,17 +315,17 @@ export default function JobProgressCard({
 
                           <div className="md:col-span-3">
                             <div className="text-xs text-gray-900">
-                              {g.scheduledAt ?? "-"}
+                              {group.startLabel || "-"}
                             </div>
                           </div>
 
                           <div className="md:col-span-3">
                             <div className="text-xs text-gray-900">
-                              {g.finishedAt ?? "-"}
+                              {group.endLabel || "-"}
                             </div>
                           </div>
                         </div>
-                      </Disclosure.Button>
+                      </button>
 
                       <Transition
                         as={Fragment}
@@ -392,212 +336,185 @@ export default function JobProgressCard({
                         leave="transition duration-100 ease-in"
                         leaveFrom="opacity-100 translate-y-0"
                         leaveTo="opacity-0 -translate-y-1">
-                        <Disclosure.Panel static>
+                        <div>
                           <div className="mt-1 space-y-0">
-                            {g.children.map((c) => {
-                              const dim = c.status === "done";
+                            {group.children?.map((child) => {
+                              const dim = child.status === "done";
+                              const childOpen = openSubtaskIds.has(child.id);
+                              const hasDetail = Boolean(child.detail);
 
                               return (
-                                <Disclosure
-                                  key={c.id}
-                                  as="div"
-                                  defaultOpen={false}>
-                                  {({ open: childOpen }) => (
-                                    <div className="relative">
-                                      <Disclosure.Button
-                                        className={[
-                                          "w-full text-left",
-                                          "rounded-lg hover:bg-gray-50",
-                                          "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-                                          "px-2 py-3",
-                                          "pl-9 pr-2 box-border",
-                                        ].join(" ")}
-                                        style={
-                                          {
-                                            "--tw-ring-color": GREEN,
-                                          } as React.CSSProperties
-                                        }>
-                                        <div className="grid grid-cols-12 items-center gap-3">
-                                          <div className="col-span-1">
-                                            <div className="relative flex h-full w-10 items-center justify-center">
-                                              <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
-                                                <StepIcon status={c.status} />
-                                              </span>
-                                            </div>
+                                <div key={child.id} className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (child.id === "project-kickoff") {
+                                        handleStartMainTasks();
+                                        return;
+                                      }
+
+                                      if (hasDetail) {
+                                        toggleSubtaskRow(child.id);
+                                      }
+                                    }}
+                                    className={[
+                                      "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50",
+                                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                                    ].join(" ")}
+                                    style={
+                                      {
+                                        "--tw-ring-color": GREEN,
+                                      } as React.CSSProperties
+                                    }>
+                                    <div className="grid grid-cols-12 items-center gap-3">
+                                      <div className="col-span-1">
+                                        <div className="relative flex h-full w-10 items-center justify-center">
+                                          <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                            <StepIcon status={child.status} />
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="col-span-5 min-w-0">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                          <div
+                                            className={[
+                                              "truncate text-sm font-medium",
+                                              dim
+                                                ? "text-gray-300"
+                                                : "text-gray-800",
+                                            ].join(" ")}>
+                                            {child.title}
                                           </div>
 
-                                          <div className="col-span-5 min-w-0">
-                                            <div className="flex min-w-0 items-center gap-2">
-                                              <div
-                                                className={[
-                                                  "truncate text-sm font-medium",
-                                                  dim
-                                                    ? "text-gray-300"
-                                                    : "text-gray-800",
-                                                ].join(" ")}>
-                                                {c.title}
-                                              </div>
+                                          <span
+                                            className={[
+                                              "shrink-0 text-xs",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-400",
+                                            ].join(" ")}>
+                                            {statusLabel(child.status)}
+                                          </span>
 
+                                          {child.id === "project-kickoff" ? (
+                                            <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                              Start Main Tasks
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      </div>
+
+                                      <div className="col-span-3">
+                                        <div
+                                          className={[
+                                            "text-xs",
+                                            dim
+                                              ? "text-gray-200"
+                                              : "text-gray-700",
+                                          ].join(" ")}>
+                                          {child.startLabel || "-"}
+                                        </div>
+                                      </div>
+
+                                      <div className="col-span-3">
+                                        <div
+                                          className={[
+                                            "flex items-center justify-between gap-2 text-xs",
+                                            dim
+                                              ? "text-gray-200"
+                                              : "text-gray-700",
+                                          ].join(" ")}>
+                                          <span>{child.endLabel || "-"}</span>
+
+                                          {hasDetail ? (
+                                            <ChevronRight
+                                              className={[
+                                                "h-4 w-4 shrink-0 text-gray-300 transition-transform",
+                                                childOpen ? "rotate-90" : "",
+                                              ].join(" ")}
+                                              aria-hidden
+                                            />
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </button>
+
+                                  <Transition
+                                    as={Fragment}
+                                    show={childOpen && hasDetail}
+                                    enter="transition duration-150 ease-out"
+                                    enterFrom="opacity-0 -translate-y-1"
+                                    enterTo="opacity-100 translate-y-0"
+                                    leave="transition duration-100 ease-in"
+                                    leaveFrom="opacity-100 translate-y-0"
+                                    leaveTo="opacity-0 -translate-y-1">
+                                    <div className="grid grid-cols-12 gap-3 pb-2 pl-9 pr-2">
+                                      <div className="relative col-span-1" />
+
+                                      <div className="col-span-11">
+                                        <div className="rounded-lg border border-gray-200 bg-white p-2">
+                                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                            <span
+                                              className={[
+                                                "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs",
+                                                dim
+                                                  ? "text-gray-400 opacity-70"
+                                                  : "text-gray-700",
+                                              ].join(" ")}>
+                                              Assigned to:{" "}
                                               <span
                                                 className={[
-                                                  "shrink-0 text-xs",
+                                                  "font-semibold",
                                                   dim
-                                                    ? "text-gray-200"
-                                                    : "text-gray-400",
+                                                    ? "text-gray-400 opacity-70"
+                                                    : "text-gray-900",
                                                 ].join(" ")}>
-                                                {statusLabel(c.status)}
+                                                {child.detail?.employees?.length
+                                                  ? child.detail.employees.join(
+                                                      ", ",
+                                                    )
+                                                  : "No assigned employees yet"}
                                               </span>
-                                            </div>
-                                          </div>
+                                            </span>
 
-                                          <div className="col-span-3">
-                                            <div
+                                            <span
                                               className={[
-                                                "text-xs",
+                                                "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs",
                                                 dim
-                                                  ? "text-gray-200"
+                                                  ? "text-gray-400 opacity-70"
                                                   : "text-gray-700",
                                               ].join(" ")}>
-                                              {c.scheduledAt ?? "-"}
-                                            </div>
-                                          </div>
-
-                                          <div className="col-span-3">
-                                            <div
-                                              className={[
-                                                "text-xs",
-                                                dim
-                                                  ? "text-gray-200"
-                                                  : "text-gray-700",
-                                              ].join(" ")}>
-                                              {c.finishedAt ??
-                                                "Working on it..."}
-                                            </div>
+                                              Estimated Duration:{" "}
+                                              <span
+                                                className={[
+                                                  "font-semibold",
+                                                  dim
+                                                    ? "text-gray-400 opacity-70"
+                                                    : "text-gray-900",
+                                                ].join(" ")}>
+                                                {child.detail?.estimatedHours ||
+                                                  "0 hrs"}
+                                              </span>
+                                            </span>
                                           </div>
                                         </div>
-                                      </Disclosure.Button>
-
-                                      <Transition
-                                        as={Fragment}
-                                        show={childOpen}
-                                        enter="transition duration-150 ease-out"
-                                        enterFrom="opacity-0 -translate-y-1"
-                                        enterTo="opacity-100 translate-y-0"
-                                        leave="transition duration-100 ease-in"
-                                        leaveFrom="opacity-100 translate-y-0"
-                                        leaveTo="opacity-0 -translate-y-1">
-                                        <Disclosure.Panel static>
-                                          <div className="grid grid-cols-12 gap-3 pl-9 pr-2 pb-2">
-                                            <div className="col-span-1 relative" />
-                                            <div className="col-span-11">
-                                              <div
-                                                className={
-                                                  g.embedded
-                                                    ? "p-1"
-                                                    : "rounded-lg border border-gray-200 bg-white p-2"
-                                                }>
-                                                {g.embedded ? (
-                                                  // has buttons not materials and assigned to
-                                                  <div className="flex items-center justify-start">
-                                                    <button
-                                                      type="button"
-                                                      onClick={(e) => {
-                                                        e.preventDefault()
-                                                        e.stopPropagation()
-
-                                                        const did = runEmbedded(c.id)
-                                                        if (did !== undefined) return
-
-                                                        console.log("Embedded action clicked:", c.id)
-                                                      }}
-                                                      className={[
-                                                        "inline-flex items-center gap-2",
-                                                        "rounded-md px-5 py-3",
-                                                        "text-xs font-semibold",
-                                                        "shadow-sm",
-                                                        "bg-[#BFEFB0]",
-                                                        dim ? "text-white" : "text-gray-900",
-                                                        "hover:bg-[#B2E7A3] active:bg-[#A6DE97]",
-                                                      ].join(" ")}
-                                                    >
-                                                      {c.id === "start-downpayment" ? <Plus className="h-4 w-4" aria-hidden /> : null}
-                                                      <p>{c.actionLabel ?? "Action"}</p>
-                                                    </button>
-                                                  </div>
-                                                ) : (
-                                                  // has metrials and assignto; no button
-                                                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                                    {c.assignedTo ? (
-                                                      <span
-                                                        className={[
-                                                          "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs",
-                                                          dim ? "text-gray-400 opacity-70" : "text-gray-700",
-                                                        ].join(" ")}
-                                                      >
-                                                        Assigned to:{" "}
-                                                        <span
-                                                          className={[
-                                                            "font-semibold",
-                                                            dim ? "text-gray-400 opacity-70" : "text-gray-900",
-                                                          ].join(" ")}
-                                                        >
-                                                          {c.assignedTo}
-                                                        </span>
-                                                      </span>
-                                                    ) : null}
-
-                                                    {c.materialsNeeded ? (
-                                                      <span
-                                                        className={[
-                                                          "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs",
-                                                          dim ? "text-gray-400 opacity-70" : "text-gray-700",
-                                                        ].join(" ")}
-                                                      >
-                                                        Materials Needed:{" "}
-                                                        <span
-                                                          className={[
-                                                            "font-semibold",
-                                                            dim ? "text-gray-400 opacity-70" : "text-gray-900",
-                                                          ].join(" ")}
-                                                        >
-                                                          {c.materialsNeeded}
-                                                        </span>
-                                                      </span>
-                                                    ) : null}
-
-                                                    {!c.assignedTo &&
-                                                    !c.materialsNeeded ? (
-                                                      <span className="text-xs text-gray-400">
-                                                        No details available.
-                                                      </span>
-                                                    ) : null}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </Disclosure.Panel>
-                                      </Transition>
+                                      </div>
                                     </div>
-                                  )}
-                                </Disclosure>
+                                  </Transition>
+                                </div>
                               );
                             })}
                           </div>
-                        </Disclosure.Panel>
+                        </div>
                       </Transition>
                     </div>
-                  )}
-                </Disclosure>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
-
-          {groups.length === 0 ? (
-            <div className="py-6 text-center text-xs text-gray-400">
-              No progress steps yet.
-            </div>
-          ) : null}
         </div>
       </div>
     </section>

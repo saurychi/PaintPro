@@ -1300,17 +1300,19 @@ export default function AdminProjectsPage() {
         <h1 className="text-2xl font-semibold text-gray-900">Projects</h1>
 
         <div className="mt-6 grid h-[calc(100vh-112px)] grid-cols-1 gap-4 overflow-hidden lg:grid-cols-12 items-stretch">
-          <ProgressMainSection
-            selectedProject={selectedProject}
-            loadingDetails={loadingDetails}
-            navigating={loadingDetails}
-            processItems={processItems as ProcessItem[]}
-            openProcessIds={openProcessIds}
-            openSubtaskIds={openSubtaskIds}
-            toggleProcessRow={toggleProcessRow}
-            toggleSubtaskRow={toggleSubtaskRow}
-            handleStartMainTasks={handleStartMainTasks}
-          />
+          <div className="lg:col-span-9 h-full min-h-0 overflow-hidden">
+            <ProgressMainSection
+              selectedProject={selectedProject}
+              loadingDetails={loadingDetails}
+              navigating={loadingDetails}
+              processItems={processItems as ProcessItem[]}
+              openProcessIds={openProcessIds}
+              openSubtaskIds={openSubtaskIds}
+              toggleProcessRow={toggleProcessRow}
+              toggleSubtaskRow={toggleSubtaskRow}
+              handleStartMainTasks={handleStartMainTasks}
+            />
+          </div>
 
           <aside className="lg:col-span-3 grid min-h-0 grid-cols-1 grid-rows-[minmax(0,2.75fr)_minmax(0,2.25fr)] gap-4">
             <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
