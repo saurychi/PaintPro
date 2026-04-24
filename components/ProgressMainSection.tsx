@@ -95,15 +95,23 @@ function TimelineMarker({
   showLine: boolean;
 }) {
   return (
-    <div className="relative flex w-7 shrink-0 items-start justify-center">
+    <div className="relative flex h-full min-h-[32px] w-7 shrink-0 items-start justify-center">
       <StepIcon status={status} size="lg" />
 
       {showLine ? (
         <div
-          className="absolute left-1/2 top-5 bottom-[-14px] -translate-x-1/2 border-l border-dashed border-gray-400"
+          className="absolute left-1/2 top-5 bottom-[-20px] -translate-x-1/2 border-l border-dashed border-gray-400"
           aria-hidden="true"
         />
       ) : null}
+    </div>
+  );
+}
+
+function SubtaskTimelineMarker({ status }: { status: StepVisualStatus }) {
+  return (
+    <div className="relative flex w-4 shrink-0 items-center justify-center">
+      <StepIcon status={status} size="md" />
     </div>
   );
 }
@@ -171,9 +179,9 @@ export default function ProgressMainSection({
     <section className="lg:col-span-9 flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
 
-      <div className="border-b border-gray-200 px-6 py-5">
+      <div className="border-b border-gray-200 px-6 py-3">
         <div className="flex items-start justify-between gap-4">
-          <div className="border-b border-gray-200 px-4 py-3">
+          <div>
             <h2 className="text-[18px] font-semibold leading-5 text-gray-900">
               Progress
             </h2>
@@ -212,7 +220,7 @@ export default function ProgressMainSection({
               return (
                 <div key={item.id} className="relative">
                   <div className="grid grid-cols-1 gap-2 rounded-xl px-2 py-2 transition hover:bg-gray-50 md:grid-cols-[40px_minmax(0,1fr)_200px_200px] md:gap-3">
-                    <div className="flex md:justify-center">
+                    <div className="flex self-stretch md:justify-center">
                       <TimelineMarker
                         status={item.status}
                         showLine={!isLastMain}
@@ -269,14 +277,14 @@ export default function ProgressMainSection({
                           : "mt-0 grid-rows-[0fr] opacity-0"
                       }`}>
                       <div className="overflow-hidden">
-                        <div className="ml-[52px] rounded-xl border border-gray-200 bg-white">
+                        <div className="ml-[18px] rounded-lg border border-gray-200 bg-white">
                           <div className="divide-y divide-gray-200">
                             {item.children?.map((child) => {
                               const isSubOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
 
                               return (
-                                <div key={child.id} className="px-2 py-2.5">
+                                <div key={child.id} className="px-1.5 py-1.5">
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -289,16 +297,21 @@ export default function ProgressMainSection({
                                         toggleSubtaskRow(child.id);
                                       }
                                     }}
-                                    className={`grid w-full grid-cols-1 gap-3 rounded-lg px-2 py-2 text-left transition md:grid-cols-[minmax(0,2.4fr)_180px_180px_36px] md:items-center ${
+                                    className={`grid w-full grid-cols-1 gap-2 rounded-md px-1.5 py-1.5 text-left transition md:grid-cols-[20px_minmax(0,2.4fr)_160px_160px_28px] md:items-center ${
                                       hasDetail ||
                                       child.id === "project-kickoff"
                                         ? "hover:bg-gray-50"
                                         : ""
                                     }`}>
+                                    <div className="hidden md:flex md:justify-center">
+                                      <SubtaskTimelineMarker
+                                        status={child.status}
+                                      />
+                                    </div>
                                     <div className="min-w-0">
-                                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                                         <span
-                                          className={`block text-[12px] leading-5 break-words ${
+                                          className={`block text-[12px] leading-4.5 break-words ${
                                             child.status === "done"
                                               ? "text-gray-400"
                                               : child.status === "active"
@@ -316,11 +329,11 @@ export default function ProgressMainSection({
                                       </div>
                                     </div>
 
-                                    <div className="text-[12px] leading-5 text-gray-600">
+                                    <div className="text-[12px] leading-5 text-gray-600 md:flex md:min-h-[40px] md:items-center">
                                       {child.startLabel}
                                     </div>
 
-                                    <div className="text-[12px] leading-5 text-gray-900">
+                                    <div className="text-[12px] leading-5 text-gray-900 md:flex md:min-h-[40px] md:items-center">
                                       {child.endLabel}
                                     </div>
 
@@ -339,11 +352,11 @@ export default function ProgressMainSection({
                                     <div
                                       className={`grid transition-all duration-300 ease-out ${
                                         isSubOpen
-                                          ? "mt-2 grid-rows-[1fr] opacity-100"
+                                          ? "mt-1 grid-rows-[1fr] opacity-100"
                                           : "mt-0 grid-rows-[0fr] opacity-0"
                                       }`}>
-                                      <div className="overflow-hidden rounded-lg border border-gray-200 bg-[#fafafa]">
-                                        <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2">
+                                      <div className="overflow-hidden rounded-md border border-gray-200 bg-[#fafafa]">
+                                        <div className="grid grid-cols-1 gap-1.5 px-3 py-2 md:grid-cols-2">
                                           <div className="text-[12px] leading-5 text-gray-700">
                                             <span className="font-medium text-gray-900">
                                               Assigned:

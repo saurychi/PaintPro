@@ -4,7 +4,7 @@ import Image from "next/image"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import rawCountries from "@/app/data/country-by-calling-code.json"
+import rawCountries from "@/lib/data/country-by-calling-code.json"
 
 type CountryRaw = {
   country: string
