@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 import CurrentJobCard, {
   CurrentJobOption,
@@ -16,6 +17,7 @@ type StepVisualStatus = "done" | "active" | "pending";
 
 type ProcessDetail = {
   employees: string[];
+  employeeIds: string[];
   estimatedHours: string;
 };
 
@@ -55,77 +57,6 @@ type OverviewResponse = {
   details?: string;
 };
 
-type WorkflowStep = {
-  key: string;
-  title: string;
-  rawStatus: string;
-  route: (projectId: string) => string;
-};
-
-const WORKFLOW_STEPS: WorkflowStep[] = [
-  {
-    key: "main-task",
-    title: "Main Task Assignment",
-    rawStatus: "main_task_pending",
-    route: (projectId) =>
-      `/admin/job-creation/main-task-assignment?projectId=${projectId}`,
-  },
-  {
-    key: "sub-task",
-    title: "Sub Task Assignment",
-    rawStatus: "sub_task_pending",
-    route: (projectId) =>
-      `/admin/job-creation/sub-task-assignment?projectId=${projectId}`,
-  },
-  {
-    key: "materials",
-    title: "Materials Assignment",
-    rawStatus: "materials_pending",
-    route: (projectId) =>
-      `/admin/job-creation/materials-assignment?projectId=${projectId}`,
-  },
-  {
-    key: "equipment",
-    title: "Equipment Assignment",
-    rawStatus: "equipment_pending",
-    route: (projectId) =>
-      `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
-  },
-  {
-    key: "schedule",
-    title: "Project Schedule",
-    rawStatus: "schedule_pending",
-    route: (projectId) =>
-      `/admin/job-creation/project-schedule?projectId=${projectId}`,
-  },
-  {
-    key: "employee-assignment",
-    title: "Employee Assignment",
-    rawStatus: "employee_assignment_pending",
-    route: (projectId) =>
-      `/admin/job-creation/employee-assignment?projectId=${projectId}`,
-  },
-  {
-    key: "cost-estimation",
-    title: "Cost Estimation",
-    rawStatus: "cost_estimation_pending",
-    route: (projectId) =>
-      `/admin/job-creation/cost-estimation?projectId=${projectId}`,
-  },
-  {
-    key: "overview",
-    title: "Overview",
-    rawStatus: "overview_pending",
-    route: (projectId) => `/admin/job-creation/overview?projectId=${projectId}`,
-  },
-  {
-    key: "quotation",
-    title: "Quotation Generation",
-    rawStatus: "quotation_pending",
-    route: (projectId) =>
-      `/admin/job-creation/quotation-generation?projectId=${projectId}`,
-  },
-];
 
 function normalizeStatus(value?: string | null) {
   return String(value || "")
@@ -281,35 +212,6 @@ function lastDateLabel(values: Array<string | null | undefined>) {
   return formatDateTime(valid[0].raw);
 }
 
-function getCurrentWorkflowIndex(status: string) {
-  const normalized = normalizeStatus(status);
-
-  const index = WORKFLOW_STEPS.findIndex(
-    (step) => step.rawStatus === normalized,
-  );
-
-  if (index >= 0) return index;
-
-  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length;
-  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 1;
-  if (normalized === "completed") return WORKFLOW_STEPS.length + 2;
-  if (normalized === "cancelled") return -2;
-
-  return 0;
-}
-
-function getStepStatus(
-  projectStatus: string,
-  stepIndex: number,
-): StepVisualStatus {
-  const currentIndex = getCurrentWorkflowIndex(projectStatus);
-
-  if (currentIndex === -2) return "pending";
-  if (currentIndex > stepIndex) return "done";
-  if (currentIndex === stepIndex) return "active";
-
-  return "pending";
-}
 
 function getStatusLabel(projectStatus: string) {
   const status = normalizeStatus(projectStatus);
@@ -445,6 +347,33 @@ function collectEmployeeLabelsFromSubTask(subTask: Record<string, unknown>) {
   return unique(labels);
 }
 
+function collectEmployeeIdsFromSubTask(subTask: Record<string, unknown>) {
+  const ids: string[] = [];
+
+  const directId = readString(subTask.assignedUserId, subTask.assigned_user_id);
+  if (directId) ids.push(directId);
+
+  const collections = [
+    ...asArray<Record<string, unknown>>(subTask.assignedStaff),
+    ...asArray<Record<string, unknown>>(subTask.assignedEmployees),
+    ...asArray<Record<string, unknown>>(subTask.employees),
+    ...asArray<Record<string, unknown>>(subTask.staff),
+    ...asArray<Record<string, unknown>>(subTask.projectSubTaskStaff),
+    ...asArray<Record<string, unknown>>(subTask.assigned_staff),
+  ];
+
+  for (const entry of collections) {
+    const nested =
+      asRecord(entry.user) ||
+      asRecord(entry.employee) ||
+      asRecord(entry.profile);
+    const id = readString(entry.user_id, entry.userId, nested?.id);
+    if (id) ids.push(id);
+  }
+
+  return unique(ids);
+}
+
 function deriveProjectMeta(
   projectRow: RawProject | null,
   overviewProject: Record<string, unknown> | null,
@@ -518,51 +447,14 @@ function deriveProjectMeta(
 
 function buildProcessItems(args: {
   projectStatus: string;
-  workflowSteps: Array<WorkflowStep & { visualStatus: StepVisualStatus }>;
   mainTasks: Record<string, unknown>[];
-  projectStart: string | null;
   projectEnd: string | null;
 }) {
-  const { projectStatus, workflowSteps, mainTasks, projectStart, projectEnd } =
-    args;
+  const { projectStatus, mainTasks, projectEnd } = args;
 
   const normalized = normalizeStatus(projectStatus);
 
-  const jobCreationStatus: StepVisualStatus = workflowSteps.every(
-    (step) => step.visualStatus === "done",
-  )
-    ? "done"
-    : workflowSteps.some((step) => step.visualStatus === "active")
-      ? "active"
-      : "pending";
-
-  const items: ProcessItem[] = [
-    {
-      id: "job-creation",
-      title: "Job Creation",
-      status: jobCreationStatus,
-      startLabel: formatDateTime(projectStart),
-      endLabel:
-        jobCreationStatus === "done"
-          ? "Completed"
-          : jobCreationStatus === "active"
-            ? "Working on it..."
-            : "-",
-      children: workflowSteps.map((step) => ({
-        id: `workflow-${step.key}`,
-        title: step.title,
-        status: step.visualStatus,
-        startLabel: "-",
-        endLabel:
-          step.visualStatus === "done"
-            ? "Completed"
-            : step.visualStatus === "active"
-              ? "Working on it..."
-              : "-",
-      })),
-    },
-  ];
-
+  const items: ProcessItem[] = [];
 
   for (let index = 0; index < mainTasks.length; index += 1) {
     const mainTask = mainTasks[index];
@@ -580,6 +472,7 @@ function buildProcessItems(args: {
       );
 
       const employeeLabels = collectEmployeeLabelsFromSubTask(subTask);
+      const employeeIds = collectEmployeeIdsFromSubTask(subTask);
 
       const estimatedHours = readNumber(
         subTask.estimatedHours,
@@ -621,6 +514,7 @@ function buildProcessItems(args: {
             : "-",
         detail: {
           employees: employeeLabels,
+          employeeIds,
           estimatedHours: formatHours(estimatedHours),
         },
       };
@@ -781,6 +675,14 @@ export default function DashboardPage() {
 
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setCurrentUserId(data.user.id);
+    });
+  }, []);
 
   useEffect(() => {
     async function loadProjects() {
@@ -843,7 +745,7 @@ export default function DashboardPage() {
         setOverviewProject(asRecord(data.project));
         setMainTasks(nextMainTasks);
 
-        const defaultOpen = new Set<string>(["job-creation"]);
+        const defaultOpen = new Set<string>();
 
         if (nextMainTasks.length > 0) {
           const firstMainTaskId =
@@ -867,7 +769,7 @@ export default function DashboardPage() {
     }
 
     loadProjectOverview();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, refreshKey]);
 
   const projectsForSelectedDate = useMemo(() => {
     const matchingProjects = projects.filter((project) =>
@@ -903,28 +805,13 @@ export default function DashboardPage() {
     return deriveProjectMeta(selectedProject, overviewProject, mainTasks);
   }, [selectedProject, overviewProject, mainTasks]);
 
-  const workflowSteps = useMemo(() => {
-    return WORKFLOW_STEPS.map((step, index) => ({
-      ...step,
-      visualStatus: getStepStatus(selectedStatus, index),
-    }));
-  }, [selectedStatus]);
-
   const processItems = useMemo(() => {
     return buildProcessItems({
       projectStatus: selectedStatus,
-      workflowSteps,
       mainTasks,
-      projectStart: projectMeta.startDatetime || null,
       projectEnd: projectMeta.endDatetime || null,
     });
-  }, [
-    selectedStatus,
-    workflowSteps,
-    mainTasks,
-    projectMeta.startDatetime,
-    projectMeta.endDatetime,
-  ]);
+  }, [selectedStatus, mainTasks, projectMeta.endDatetime]);
 
   function toggleProcessRow(id: string) {
     setOpenProcessIds((prev) => {
@@ -948,12 +835,20 @@ export default function DashboardPage() {
     });
   }
 
-  function handleStartMainTasks() {
-    if (!selectedProjectId) return;
-
-    router.push(
-      `/admin/job-creation/main-task-assignment?projectId=${selectedProjectId}`,
-    );
+  async function handleFinishSubtask(subtaskId: string) {
+    const res = await fetch("/api/planning/updateSubTaskStatus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectSubTaskId: subtaskId, status: "completed" }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(
+        [data?.error, data?.details].filter(Boolean).join(": ") ||
+          "Failed to update subtask.",
+      );
+    }
+    setRefreshKey((k) => k + 1);
   }
 
   function handleDashboardProjectChange(projectId: string) {
@@ -1028,7 +923,8 @@ export default function DashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
-              handleStartMainTasks={handleStartMainTasks}
+              onFinishSubtask={handleFinishSubtask}
+              currentUserId={currentUserId}
             />
           </div>
 

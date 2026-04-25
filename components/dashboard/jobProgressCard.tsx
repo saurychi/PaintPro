@@ -10,6 +10,7 @@ export type StepVisualStatus = "done" | "active" | "pending";
 
 export type ProcessDetail = {
   employees: string[];
+  employeeIds: string[];
   estimatedHours: string;
 };
 
@@ -34,6 +35,8 @@ type Props = {
   openSubtaskIds: Set<string>;
   toggleProcessRow: (id: string) => void;
   toggleSubtaskRow: (id: string) => void;
+  onFinishSubtask?: (subtaskId: string) => Promise<void>;
+  currentUserId?: string | null;
   className?: string;
 };
 
@@ -194,12 +197,17 @@ export default function JobProgressCard({
   openSubtaskIds,
   toggleProcessRow,
   toggleSubtaskRow,
+  onFinishSubtask,
+  currentUserId,
   className = "",
 }: Props) {
   const router = useRouter();
 
   const [startingProject, setStartingProject] = useState(false);
   const [startOfWorkDone, setStartOfWorkDone] = useState(false);
+  const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(null);
+  const [confirmingFinishTitle, setConfirmingFinishTitle] = useState("");
+  const [finishing, setFinishing] = useState(false);
 
   const selectedProjectStatus = readProjectStatus(selectedProject);
 
@@ -251,6 +259,21 @@ export default function JobProgressCard({
       });
     } finally {
       setStartingProject(false);
+    }
+  }
+
+  async function handleConfirmFinish() {
+    if (!confirmingFinishId || !onFinishSubtask) return;
+    setFinishing(true);
+    try {
+      await onFinishSubtask(confirmingFinishId);
+      setConfirmingFinishId(null);
+      toast.success("Subtask completed");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to finish subtask.";
+      toast.error("Could not finish subtask", { description: message });
+    } finally {
+      setFinishing(false);
     }
   }
 
@@ -607,23 +630,15 @@ export default function JobProgressCard({
                                       </div>
                                     </div>
                                   ) : (
-                                    /* ── Regular child: button wrapper for detail expansion ── */
-                                    <button
-                                      type="button"
+                                    /* ── Regular child: div wrapper with optional Finish button ── */
+                                    <div
                                       onClick={() => {
-                                        if (hasDetail) {
-                                          toggleSubtaskRow(child.id);
-                                        }
+                                        if (hasDetail) toggleSubtaskRow(child.id);
                                       }}
                                       className={[
                                         "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50",
-                                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-                                      ].join(" ")}
-                                      style={
-                                        {
-                                          "--tw-ring-color": GREEN,
-                                        } as React.CSSProperties
-                                      }>
+                                        hasDetail ? "cursor-pointer" : "",
+                                      ].join(" ")}>
                                       <div className="grid grid-cols-12 items-center gap-3">
                                         {/* Status icon */}
                                         <div className="col-span-1">
@@ -678,9 +693,7 @@ export default function JobProgressCard({
                                           <div
                                             className={[
                                               "flex items-center justify-end gap-2 text-xs",
-                                              dim
-                                                ? "text-gray-200"
-                                                : "text-gray-700",
+                                              dim ? "text-gray-200" : "text-gray-700",
                                             ].join(" ")}>
                                             <span>{child.endLabel || "-"}</span>
                                             {hasDetail ? (
@@ -695,7 +708,7 @@ export default function JobProgressCard({
                                           </div>
                                         </div>
                                       </div>
-                                    </button>
+                                    </div>
                                   )}
 
                                   {/* Detail expansion panel (regular children only) */}
@@ -756,6 +769,21 @@ export default function JobProgressCard({
                                                   "0 hrs"}
                                               </span>
                                             </span>
+
+                                            {onFinishSubtask &&
+                                            currentUserId &&
+                                            child.detail?.employeeIds?.includes(currentUserId) &&
+                                            child.status !== "done" ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setConfirmingFinishId(child.id);
+                                                  setConfirmingFinishTitle(child.title);
+                                                }}
+                                                className="ml-auto shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100">
+                                                Finish
+                                              </button>
+                                            ) : null}
                                           </div>
                                         </div>
                                       </div>
@@ -775,6 +803,41 @@ export default function JobProgressCard({
           </div>
         </div>
       </div>
+
+      {/* Finish subtask confirmation modal */}
+      {confirmingFinishId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl">
+            <h3 className="text-base font-semibold text-gray-900">
+              Mark subtask as done?
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Are you sure you want to finish{" "}
+              <span className="font-medium text-gray-900">
+                {confirmingFinishTitle}
+              </span>
+              ? This will mark it as completed.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmingFinishId(null)}
+                disabled={finishing}
+                className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmFinish}
+                disabled={finishing}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors disabled:opacity-50 hover:opacity-90"
+                style={{ backgroundColor: GREEN }}>
+                {finishing ? "Finishing..." : "Yes, finish"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

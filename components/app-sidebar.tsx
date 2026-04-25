@@ -115,6 +115,12 @@ const adminItems: Item[] = [
 const staffItems: Item[] = [
   { key: "dashboard", title: "Dashboard", url: "/staff", icon: Home },
   { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
+  {
+    key: "messages",
+    title: "Messages",
+    url: "/staff/messages",
+    icon: MessageSquare,
+  },
   { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
   {
     key: "settings",

@@ -232,7 +232,7 @@ function buildProcessItems(
                 ) || null,
               )
             : "-",
-        detail: { employees, estimatedHours: formatHours(estimatedHours) },
+        detail: { employees, employeeIds: [], estimatedHours: formatHours(estimatedHours) },
       };
     });
 

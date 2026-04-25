@@ -1,22 +1,41 @@
 "use client"
 
 import React, { useMemo, useState, useEffect, useRef } from "react"
-import {
-  fetchConversations,
-  fetchMessages,
-  postMessage,
-  fetchAvailableUsers,
-  createOrGetConversation,
-  markConversationAsRead,
-  type Message
-} from "@/lib/messages"
-import { supabase } from '@/lib/supabaseClient'
-import { Search } from "lucide-react"
+import { Search, MessageSquare } from "lucide-react"
+import { useClientProject } from "../ClientShellClient"
+import { supabase } from "@/lib/supabaseClient"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
 
-export default function AdminMessages() {
+type Message = {
+  id: string
+  conversation_id: string
+  sender_id: string | null
+  client_id: string | null
+  content: string
+  created_at: string
+}
+
+type Conversation = {
+  id: string
+  name: string
+  role: string
+  profile_image_url: string | null
+  lastMessage: string
+  lastActivity: number
+}
+
+type StaffUser = {
+  id: string
+  username: string
+  role: string
+  profile_image_url: string | null
+}
+
+export default function ClientMessages() {
+  const { projectId } = useClientProject()
+
   // UI State
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -24,29 +43,18 @@ export default function AdminMessages() {
   const [isLoading, setIsLoading] = useState(true)
 
   // Data State
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [conversations, setConversations] = useState<any[]>([])
+  const [clientId, setClientId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>([])
   const [chatHistory, setChatHistory] = useState<Message[]>([])
 
   // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
-  const [availableUsers, setAvailableUsers] = useState<any[]>([])
+  const [availableUsers, setAvailableUsers] = useState<StaffUser[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
-  // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // 1. Get current user
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) setCurrentUserId(user.id)
-    }
-    getUser()
-  }, [])
-
-  // 2. Auto-Scroll to bottom function
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -55,99 +63,66 @@ export default function AdminMessages() {
     scrollToBottom()
   }, [chatHistory])
 
-  // 3. Helper function to load/refresh conversations
-  const loadConversations = async (userId: string, selectChatId?: string) => {
-    const data = await fetchConversations(userId)
-    const mappedConvos = data.map((cp: any) => {
-      // Calculate unread status by comparing timestamps
-      const lastMsg = cp.latest_message
-      const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
-      const lastMsgTime = lastMsg ? new Date(lastMsg.created_at).getTime() : 0
-      const isUnread = lastMsgTime > lastReadAt
-
-      return {
-        id: cp.conversation_id,
-        name: cp.users?.username || "Unknown User",
-        role: cp.users?.role || "Client",
-        profile_image_url: cp.users?.profile_image_url || null,
-        lastMessage: lastMsg ? lastMsg.content : "Say hello!",
-        unread: isUnread,
-        lastActivity: lastMsgTime // <-- NEW: Store time for sorting
-      }
-    })
-
-    // <-- NEW: Sort initial load (highest timestamp first)
-    mappedConvos.sort((a, b) => b.lastActivity - a.lastActivity)
-
-    setConversations(mappedConvos)
-
+  // Load conversations list — also retrieves clientId tied to this project
+  const loadConversations = async (selectChatId?: string) => {
+    const res = await fetch("/api/messages/project-chat")
+    if (!res.ok) { setIsLoading(false); return }
+    const data = await res.json()
+    const convos: Conversation[] = data.conversations ?? []
+    setConversations(convos)
+    if (data.clientId) setClientId(data.clientId)
     if (selectChatId) {
       setActiveChatId(selectChatId)
-    } else if (mappedConvos.length > 0 && !activeChatId) {
-      setActiveChatId(mappedConvos[0].id)
+    } else if (convos.length > 0 && !activeChatId) {
+      setActiveChatId(convos[0].id)
     }
     setIsLoading(false)
   }
 
-  // 4. Initial Load
+  // Initial load
   useEffect(() => {
-    if (currentUserId) loadConversations(currentUserId)
-  }, [currentUserId])
+    if (!projectId) { setIsLoading(false); return }
+    loadConversations()
+  }, [projectId])
 
-  // 5. When user CLICKS a chat, Mark as Read in DB
-  useEffect(() => {
-    if (activeChatId && currentUserId) {
-      markConversationAsRead(activeChatId, currentUserId)
-      setConversations(prev => prev.map(c =>
-        c.id === activeChatId ? { ...c, unread: false } : c
-      ))
-    }
-  }, [activeChatId, currentUserId])
-
-  // 6. Fetch Chat History
+  // Fetch messages when active chat changes
   useEffect(() => {
     if (!activeChatId) return
-
     async function loadMessages() {
-      const msgs = await fetchMessages(activeChatId!)
-      setChatHistory(msgs)
+      const res = await fetch(`/api/messages/project-chat/messages?conversationId=${activeChatId}`)
+      if (res.ok) setChatHistory(await res.json())
     }
     loadMessages()
   }, [activeChatId])
 
-  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  // Realtime listener for incoming staff replies
   useEffect(() => {
-    if (!currentUserId) return
+    if (!activeChatId) return
 
     const channel = supabase
-      .channel(`global-chat-listener`)
+      .channel(`project-chat-${activeChatId}`)
       .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${activeChatId}`,
+        },
         (payload) => {
           const newMessage = payload.new as Message
-
-          if (newMessage.conversation_id === activeChatId) {
-            // It's the chat we are currently looking at
-            if (newMessage.sender_id !== currentUserId) {
-              setChatHistory((prev) => [...prev, newMessage])
-              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
-            }
-          }
-
-          // <-- NEW: Update the sidebar for ALL incoming messages and bump to top
-          setConversations(prev => {
-            const updated = prev.map(c =>
-              c.id === newMessage.conversation_id
-                ? {
-                    ...c,
-                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
-                    lastMessage: newMessage.content,
-                    lastActivity: new Date(newMessage.created_at).getTime()
-                  }
+          // Skip messages we sent ourselves (already added optimistically)
+          if (newMessage.client_id === clientId) return
+          setChatHistory((prev) => {
+            if (prev.some((m) => m.id === newMessage.id)) return prev
+            return [...prev, newMessage]
+          })
+          setConversations((prev) => {
+            const updated = prev.map((c) =>
+              c.id === activeChatId
+                ? { ...c, lastMessage: newMessage.content, lastActivity: new Date(newMessage.created_at).getTime() }
                 : c
             )
-            // Re-sort the array so this chat jumps to the top
             return updated.sort((a, b) => b.lastActivity - a.lastActivity)
           })
         }
@@ -155,26 +130,29 @@ export default function AdminMessages() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeChatId, currentUserId])
+  }, [activeChatId, clientId])
 
-  // 8. Handle Sending a Message
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !activeChatId || !currentUserId) return
+    if (!inputMessage.trim() || !activeChatId) return
     setIsSending(true)
     try {
-      const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
-      setChatHistory((prev) => [...prev, sentMsg])
-
-      // <-- NEW: Update sidebar instantly for ourselves and bump to top
-      setConversations(prev => {
-        const updated = prev.map(c =>
+      const res = await fetch("/api/messages/project-chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: activeChatId, content: inputMessage }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(`${data?.error} — ${data?.details ?? ""}`)
+      const msg: Message = data
+      setChatHistory((prev) => [...prev, msg])
+      setConversations((prev) => {
+        const updated = prev.map((c) =>
           c.id === activeChatId
-            ? { ...c, lastMessage: inputMessage, unread: false, lastActivity: Date.now() }
+            ? { ...c, lastMessage: inputMessage, lastActivity: Date.now() }
             : c
         )
         return updated.sort((a, b) => b.lastActivity - a.lastActivity)
       })
-
       setInputMessage("")
     } catch (error) {
       console.error("Error sending message:", error)
@@ -184,24 +162,26 @@ export default function AdminMessages() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') handleSendMessage()
+    if (e.key === "Enter") handleSendMessage()
   }
 
-  // Modal Handlers
   const handleOpenNewChat = async () => {
     setIsNewChatOpen(true)
-    if (currentUserId) {
-      const users = await fetchAvailableUsers(currentUserId)
-      setAvailableUsers(users)
-    }
+    const res = await fetch("/api/messages/project-chat/users")
+    if (res.ok) setAvailableUsers(await res.json())
   }
 
   const handleStartConversation = async (targetUserId: string) => {
-    if (!currentUserId) return
     setIsCreatingChat(true)
     try {
-      const newChatId = await createOrGetConversation(currentUserId, targetUserId)
-      await loadConversations(currentUserId, newChatId)
+      const res = await fetch("/api/messages/project-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(`${data?.error || "Failed to start conversation."} — ${data?.details ?? ""}`)
+      await loadConversations(data.conversationId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
     } catch (error) {
@@ -223,6 +203,15 @@ export default function AdminMessages() {
 
   if (isLoading) {
     return <div className="p-6 text-gray-500 font-medium">Loading messages...</div>
+  }
+
+  if (!projectId) {
+    return (
+      <div className="p-6 flex flex-col items-center justify-center h-64">
+        <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
+        <p className="text-sm text-gray-500">No project session found.</p>
+      </div>
+    )
   }
 
   return (
@@ -254,16 +243,9 @@ export default function AdminMessages() {
                     activeChatId === chat.id ? "border-[#00c065]" : "border-gray-200",
                   ].join(" ")}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {chat.unread ? <span className="h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" /> : null}
-                        <p className="text-sm font-semibold text-gray-900 truncate">{chat.name}</p>
-                      </div>
-                      <p className={`mt-1 text-xs line-clamp-1 ${chat.unread ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
-                        {chat.lastMessage}
-                      </p>
-                    </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{chat.name}</p>
+                    <p className="mt-1 text-xs line-clamp-1 text-gray-600">{chat.lastMessage}</p>
                   </div>
                 </button>
               ))}
@@ -274,21 +256,19 @@ export default function AdminMessages() {
           </aside>
 
           {/* Chat Area */}
-          {activeChat && (
+          {activeChat ? (
             <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
               {/* Header */}
-              <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
-                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
-                    <span className="text-xs font-semibold text-gray-700">
-                      {activeChat.name.slice(0, 1).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{activeChat.name}</p>
-                    <p className="text-xs text-gray-600 capitalize">{activeChat.role}</p>
-                  </div>
+              <div className="p-4 border-b border-gray-200 flex items-center gap-3 shrink-0">
+                <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
+                  <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
+                  <span className="text-xs font-semibold text-gray-700">
+                    {activeChat.name.slice(0, 1).toUpperCase()}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{activeChat.name}</p>
+                  <p className="text-xs text-gray-600 capitalize">{activeChat.role}</p>
                 </div>
               </div>
 
@@ -298,9 +278,8 @@ export default function AdminMessages() {
                   <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
                 )}
                 {chatHistory.map((msg) => {
-                  const isMe = msg.sender_id === currentUserId
-                  const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-
+                  const isMe = msg.client_id !== null && msg.client_id === clientId
+                  const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                   return (
                     <div key={msg.id}>
                       <div className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}>
@@ -318,7 +297,6 @@ export default function AdminMessages() {
                     </div>
                   )
                 })}
-                {/* Auto-scroll target */}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -345,16 +323,21 @@ export default function AdminMessages() {
                 </div>
               </div>
             </section>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
+              <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
+              <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
+              <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
+            </div>
           )}
         </div>
       </div>
 
-      {/* --- NEW CHAT MODAL --- */}
+      {/* New Chat Modal */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
         <DialogContent className="max-w-md bg-white border-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] p-0">
           <DialogHeader className="p-6 pb-4 border-b border-gray-100">
             <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
-
             <div className="relative mt-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
