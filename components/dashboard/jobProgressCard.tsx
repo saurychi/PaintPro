@@ -1,7 +1,8 @@
 "use client";
 
-import React, { Fragment } from "react";
+import React, { useState, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
@@ -33,7 +34,6 @@ type Props = {
   openSubtaskIds: Set<string>;
   toggleProcessRow: (id: string) => void;
   toggleSubtaskRow: (id: string) => void;
-  handleStartMainTasks: () => void;
   className?: string;
 };
 
@@ -51,6 +51,15 @@ const JOB_CREATION_CHILD_ROUTES: Record<string, string> = {
   "workflow-overview": "/admin/job-creation/overview",
   "workflow-quotation": "/admin/job-creation/quotation-generation",
 };
+
+function readProjectStatus(project: unknown): string {
+  if (!project || typeof project !== "object") return "";
+
+  const record = project as Record<string, unknown>;
+  const status = record.status;
+
+  return typeof status === "string" ? status : "";
+}
 
 function statusLabel(status: StepVisualStatus) {
   if (status === "done") return "Completed";
@@ -185,10 +194,65 @@ export default function JobProgressCard({
   openSubtaskIds,
   toggleProcessRow,
   toggleSubtaskRow,
-  handleStartMainTasks,
   className = "",
 }: Props) {
   const router = useRouter();
+
+  const [startingProject, setStartingProject] = useState(false);
+  const [startOfWorkDone, setStartOfWorkDone] = useState(false);
+
+  const selectedProjectStatus = readProjectStatus(selectedProject);
+
+  useEffect(() => {
+    if (selectedProjectStatus === "in_progress") {
+      setStartOfWorkDone(true);
+    }
+  }, [selectedProjectStatus]);
+
+  async function handleStartProjectWork() {
+    if (!projectId || startingProject) return;
+
+    try {
+      setStartingProject(true);
+
+      const response = await fetch("/api/planning/updateProjectStatus", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId,
+          status: "in_progress",
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to start project.",
+        );
+      }
+
+      setStartOfWorkDone(true);
+
+      toast.success("Project started", {
+        description: "Project status is now in progress.",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to start project.";
+
+      console.error(error);
+
+      toast.error("Could not start project", {
+        description: message,
+      });
+    } finally {
+      setStartingProject(false);
+    }
+  }
 
   const jobCreationDone = processItems.some(
     (item) =>
@@ -262,6 +326,15 @@ export default function JobProgressCard({
                   const hasChildren = Boolean(group.children?.length);
                   const open = openProcessIds.has(group.id);
 
+                  const isStartOfWorkGroup =
+                    group.id === "start-of-work" ||
+                    group.title.toLowerCase().trim() === "start of work";
+
+                  const effectiveGroupStatus: StepVisualStatus =
+                    isStartOfWorkGroup && startOfWorkDone
+                      ? "done"
+                      : group.status;
+
                   const doneCount = (group.children ?? []).filter(
                     (child) => child.status === "done",
                   ).length;
@@ -308,7 +381,7 @@ export default function JobProgressCard({
                             <div className="relative h-6">
                               <div className="absolute left-0 top-0">
                                 <GroupProgressRing
-                                  status={group.status}
+                                  status={effectiveGroupStatus}
                                   doneCount={doneCount}
                                   totalCount={totalCount}
                                 />
@@ -335,7 +408,7 @@ export default function JobProgressCard({
                                   <div
                                     className={[
                                       "truncate text-sm font-medium",
-                                      group.status === "pending"
+                                      effectiveGroupStatus === "pending"
                                         ? "text-gray-700"
                                         : "text-gray-900",
                                     ].join(" ")}>
@@ -343,7 +416,7 @@ export default function JobProgressCard({
                                   </div>
 
                                   <span className="shrink-0 text-xs text-gray-400">
-                                    {statusLabel(group.status)}
+                                    {statusLabel(effectiveGroupStatus)}
                                   </span>
                                 </div>
                               </div>
@@ -376,7 +449,15 @@ export default function JobProgressCard({
                         <div>
                           <div className="mt-1 space-y-0">
                             {group.children?.map((child) => {
-                              const dim = child.status === "done";
+                              const isProjectKickoff =
+                                child.id === "project-kickoff";
+
+                              const effectiveChildStatus: StepVisualStatus =
+                                isProjectKickoff && startOfWorkDone
+                                  ? "done"
+                                  : child.status;
+
+                              const dim = effectiveChildStatus === "done";
                               const childOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
                               const childRoute = isJobCreationGroup
@@ -393,7 +474,9 @@ export default function JobProgressCard({
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
-                                              <StepIcon status={child.status} />
+                                              <StepIcon
+                                                status={effectiveChildStatus}
+                                              />
                                             </span>
                                           </div>
                                         </div>
@@ -404,16 +487,22 @@ export default function JobProgressCard({
                                             <div
                                               className={[
                                                 "truncate text-sm font-medium",
-                                                dim ? "text-gray-300" : "text-gray-800",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
                                             <span
                                               className={[
                                                 "shrink-0 text-xs",
-                                                dim ? "text-gray-200" : "text-gray-400",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
                                               ].join(" ")}>
-                                              {statusLabel(child.status)}
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
                                             </span>
                                           </div>
                                         </div>
@@ -426,7 +515,13 @@ export default function JobProgressCard({
                                           {childRoute ? (
                                             <button
                                               type="button"
-                                              onClick={() => router.push(projectId ? `${childRoute}?projectId=${projectId}` : childRoute)}
+                                              onClick={() =>
+                                                router.push(
+                                                  projectId
+                                                    ? `${childRoute}?projectId=${projectId}`
+                                                    : childRoute,
+                                                )
+                                              }
                                               disabled={dim}
                                               className={[
                                                 "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
@@ -459,16 +554,22 @@ export default function JobProgressCard({
                                             <div
                                               className={[
                                                 "truncate text-sm font-medium",
-                                                dim ? "text-gray-300" : "text-gray-800",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
                                             <span
                                               className={[
                                                 "shrink-0 text-xs",
-                                                dim ? "text-gray-200" : "text-gray-400",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
                                               ].join(" ")}>
-                                              {statusLabel(child.status)}
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
                                             </span>
                                           </div>
                                         </div>
@@ -480,15 +581,27 @@ export default function JobProgressCard({
                                         <div className="col-span-3 flex justify-end">
                                           <button
                                             type="button"
-                                            onClick={handleStartMainTasks}
-                                            disabled={!jobCreationDone || dim}
+                                            onClick={handleStartProjectWork}
+                                            disabled={
+                                              !jobCreationDone ||
+                                              dim ||
+                                              startingProject ||
+                                              !projectId
+                                            }
                                             className={[
                                               "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
-                                              !jobCreationDone || dim
+                                              !jobCreationDone ||
+                                              dim ||
+                                              startingProject ||
+                                              !projectId
                                                 ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
                                                 : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
                                             ].join(" ")}>
-                                            Start Project
+                                            {startingProject
+                                              ? "Starting..."
+                                              : dim
+                                                ? "Started"
+                                                : "Start Project"}
                                           </button>
                                         </div>
                                       </div>
@@ -527,16 +640,22 @@ export default function JobProgressCard({
                                             <div
                                               className={[
                                                 "truncate text-sm font-medium",
-                                                dim ? "text-gray-300" : "text-gray-800",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
                                             <span
                                               className={[
                                                 "shrink-0 text-xs",
-                                                dim ? "text-gray-200" : "text-gray-400",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
                                               ].join(" ")}>
-                                              {statusLabel(child.status)}
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
                                             </span>
                                           </div>
                                         </div>
@@ -546,7 +665,9 @@ export default function JobProgressCard({
                                           <div
                                             className={[
                                               "text-xs",
-                                              dim ? "text-gray-200" : "text-gray-700",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-700",
                                             ].join(" ")}>
                                             {child.startLabel || "-"}
                                           </div>
@@ -557,7 +678,9 @@ export default function JobProgressCard({
                                           <div
                                             className={[
                                               "flex items-center justify-end gap-2 text-xs",
-                                              dim ? "text-gray-200" : "text-gray-700",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-700",
                                             ].join(" ")}>
                                             <span>{child.endLabel || "-"}</span>
                                             {hasDetail ? (
@@ -607,7 +730,9 @@ export default function JobProgressCard({
                                                     : "text-gray-900",
                                                 ].join(" ")}>
                                                 {child.detail?.employees?.length
-                                                  ? child.detail.employees.join(", ")
+                                                  ? child.detail.employees.join(
+                                                      ", ",
+                                                    )
                                                   : "No assigned employees yet"}
                                               </span>
                                             </span>
@@ -627,7 +752,8 @@ export default function JobProgressCard({
                                                     ? "text-gray-400 opacity-70"
                                                     : "text-gray-900",
                                                 ].join(" ")}>
-                                                {child.detail?.estimatedHours || "0 hrs"}
+                                                {child.detail?.estimatedHours ||
+                                                  "0 hrs"}
                                               </span>
                                             </span>
                                           </div>

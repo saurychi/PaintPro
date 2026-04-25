@@ -402,8 +402,12 @@ export default function ClientDashboardPage() {
   const pendingDocumentProject = useMemo(() => {
     if (!project) return null;
 
+    const safeProjectId = readString(project.project_id, project.id, projectId);
+
+    if (!safeProjectId) return null;
+
     return {
-      project_id: readString(project.project_id, project.id) || projectId,
+      project_id: safeProjectId,
       project_code: readString(project.project_code, project.projectCode),
       title: readString(project.title),
       status: projectStatus,
@@ -499,7 +503,6 @@ export default function ClientDashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
-              handleStartMainTasks={() => {}}
             />
           </div>
 
