@@ -563,39 +563,6 @@ function buildProcessItems(args: {
     },
   ];
 
-  const startOfWorkStatus: StepVisualStatus =
-    normalized === "ready_to_start"
-      ? "active"
-      : normalized === "in_progress" || normalized === "completed"
-        ? "done"
-        : "pending";
-
-  items.push({
-    id: "start-of-work",
-    title: "Start of Work",
-    status: startOfWorkStatus,
-    startLabel: formatDateTime(projectStart),
-    endLabel:
-      startOfWorkStatus === "done"
-        ? formatDateTime(projectStart)
-        : startOfWorkStatus === "active"
-          ? "Working on it..."
-          : "-",
-    children: [
-      {
-        id: "project-kickoff",
-        title: "Project Kickoff",
-        status: startOfWorkStatus,
-        startLabel: formatDateTime(projectStart),
-        endLabel:
-          startOfWorkStatus === "done"
-            ? formatDateTime(projectStart)
-            : startOfWorkStatus === "active"
-              ? "Working on it..."
-              : "-",
-      },
-    ],
-  });
 
   for (let index = 0; index < mainTasks.length; index += 1) {
     const mainTask = mainTasks[index];

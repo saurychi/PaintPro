@@ -89,6 +89,14 @@ const adminItems: Item[] = [
     title: "Documents",
     url: "/admin/documents",
     icon: FileText,
+    subItems: [
+      {
+        key: "pending-documents",
+        title: "Pending",
+        url: "/admin/documents/pending",
+        matchUrls: ["/admin/documents/pending"],
+      },
+    ],
   },
   {
     key: "messages",
@@ -129,6 +137,14 @@ const clientItems: Item[] = [
     title: "Documents",
     url: "/client/documents",
     icon: FileText,
+    subItems: [
+      {
+        key: "pending-documents",
+        title: "Pending",
+        url: "/client/documents/pending",
+        matchUrls: ["/client/documents/pending"],
+      },
+    ],
   },
   {
     key: "schedule",
@@ -229,6 +245,9 @@ export function AppSidebar({ role }: AppSidebarProps) {
   const [openMenus, setOpenMenus] = React.useState<Record<string, boolean>>({
     dashboard:
       pathname === "/admin" || pathname.startsWith("/admin/job-creation"),
+    documents:
+      pathname.startsWith("/admin/documents") ||
+      pathname.startsWith("/client/documents"),
   });
 
   React.useEffect(() => {
