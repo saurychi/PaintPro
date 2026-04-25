@@ -1,6 +1,8 @@
 "use client";
 
-import React, { Fragment } from "react";
+import React, { useState, useEffect, Fragment } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
@@ -24,6 +26,7 @@ export type ProcessItem = {
 type Props = {
   title?: string;
   selectedProject: unknown | null;
+  projectId?: string | null;
   loadingDetails: boolean;
   navigating?: boolean;
   processItems: ProcessItem[];
@@ -31,12 +34,32 @@ type Props = {
   openSubtaskIds: Set<string>;
   toggleProcessRow: (id: string) => void;
   toggleSubtaskRow: (id: string) => void;
-  handleStartMainTasks: () => void;
   className?: string;
 };
 
 const GREEN = "#7ED957";
 const SCROLL_TRACK = "#EAF7E4";
+
+const JOB_CREATION_CHILD_ROUTES: Record<string, string> = {
+  "workflow-main-task": "/admin/job-creation/main-task-assignment",
+  "workflow-sub-task": "/admin/job-creation/sub-task-assignment",
+  "workflow-materials": "/admin/job-creation/materials-assignment",
+  "workflow-equipment": "/admin/job-creation/equipment-assignment",
+  "workflow-schedule": "/admin/job-creation/project-schedule",
+  "workflow-employee-assignment": "/admin/job-creation/employee-assignment",
+  "workflow-cost-estimation": "/admin/job-creation/cost-estimation",
+  "workflow-overview": "/admin/job-creation/overview",
+  "workflow-quotation": "/admin/job-creation/quotation-generation",
+};
+
+function readProjectStatus(project: unknown): string {
+  if (!project || typeof project !== "object") return "";
+
+  const record = project as Record<string, unknown>;
+  const status = record.status;
+
+  return typeof status === "string" ? status : "";
+}
 
 function statusLabel(status: StepVisualStatus) {
   if (status === "done") return "Completed";
@@ -163,6 +186,7 @@ function ProgressSkeleton() {
 export default function JobProgressCard({
   title = "Progress",
   selectedProject,
+  projectId,
   loadingDetails,
   navigating = false,
   processItems,
@@ -170,9 +194,73 @@ export default function JobProgressCard({
   openSubtaskIds,
   toggleProcessRow,
   toggleSubtaskRow,
-  handleStartMainTasks,
   className = "",
 }: Props) {
+  const router = useRouter();
+
+  const [startingProject, setStartingProject] = useState(false);
+  const [startOfWorkDone, setStartOfWorkDone] = useState(false);
+
+  const selectedProjectStatus = readProjectStatus(selectedProject);
+
+  useEffect(() => {
+    if (selectedProjectStatus === "in_progress") {
+      setStartOfWorkDone(true);
+    }
+  }, [selectedProjectStatus]);
+
+  async function handleStartProjectWork() {
+    if (!projectId || startingProject) return;
+
+    try {
+      setStartingProject(true);
+
+      const response = await fetch("/api/planning/updateProjectStatus", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId,
+          status: "in_progress",
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to start project.",
+        );
+      }
+
+      setStartOfWorkDone(true);
+
+      toast.success("Project started", {
+        description: "Project status is now in progress.",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to start project.";
+
+      console.error(error);
+
+      toast.error("Could not start project", {
+        description: message,
+      });
+    } finally {
+      setStartingProject(false);
+    }
+  }
+
+  const jobCreationDone = processItems.some(
+    (item) =>
+      (item.id === "job-creation" ||
+        item.title.toLowerCase().trim() === "job creation") &&
+      item.status === "done",
+  );
+
   return (
     <section
       className={[
@@ -233,19 +321,41 @@ export default function JobProgressCard({
                 No progress steps yet.
               </div>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {processItems.map((group) => {
+              <div>
+                {processItems.map((group, groupIndex) => {
                   const hasChildren = Boolean(group.children?.length);
                   const open = openProcessIds.has(group.id);
+
+                  const isStartOfWorkGroup =
+                    group.id === "start-of-work" ||
+                    group.title.toLowerCase().trim() === "start of work";
+
+                  const effectiveGroupStatus: StepVisualStatus =
+                    isStartOfWorkGroup && startOfWorkDone
+                      ? "done"
+                      : group.status;
 
                   const doneCount = (group.children ?? []).filter(
                     (child) => child.status === "done",
                   ).length;
 
                   const totalCount = group.children?.length ?? 0;
+                  const isJobCreationGroup =
+                    group.id === "job-creation" ||
+                    group.title.toLowerCase().trim() === "job creation";
+                  const isLastGroup = groupIndex === processItems.length - 1;
 
                   return (
-                    <div key={group.id} className="py-2">
+                    <div
+                      key={group.id}
+                      className={[
+                        "py-2",
+                        !isLastGroup
+                          ? isJobCreationGroup
+                            ? "border-b border-gray-100/40"
+                            : "border-b border-gray-100"
+                          : "",
+                      ].join(" ")}>
                       <button
                         type="button"
                         disabled={!hasChildren}
@@ -271,7 +381,7 @@ export default function JobProgressCard({
                             <div className="relative h-6">
                               <div className="absolute left-0 top-0">
                                 <GroupProgressRing
-                                  status={group.status}
+                                  status={effectiveGroupStatus}
                                   doneCount={doneCount}
                                   totalCount={totalCount}
                                 />
@@ -298,7 +408,7 @@ export default function JobProgressCard({
                                   <div
                                     className={[
                                       "truncate text-sm font-medium",
-                                      group.status === "pending"
+                                      effectiveGroupStatus === "pending"
                                         ? "text-gray-700"
                                         : "text-gray-900",
                                     ].join(" ")}>
@@ -306,7 +416,7 @@ export default function JobProgressCard({
                                   </div>
 
                                   <span className="shrink-0 text-xs text-gray-400">
-                                    {statusLabel(group.status)}
+                                    {statusLabel(effectiveGroupStatus)}
                                   </span>
                                 </div>
                               </div>
@@ -339,108 +449,256 @@ export default function JobProgressCard({
                         <div>
                           <div className="mt-1 space-y-0">
                             {group.children?.map((child) => {
-                              const dim = child.status === "done";
+                              const isProjectKickoff =
+                                child.id === "project-kickoff";
+
+                              const effectiveChildStatus: StepVisualStatus =
+                                isProjectKickoff && startOfWorkDone
+                                  ? "done"
+                                  : child.status;
+
+                              const dim = effectiveChildStatus === "done";
                               const childOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
+                              const childRoute = isJobCreationGroup
+                                ? JOB_CREATION_CHILD_ROUTES[child.id]
+                                : undefined;
 
                               return (
                                 <div key={child.id} className="relative">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (child.id === "project-kickoff") {
-                                        handleStartMainTasks();
-                                        return;
-                                      }
-
-                                      if (hasDetail) {
-                                        toggleSubtaskRow(child.id);
-                                      }
-                                    }}
-                                    className={[
-                                      "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50",
-                                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-                                    ].join(" ")}
-                                    style={
-                                      {
-                                        "--tw-ring-color": GREEN,
-                                      } as React.CSSProperties
-                                    }>
-                                    <div className="grid grid-cols-12 items-center gap-3">
-                                      <div className="col-span-1">
-                                        <div className="relative flex h-full w-10 items-center justify-center">
-                                          <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
-                                            <StepIcon status={child.status} />
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      <div className="col-span-5 min-w-0">
-                                        <div className="flex min-w-0 items-center gap-2">
-                                          <div
-                                            className={[
-                                              "truncate text-sm font-medium",
-                                              dim
-                                                ? "text-gray-300"
-                                                : "text-gray-800",
-                                            ].join(" ")}>
-                                            {child.title}
-                                          </div>
-
-                                          <span
-                                            className={[
-                                              "shrink-0 text-xs",
-                                              dim
-                                                ? "text-gray-200"
-                                                : "text-gray-400",
-                                            ].join(" ")}>
-                                            {statusLabel(child.status)}
-                                          </span>
-
-                                          {child.id === "project-kickoff" ? (
-                                            <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                              Start Main Tasks
+                                  {isJobCreationGroup ? (
+                                    /* ── Job-creation child: div wrapper so we can put a real button inside ── */
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                      <div className="grid grid-cols-12 items-center gap-3">
+                                        {/* Status icon */}
+                                        <div className="col-span-1">
+                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                              <StepIcon
+                                                status={effectiveChildStatus}
+                                              />
                                             </span>
-                                          ) : null}
+                                          </div>
                                         </div>
-                                      </div>
 
-                                      <div className="col-span-3">
-                                        <div
-                                          className={[
-                                            "text-xs",
-                                            dim
-                                              ? "text-gray-200"
-                                              : "text-gray-700",
-                                          ].join(" ")}>
-                                          {child.startLabel || "-"}
-                                        </div>
-                                      </div>
-
-                                      <div className="col-span-3">
-                                        <div
-                                          className={[
-                                            "flex items-center justify-between gap-2 text-xs",
-                                            dim
-                                              ? "text-gray-200"
-                                              : "text-gray-700",
-                                          ].join(" ")}>
-                                          <span>{child.endLabel || "-"}</span>
-
-                                          {hasDetail ? (
-                                            <ChevronRight
+                                        {/* Title + status label */}
+                                        <div className="col-span-5 min-w-0">
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <div
                                               className={[
-                                                "h-4 w-4 shrink-0 text-gray-300 transition-transform",
-                                                childOpen ? "rotate-90" : "",
-                                              ].join(" ")}
-                                              aria-hidden
-                                            />
+                                                "truncate text-sm font-medium",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
+                                              ].join(" ")}>
+                                              {child.title}
+                                            </div>
+                                            <span
+                                              className={[
+                                                "shrink-0 text-xs",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
+                                              ].join(" ")}>
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Empty middle column */}
+                                        <div className="col-span-3" />
+
+                                        {/* Navigation button — right-aligned, greyed when done */}
+                                        <div className="col-span-3 flex justify-end">
+                                          {childRoute ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                router.push(
+                                                  projectId
+                                                    ? `${childRoute}?projectId=${projectId}`
+                                                    : childRoute,
+                                                )
+                                              }
+                                              disabled={dim}
+                                              className={[
+                                                "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                                dim
+                                                  ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
+                                                  : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
+                                              ].join(" ")}>
+                                              Open
+                                            </button>
                                           ) : null}
                                         </div>
                                       </div>
                                     </div>
-                                  </button>
+                                  ) : child.id === "project-kickoff" ? (
+                                    /* ── Project Kickoff: div wrapper with Start Project button ── */
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                      <div className="grid grid-cols-12 items-center gap-3">
+                                        {/* Status icon */}
+                                        <div className="col-span-1">
+                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                              <StepIcon status={child.status} />
+                                            </span>
+                                          </div>
+                                        </div>
 
+                                        {/* Title + status label */}
+                                        <div className="col-span-5 min-w-0">
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <div
+                                              className={[
+                                                "truncate text-sm font-medium",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
+                                              ].join(" ")}>
+                                              {child.title}
+                                            </div>
+                                            <span
+                                              className={[
+                                                "shrink-0 text-xs",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
+                                              ].join(" ")}>
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Empty middle column */}
+                                        <div className="col-span-3" />
+
+                                        {/* Start Project button */}
+                                        <div className="col-span-3 flex justify-end">
+                                          <button
+                                            type="button"
+                                            onClick={handleStartProjectWork}
+                                            disabled={
+                                              !jobCreationDone ||
+                                              dim ||
+                                              startingProject ||
+                                              !projectId
+                                            }
+                                            className={[
+                                              "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                              !jobCreationDone ||
+                                              dim ||
+                                              startingProject ||
+                                              !projectId
+                                                ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
+                                                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
+                                            ].join(" ")}>
+                                            {startingProject
+                                              ? "Starting..."
+                                              : dim
+                                                ? "Started"
+                                                : "Start Project"}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    /* ── Regular child: button wrapper for detail expansion ── */
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (hasDetail) {
+                                          toggleSubtaskRow(child.id);
+                                        }
+                                      }}
+                                      className={[
+                                        "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50",
+                                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                                      ].join(" ")}
+                                      style={
+                                        {
+                                          "--tw-ring-color": GREEN,
+                                        } as React.CSSProperties
+                                      }>
+                                      <div className="grid grid-cols-12 items-center gap-3">
+                                        {/* Status icon */}
+                                        <div className="col-span-1">
+                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                              <StepIcon status={child.status} />
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Title + status label */}
+                                        <div className="col-span-5 min-w-0">
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <div
+                                              className={[
+                                                "truncate text-sm font-medium",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
+                                              ].join(" ")}>
+                                              {child.title}
+                                            </div>
+                                            <span
+                                              className={[
+                                                "shrink-0 text-xs",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
+                                              ].join(" ")}>
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Start date */}
+                                        <div className="col-span-3">
+                                          <div
+                                            className={[
+                                              "text-xs",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-700",
+                                            ].join(" ")}>
+                                            {child.startLabel || "-"}
+                                          </div>
+                                        </div>
+
+                                        {/* End date + detail chevron */}
+                                        <div className="col-span-3">
+                                          <div
+                                            className={[
+                                              "flex items-center justify-end gap-2 text-xs",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-700",
+                                            ].join(" ")}>
+                                            <span>{child.endLabel || "-"}</span>
+                                            {hasDetail ? (
+                                              <ChevronRight
+                                                className={[
+                                                  "h-4 w-4 shrink-0 text-gray-300 transition-transform",
+                                                  childOpen ? "rotate-90" : "",
+                                                ].join(" ")}
+                                                aria-hidden
+                                              />
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </button>
+                                  )}
+
+                                  {/* Detail expansion panel (regular children only) */}
                                   <Transition
                                     as={Fragment}
                                     show={childOpen && hasDetail}

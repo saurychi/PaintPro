@@ -4,16 +4,15 @@ import { cookies } from "next/headers"
 import { createServerClient } from "@supabase/ssr"
 import ClientShellClient from "./ClientShellClient"
 
+const CLIENT_COOKIE = "paintpro_client_project_id"
+
 type DbUser = {
   id: string
   role: "client" | "staff" | "manager" | "admin"
   status: "active" | "inactive" | "pending"
 }
 
-// false = only clients can access
-// true  = allow other roles too (controlled by ALLOWED_ROLES)
 const ALLOW_CROSS_ROLE_ACCESS = true
-
 const ALLOWED_ROLES: DbUser["role"][] = ["client", "admin", "manager", "staff"]
 
 export default async function ClientLayout({ children }: { children: ReactNode }) {
@@ -43,8 +42,19 @@ export default async function ClientLayout({ children }: { children: ReactNode }
 
   const { data: userData } = await supabase.auth.getUser()
   const authUser = userData.user
-  if (!authUser) redirect("/auth/signin")
 
+  // No Supabase session — check for project-code cookie access
+  if (!authUser) {
+    const clientProjectId = cookieStore.get(CLIENT_COOKIE)?.value
+    if (!clientProjectId) redirect("/auth/signin")
+    return (
+      <ClientShellClient role="client" projectId={clientProjectId}>
+        {children}
+      </ClientShellClient>
+    )
+  }
+
+  // Supabase session exists — staff / admin flow
   const { data: profile } = await supabase
     .from("users")
     .select("id, role, status")
@@ -62,5 +72,9 @@ export default async function ClientLayout({ children }: { children: ReactNode }
 
   const sidebarRole: DbUser["role"] = ALLOW_CROSS_ROLE_ACCESS ? profile.role : "client"
 
-  return <ClientShellClient role={sidebarRole}>{children}</ClientShellClient>
+  return (
+    <ClientShellClient role={sidebarRole} projectId={null}>
+      {children}
+    </ClientShellClient>
+  )
 }
