@@ -654,6 +654,7 @@ function buildProcessItems(args: {
             : "-",
         detail: {
           employees: employeeLabels,
+          employeeIds: [],
           estimatedHours: formatHours(estimatedHours),
         },
       };

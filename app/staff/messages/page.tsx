@@ -6,12 +6,11 @@ import {
   fetchMessages,
   postMessage,
   fetchAvailableUsers,
-  createOrGetConversation,
   markConversationAsRead,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search } from "lucide-react"
+import { Search, MessageSquare } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
@@ -200,8 +199,14 @@ export default function AdminMessages() {
     if (!currentUserId) return
     setIsCreatingChat(true)
     try {
-      const newChatId = await createOrGetConversation(currentUserId, targetUserId)
-      await loadConversations(currentUserId, newChatId)
+      const res = await fetch("/api/messages/conversation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || "Failed to start conversation.")
+      await loadConversations(currentUserId, data.conversationId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
     } catch (error) {
@@ -274,7 +279,7 @@ export default function AdminMessages() {
           </aside>
 
           {/* Chat Area */}
-          {activeChat && (
+          {activeChat ? (
             <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
               {/* Header */}
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
@@ -345,6 +350,12 @@ export default function AdminMessages() {
                 </div>
               </div>
             </section>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
+              <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
+              <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
+              <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
+            </div>
           )}
         </div>
       </div>
