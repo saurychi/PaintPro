@@ -19,71 +19,85 @@ import {
   Upload,
   Check,
   Info,
+  Plus,
+  FileText,
 } from "lucide-react"
 
 import {
   listFolders,
   listDocuments,
+  createFolder,
+  renameFolder,
+  archiveFolder,
+  restoreFolder,
+  createDocument,
+  renameDocument,
+  archiveDocument,
+  restoreDocument,
   type FolderItem,
   type FileItem,
   type DocType,
   type SortKey,
 } from "@/lib/data/documents.repo"
 
-/* ----------------------------- non-standard input props ----------------------------- */
-/** Fixes TS error for folder upload inputs (webkitdirectory/directory not in React typings) */
 const folderPickerProps = {
   webkitdirectory: "true",
   directory: "true",
 } as any
 
-/* ----------------------------------- meta ----------------------------------- */
+const ACCENT = "#00c065"
+const ACCENT_HOVER = "#00a054"
 
 const typeMeta: Record<DocType, { label: string; pillClass: string; pillText: string }> = {
   INV: {
     label: "Invoice",
     pillText: "INV",
-    pillClass: "bg-[#00c065]/15 text-green-900 border border-[#00c065]/20",
+    pillClass: "bg-[#00c065]/10 text-[#047857] border border-[#00c065]/20",
   },
   PAY: {
     label: "Payroll",
     pillText: "PAY",
-    pillClass: "bg-red-500/10 text-red-900 border border-red-500/20",
+    pillClass: "bg-red-50 text-red-700 border border-red-200",
   },
   RCP: {
     label: "Receipt",
     pillText: "RCP",
-    pillClass: "bg-[#00c065]/15 text-green-900 border border-[#00c065]/20",
+    pillClass: "bg-[#00c065]/10 text-[#047857] border border-[#00c065]/20",
   },
   QTE: {
     label: "Quote",
     pillText: "QTE",
-    pillClass: "bg-[#00c065]/15 text-green-900 border border-[#00c065]/20",
+    pillClass: "bg-[#00c065]/10 text-[#047857] border border-[#00c065]/20",
   },
 }
 
-/* --------------------------------- styling --------------------------------- */
+const cardShell =
+  "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+
+const cardAccent =
+  "before:block before:h-1 before:w-full before:bg-[#00c065]"
 
 const btnBase =
-  "inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
 
 const btnPrimary =
-  "inline-flex h-10 items-center gap-2 rounded-lg bg-[#00c065] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#00a054] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "inline-flex h-9 items-center gap-2 rounded-lg bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#00a054] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
 
 const btnDanger =
-  "inline-flex h-10 items-center gap-2 rounded-lg border border-red-500/25 bg-white px-4 text-sm font-semibold text-red-900 shadow-sm hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25 active:scale-[0.98]"
+  "inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 shadow-sm transition-all duration-200 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25 active:scale-[0.98]"
 
 const iconBtn =
-  "grid h-9 w-9 place-items-center rounded-lg border border-transparent bg-transparent hover:border-gray-200 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "grid h-8 w-8 place-items-center rounded-lg border border-transparent bg-transparent text-gray-500 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
 
-const menuBox = "min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm"
+const menuBox = "min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/60"
 const menuItem =
-  "inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50"
+  "inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-800 transition hover:bg-gray-50"
 
 const inputBase =
-  "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
+  "h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
 
-/* -------------------------------- utilities -------------------------------- */
+type Toast = { id: string; message: string; tone?: "default" | "success" | "danger" }
+type ArchiveTab = "active" | "archived"
 
 function MenuItemBtn({
   icon,
@@ -98,7 +112,7 @@ function MenuItemBtn({
 }) {
   return (
     <button
-      className={cn(menuItem, tone === "danger" && "text-red-900 hover:bg-red-50")}
+      className={cn(menuItem, tone === "danger" && "text-red-700 hover:bg-red-50")}
       type="button"
       onClick={onClick}
     >
@@ -120,23 +134,23 @@ function Modal({
   onClose: () => void
 }) {
   if (!open) return null
+
   return (
     <div className="fixed inset-0 z-[200]">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="text-sm font-semibold text-gray-900">{title}</div>
+      <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[560px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl shadow-gray-900/15">
+        <div className="h-1 w-full bg-[#00c065]" />
+        <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+          <div className="text-sm font-semibold text-gray-950">{title}</div>
           <button className={iconBtn} type="button" onClick={onClose} aria-label="Close">
-            <X className="h-4 w-4 text-gray-500" />
+            <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="mt-4">{children}</div>
+        <div className="px-4 py-4">{children}</div>
       </div>
     </div>
   )
 }
-
-type Toast = { id: string; message: string; tone?: "default" | "success" | "danger" }
 
 function ToastStack({ toasts }: { toasts: Toast[] }) {
   return (
@@ -145,9 +159,9 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
         <div
           key={t.id}
           className={cn(
-            "rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-sm",
-            t.tone === "success" && "border-[#00c065]/25 bg-[#00c065]/10 text-[#166534]",
-            t.tone === "danger" && "border-red-500/25 bg-red-50 text-red-900"
+            "rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-lg shadow-gray-200/70",
+            t.tone === "success" && "border-[#00c065]/25 bg-[#00c065]/10 text-[#047857]",
+            t.tone === "danger" && "border-red-200 bg-red-50 text-red-700"
           )}
         >
           {t.message}
@@ -199,12 +213,8 @@ function makeId(prefix: string) {
 }
 
 function folderMeta(count: number, size: string) {
-  return `${count} files  •  ${size}`
+  return `${count} files • ${size}`
 }
-
-type ArchiveTab = "active" | "archived"
-
-/* -------------------------- portal dropdown (fix clipping) -------------------------- */
 
 function PortalMenu<T extends HTMLElement>({
   open,
@@ -232,7 +242,7 @@ function PortalMenu<T extends HTMLElement>({
 
       const r = el.getBoundingClientRect()
       const menuWidth = 240
-      const gap = 10
+      const gap = 8
       const left = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, r.right - menuWidth))
       const top = Math.min(window.innerHeight - 12, r.bottom + gap)
 
@@ -296,7 +306,7 @@ function ActionMenu({
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
       <button ref={btnRef} className={iconBtn} type="button" onClick={onToggle} aria-label="Actions">
-        <MoreVertical className="h-[18px] w-[18px] text-gray-500" />
+        <MoreVertical className="h-[17px] w-[17px]" />
       </button>
 
       <PortalMenu open={isOpen} anchorRef={btnRef} onClose={onClose}>
@@ -305,8 +315,6 @@ function ActionMenu({
     </div>
   )
 }
-
-/* ---------------------------------- page ---------------------------------- */
 
 export default function AdminDocuments() {
   const [query, setQuery] = useState("")
@@ -541,7 +549,7 @@ export default function AdminDocuments() {
 
   function actionDownloadFile(file: FileItem) {
     const content = [
-      `PaintPro Document (Dummy)`,
+      `PaintPro Document`,
       `Name: ${file.name}`,
       `Type: ${file.type}`,
       `Created By: ${file.createdBy}`,
@@ -553,7 +561,7 @@ export default function AdminDocuments() {
 
     const safeName = file.name.replace(/[^\w\- ]+/g, "").trim() || "document"
     downloadTextFile(`${safeName}.txt`, content)
-    pushToast("Downloaded document (dummy).", "success")
+    pushToast("Downloaded document.", "success")
     setOpenMenuKey(null)
   }
 
@@ -600,7 +608,7 @@ export default function AdminDocuments() {
 
     setConfirmArchiveFolderOpen(false)
     setArchiveFolderTargetId("")
-    pushToast("Folder archived (files inside archived too).", "success")
+    pushToast("Folder archived.", "success")
   }
 
   function requestRestoreFolder(folderId: string) {
@@ -627,7 +635,7 @@ export default function AdminDocuments() {
 
     setConfirmRestoreFolderOpen(false)
     setRestoreFolderTargetId("")
-    pushToast("Folder restored (files inside restored too).", "success")
+    pushToast("Folder restored.", "success")
   }
 
   function openRenameModal(kind: "file" | "folder", id: string, currentName: string) {
@@ -656,7 +664,7 @@ export default function AdminDocuments() {
   function bulkDownload() {
     const items = selectedItems()
     const content = [
-      `PaintPro Bulk Download (Dummy)`,
+      `PaintPro Bulk Download`,
       `Count: ${items.length}`,
       ``,
       ...items.map((f, i) => `${i + 1}. ${f.name} (${f.type}) - ${formatDateISO(f.dateISO)}`),
@@ -664,7 +672,7 @@ export default function AdminDocuments() {
 
     downloadTextFile(`paintpro_bulk_${new Date().toISOString().slice(0, 10)}.txt`, content)
     clearSelection()
-    pushToast("Downloaded selection (dummy).", "success")
+    pushToast("Downloaded selection.", "success")
   }
 
   function bulkArchive() {
@@ -734,7 +742,7 @@ export default function AdminDocuments() {
 
     setFilesAll((prev) => [newFile, ...prev])
     setUploadFileOpen(false)
-    pushToast("File uploaded (dummy).", "success")
+    pushToast("File uploaded.", "success")
   }
 
   function handleFolderPicked(fileList: FileList | null) {
@@ -755,25 +763,25 @@ export default function AdminDocuments() {
 
     setFilesAll((prev) => [...toAdd, ...prev])
     setUploadFolderOpen(false)
-    pushToast(`Folder uploaded (dummy): ${toAdd.length} files added.`, "success")
+    pushToast(`Folder uploaded: ${toAdd.length} files added.`, "success")
   }
 
   return (
-    <div className="p-6 text-gray-900" onClick={closeAll}>
+    <div className="min-h-full bg-[#f7f8fa] px-4 py-4 text-gray-900 sm:px-6" onClick={closeAll}>
       <ToastStack toasts={toasts} />
 
-      <div className="flex items-start justify-between gap-4">
+      <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Documents</h1>
-          <div className="mt-1 text-sm text-gray-500">Files, folders, and exports.</div>
+          <h1 className="text-[22px] font-semibold tracking-tight text-gray-950">Documents</h1>
+          <p className="mt-1 text-sm text-gray-500">Files, folders, exports, and project records.</p>
         </div>
       </div>
 
-      <div className="mt-5" onClick={(e) => e.stopPropagation()}>
+      <div onClick={(e) => e.stopPropagation()}>
         {activeFolder && (
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <button
-              className="bg-transparent p-0 text-sm font-semibold text-[#00c065] hover:underline"
+              className="bg-transparent p-0 text-sm font-semibold text-[#00a054] hover:underline"
               onClick={goBackToRoot}
               type="button"
             >
@@ -782,145 +790,150 @@ export default function AdminDocuments() {
             <span className="text-gray-400">›</span>
             <span className="text-sm font-semibold text-gray-900">{activeFolder.name}</span>
 
-            <button className={cn(btnBase, "ml-1 px-3")} onClick={goBackToRoot} type="button">
+            <button className={cn(btnBase, "ml-1")} onClick={goBackToRoot} type="button">
               <ChevronLeft className="h-4 w-4 text-gray-500" />
               Back
             </button>
           </div>
         )}
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative w-full lg:w-[360px] xl:w-[420px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
-              placeholder="Search documents, users, dates"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 lg:ml-auto lg:flex-nowrap">
-            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-              <button
-                type="button"
-                className={cn(
-                  "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                  tab === "active" ? "bg-[#00c065]/10 text-[#166534]" : "text-gray-700 hover:bg-gray-50"
-                )}
-                onClick={() => {
-                  setTab("active")
-                  setSelectedIds({})
-                }}
-              >
-                Active
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                  tab === "archived" ? "bg-[#00c065]/10 text-[#166534]" : "text-gray-700 hover:bg-gray-50"
-                )}
-                onClick={() => {
-                  setTab("archived")
-                  setSelectedIds({})
-                }}
-              >
-                Archived
-              </button>
+        <div className={cn(cardShell, cardAccent, "mb-4")}>
+          <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center">
+            <div className="relative w-full lg:w-[380px] xl:w-[440px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
+                placeholder="Search documents, users, dates"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
             </div>
 
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button className={btnPrimary} type="button" onClick={() => setNewOpen((v) => !v)}>
-                + New
-              </button>
+            <div className="flex flex-wrap items-center gap-3 lg:ml-auto lg:flex-nowrap">
+              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                <button
+                  type="button"
+                  className={cn(
+                    "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
+                    tab === "active" ? "bg-[#00c065]/10 text-[#047857]" : "text-gray-600 hover:bg-gray-50"
+                  )}
+                  onClick={() => {
+                    setTab("active")
+                    setSelectedIds({})
+                  }}
+                >
+                  Active
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
+                    tab === "archived" ? "bg-[#00c065]/10 text-[#047857]" : "text-gray-600 hover:bg-gray-50"
+                  )}
+                  onClick={() => {
+                    setTab("archived")
+                    setSelectedIds({})
+                  }}
+                >
+                  Archived
+                </button>
+              </div>
 
-              {newOpen && (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                  <MenuItemBtn
-                    icon={<Folder className="h-4 w-4 text-gray-500" />}
-                    label="New Folder"
-                    onClick={openNewFolder}
-                  />
-                  <MenuItemBtn
-                    icon={<Upload className="h-4 w-4 text-gray-500" />}
-                    label="File Upload"
-                    onClick={openUploadFile}
-                  />
-                  <MenuItemBtn
-                    icon={<Folder className="h-4 w-4 text-gray-500" />}
-                    label="Folder Upload"
-                    onClick={openUploadFolder}
-                  />
-                </div>
-              )}
-            </div>
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                <button className={btnPrimary} type="button" onClick={() => setNewOpen((v) => !v)}>
+                  <Plus className="h-4 w-4" />
+                  New
+                </button>
 
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button className={btnBase} type="button" onClick={() => setFiltersOpen((v) => !v)}>
-                <SlidersHorizontal className="h-4 w-4 text-gray-500" />
-                Filters
-              </button>
-
-              {filtersOpen && (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[288px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                  <div className="px-3 py-2 text-xs font-semibold text-gray-500">Document Type</div>
-                  {filterItems.map((item) => (
-                    <label
-                      key={item.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 accent-[#00c065]"
-                        checked={item.checked}
-                        onChange={(e) => item.setChecked(e.target.checked)}
-                      />
-                      <span>{item.label}</span>
-                    </label>
-                  ))}
-                  <div className="mt-2 border-t border-gray-200 px-3 pb-1 pt-2 text-xs text-gray-500">
-                    Archive is controlled by the Active/Archived tabs.
+                {newOpen && (
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70">
+                    <MenuItemBtn
+                      icon={<Folder className="h-4 w-4 text-gray-500" />}
+                      label="New Folder"
+                      onClick={openNewFolder}
+                    />
+                    <MenuItemBtn
+                      icon={<Upload className="h-4 w-4 text-gray-500" />}
+                      label="File Upload"
+                      onClick={openUploadFile}
+                    />
+                    <MenuItemBtn
+                      icon={<Folder className="h-4 w-4 text-gray-500" />}
+                      label="Folder Upload"
+                      onClick={openUploadFolder}
+                    />
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button className={btnBase} type="button" onClick={() => setSortOpen((v) => !v)}>
-                <span>Sort:</span>
-                <span className="font-semibold text-gray-900">{sortLabel}</span>
-                <ArrowUpDown className="h-4 w-4 text-gray-500" />
-              </button>
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                <button className={btnBase} type="button" onClick={() => setFiltersOpen((v) => !v)}>
+                  <SlidersHorizontal className="h-4 w-4 text-gray-500" />
+                  Filters
+                </button>
 
-              {sortOpen && (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                  {([
-                    ["date_desc", "Newest"],
-                    ["date_asc", "Oldest"],
-                    ["name_asc", "Name A-Z"],
-                    ["name_desc", "Name Z-A"],
-                  ] as const).map(([key, label]) => (
-                    <button
-                      key={key}
-                      className={menuItem}
-                      type="button"
-                      onClick={() => {
-                        setSortKey(key)
-                        setSortOpen(false)
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
+                {filtersOpen && (
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[288px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70">
+                    <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Document Type
+                    </div>
+                    {filterItems.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-[#00c065]"
+                          checked={item.checked}
+                          onChange={(e) => item.setChecked(e.target.checked)}
+                        />
+                        <span>{item.label}</span>
+                      </label>
+                    ))}
+                    <div className="mt-2 border-t border-gray-100 px-3 pb-1 pt-2 text-xs text-gray-500">
+                      Archive is controlled by the Active/Archived tabs.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                <button className={btnBase} type="button" onClick={() => setSortOpen((v) => !v)}>
+                  <span>Sort:</span>
+                  <span className="font-semibold text-gray-950">{sortLabel}</span>
+                  <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                </button>
+
+                {sortOpen && (
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70">
+                    {([
+                      ["date_desc", "Newest"],
+                      ["date_asc", "Oldest"],
+                      ["name_asc", "Name A-Z"],
+                      ["name_desc", "Name Z-A"],
+                    ] as const).map(([key, label]) => (
+                      <button
+                        key={key}
+                        className={menuItem}
+                        type="button"
+                        onClick={() => {
+                          setSortKey(key)
+                          setSortOpen(false)
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {(loading || loadError) && (
-          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+          <div className={cn(cardShell, "mb-4 p-3")}>
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
@@ -934,7 +947,7 @@ export default function AdminDocuments() {
         )}
 
         {isSearching && (
-          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+          <div className={cn(cardShell, "mb-4 p-4")}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-gray-900">
                 Search results for <span className="text-gray-700">“{query.trim()}”</span>
@@ -949,14 +962,17 @@ export default function AdminDocuments() {
         )}
 
         {!activeFolder && !isSearching && (
-          <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-xs font-semibold text-gray-500">Folders</div>
-                <div className="text-xs text-gray-500">{visibleFolders.length} folders</div>
+          <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className={cn(cardShell, cardAccent)}>
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-950">Folders</div>
+                  <div className="mt-0.5 text-xs text-gray-500">Grouped document storage.</div>
+                </div>
+                <div className="text-xs font-medium text-gray-500">{visibleFolders.length} folders</div>
               </div>
 
-              <div className="flex flex-col divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+              <div className="divide-y divide-gray-100 px-3 py-2">
                 {visibleFolders.map((folder) => {
                   const stats = folderStats[folder.id]
                   const count = stats?.count ?? folder.fileCount
@@ -970,7 +986,7 @@ export default function AdminDocuments() {
                   return (
                     <div
                       key={folder.id}
-                      className="flex items-center justify-between gap-3 bg-white px-3 py-3 hover:bg-gray-50"
+                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-3 transition hover:bg-gray-50"
                     >
                       <button
                         type="button"
@@ -978,11 +994,11 @@ export default function AdminDocuments() {
                         onClick={() => openFolder(folder.id)}
                         disabled={tab === "archived"}
                       >
-                        <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#00c065]/10">
+                        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#00c065]/10">
                           <Folder className="h-5 w-5 text-[#00a054]" />
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-gray-900">{folder.name}</div>
+                          <div className="truncate text-sm font-semibold text-gray-950">{folder.name}</div>
                           <div className="mt-1 text-xs text-gray-500">
                             {tab === "archived" ? "Archived folder" : folderMeta(count, sizeLabel)}
                           </div>
@@ -1032,90 +1048,97 @@ export default function AdminDocuments() {
                 })}
 
                 {visibleFolders.length === 0 && (
-                  <div className="px-3 py-6 text-sm text-gray-500">
+                  <div className="px-3 py-8 text-sm text-gray-500">
                     {tab === "archived" ? "No archived folders." : "No folders to display."}
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-xs font-semibold text-gray-500">Recent</div>
-                <div className="text-xs text-gray-500">{tab === "archived" ? "—" : `${recentFiles.length} items`}</div>
+            <div className={cn(cardShell, cardAccent)}>
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-950">Recent</div>
+                  <div className="mt-0.5 text-xs text-gray-500">Latest uploaded and generated files.</div>
+                </div>
+                <div className="text-xs font-medium text-gray-500">
+                  {tab === "archived" ? "—" : `${recentFiles.length} items`}
+                </div>
               </div>
 
-              {tab === "archived" ? (
-                <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 text-sm text-gray-600">
-                  Recent is available only for Active documents.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {recentFiles.map((f) => {
-                    const meta = typeMeta[f.type]
-                    const key = `recent:${f.id}`
+              <div className="px-3 py-3">
+                {tab === "archived" ? (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 text-sm text-gray-600">
+                    Recent is available only for Active documents.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {recentFiles.map((f) => {
+                      const meta = typeMeta[f.type]
+                      const key = `recent:${f.id}`
 
-                    return (
-                      <div
-                        key={f.id}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm"
-                      >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span
-                            className={cn(
-                              "inline-flex h-[22px] min-w-[34px] items-center justify-center rounded-md px-2.5 text-xs font-semibold tracking-wide",
-                              meta.pillClass
-                            )}
-                          >
-                            {meta.pillText}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-gray-900">{f.name}</div>
-                            <div className="mt-1 text-xs text-gray-500">
-                              {formatDateISO(f.dateISO)} • {f.sizeLabel}
+                      return (
+                        <div
+                          key={f.id}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm transition hover:bg-gray-50"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span
+                              className={cn(
+                                "inline-flex h-[22px] min-w-[36px] items-center justify-center rounded-md px-2 text-xs font-semibold tracking-wide",
+                                meta.pillClass
+                              )}
+                            >
+                              {meta.pillText}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-gray-950">{f.name}</div>
+                              <div className="mt-1 text-xs text-gray-500">
+                                {formatDateISO(f.dateISO)} • {f.sizeLabel}
+                              </div>
                             </div>
                           </div>
+
+                          <ActionMenu
+                            isOpen={openMenuKey === key}
+                            onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
+                            onClose={() => setOpenMenuKey(null)}
+                          >
+                            <MenuItemBtn
+                              icon={<Download className="h-4 w-4 text-gray-500" />}
+                              label="Download"
+                              onClick={() => actionDownloadFile(f)}
+                            />
+                            <MenuItemBtn
+                              icon={<Pencil className="h-4 w-4 text-gray-500" />}
+                              label="Rename"
+                              onClick={() => openRenameModal("file", f.id, f.name)}
+                            />
+                            <MenuItemBtn
+                              icon={<Archive className="h-4 w-4 text-gray-500" />}
+                              label="Archive"
+                              onClick={() => actionArchiveFile(f.id)}
+                            />
+                          </ActionMenu>
                         </div>
+                      )
+                    })}
 
-                        <ActionMenu
-                          isOpen={openMenuKey === key}
-                          onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
-                          onClose={() => setOpenMenuKey(null)}
-                        >
-                          <MenuItemBtn
-                            icon={<Download className="h-4 w-4 text-gray-500" />}
-                            label="Download"
-                            onClick={() => actionDownloadFile(f)}
-                          />
-                          <MenuItemBtn
-                            icon={<Pencil className="h-4 w-4 text-gray-500" />}
-                            label="Rename"
-                            onClick={() => openRenameModal("file", f.id, f.name)}
-                          />
-                          <MenuItemBtn
-                            icon={<Archive className="h-4 w-4 text-gray-500" />}
-                            label="Archive"
-                            onClick={() => actionArchiveFile(f.id)}
-                          />
-                        </ActionMenu>
+                    {recentFiles.length === 0 && !loading && (
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+                        No recent documents match your filters.
                       </div>
-                    )
-                  })}
-
-                  {recentFiles.length === 0 && !loading && (
-                    <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-                      No recent documents match your filters.
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}
 
         <section className="mt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="text-xs font-semibold text-gray-500">{isSearching ? "Search Results" : "All Files"}</div>
               <div className="text-xs text-gray-500">• {scopedFiles.length} results</div>
               {activeFolder && <div className="text-xs text-gray-500">• {activeFolder.name}</div>}
@@ -1123,10 +1146,12 @@ export default function AdminDocuments() {
             </div>
 
             {selectedCount > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-green-900">{selectedCount} selected</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[#00c065]/10 px-2.5 py-1 text-xs font-semibold text-[#047857]">
+                  {selectedCount} selected
+                </span>
                 <button
-                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-transparent bg-transparent px-3 text-sm font-semibold text-green-900 hover:bg-[#00c065]/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-transparent bg-transparent px-3 text-sm font-semibold text-[#047857] transition-colors hover:bg-[#00c065]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
                   onClick={clearSelection}
                   type="button"
                 >
@@ -1147,7 +1172,7 @@ export default function AdminDocuments() {
                   </>
                 ) : (
                   <button className={btnDanger} type="button" onClick={bulkRestore}>
-                    <Check className="h-4 w-4 text-red-700" />
+                    <Check className="h-4 w-4" />
                     Restore
                   </button>
                 )}
@@ -1155,8 +1180,8 @@ export default function AdminDocuments() {
             )}
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="sticky top-0 z-10 grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]">
+          <div className={cn(cardShell, cardAccent)}>
+            <div className="grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]">
               <div className="flex justify-center">
                 <input
                   type="checkbox"
@@ -1166,103 +1191,107 @@ export default function AdminDocuments() {
                   className="h-4 w-4 accent-[#00c065]"
                 />
               </div>
-              <div>NAME</div>
-              <div className="max-[920px]:hidden">CREATED BY</div>
-              <div>DATE</div>
+              <div>Name</div>
+              <div className="max-[920px]:hidden">Created By</div>
+              <div>Date</div>
               <div />
             </div>
 
-            {scopedFiles.map((f) => {
-              const meta = typeMeta[f.type]
-              const checked = Boolean(selectedIds[f.id])
-              const key = `file:${f.id}`
+            <div className="divide-y divide-gray-100">
+              {scopedFiles.map((f) => {
+                const meta = typeMeta[f.type]
+                const checked = Boolean(selectedIds[f.id])
+                const key = `file:${f.id}`
 
-              return (
-                <div
-                  key={f.id}
-                  className={cn(
-                    "grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 px-3 py-3 text-sm hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]",
-                    checked && "bg-[#00c065]/10 hover:bg-[#00c065]/10"
-                  )}
-                >
-                  <div className="flex justify-center">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleOne(f.id, e.target.checked)}
-                      aria-label={`Select ${f.name}`}
-                      className="h-4 w-4 accent-[#00c065]"
-                    />
-                  </div>
+                return (
+                  <div
+                    key={f.id}
+                    className={cn(
+                      "grid grid-cols-[52px_1fr_280px_180px_60px] items-center px-3 py-3 text-sm transition hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]",
+                      checked && "bg-[#00c065]/10 hover:bg-[#00c065]/10"
+                    )}
+                  >
+                    <div className="flex justify-center">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => toggleOne(f.id, e.target.checked)}
+                        aria-label={`Select ${f.name}`}
+                        className="h-4 w-4 accent-[#00c065]"
+                      />
+                    </div>
 
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span
-                        className={cn(
-                          "inline-flex h-[22px] min-w-[34px] items-center justify-center rounded-md px-2.5 text-xs font-semibold tracking-wide",
-                          meta.pillClass
-                        )}
-                      >
-                        {meta.pillText}
-                      </span>
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className={cn(
+                            "inline-flex h-[22px] min-w-[36px] items-center justify-center rounded-md px-2 text-xs font-semibold tracking-wide",
+                            meta.pillClass
+                          )}
+                        >
+                          {meta.pillText}
+                        </span>
 
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold text-gray-900">{f.name}</div>
-                        <div className="mt-1 truncate text-xs text-gray-500">
-                          {meta.label}
-                          {f.sizeLabel !== "—" ? `  •  ${f.sizeLabel}` : ""}
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-gray-950">{f.name}</div>
+                          <div className="mt-1 truncate text-xs text-gray-500">
+                            {meta.label}
+                            {f.sizeLabel !== "—" ? ` • ${f.sizeLabel}` : ""}
+                          </div>
                         </div>
                       </div>
                     </div>
+
+                    <div className="truncate text-sm text-gray-700 max-[920px]:hidden">{f.createdBy}</div>
+                    <div className="whitespace-nowrap text-sm text-gray-700">{formatDateISO(f.dateISO)}</div>
+
+                    <ActionMenu
+                      isOpen={openMenuKey === key}
+                      onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
+                      onClose={() => setOpenMenuKey(null)}
+                    >
+                      <MenuItemBtn
+                        icon={<Download className="h-4 w-4 text-gray-500" />}
+                        label="Download"
+                        onClick={() => actionDownloadFile(f)}
+                      />
+                      <MenuItemBtn
+                        icon={<Pencil className="h-4 w-4 text-gray-500" />}
+                        label="Rename"
+                        onClick={() => openRenameModal("file", f.id, f.name)}
+                      />
+                      {tab === "active" ? (
+                        <MenuItemBtn
+                          icon={<Archive className="h-4 w-4 text-gray-500" />}
+                          label="Archive"
+                          onClick={() => actionArchiveFile(f.id)}
+                        />
+                      ) : (
+                        <MenuItemBtn
+                          icon={<Check className="h-4 w-4 text-gray-500" />}
+                          label="Restore"
+                          onClick={() => actionUnarchiveFile(f.id)}
+                        />
+                      )}
+                    </ActionMenu>
                   </div>
-
-                  <div className="truncate text-sm text-gray-700 max-[920px]:hidden">{f.createdBy}</div>
-                  <div className="whitespace-nowrap text-sm text-gray-700">{formatDateISO(f.dateISO)}</div>
-
-                  <ActionMenu
-                    isOpen={openMenuKey === key}
-                    onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
-                    onClose={() => setOpenMenuKey(null)}
-                  >
-                    <MenuItemBtn
-                      icon={<Download className="h-4 w-4 text-gray-500" />}
-                      label="Download"
-                      onClick={() => actionDownloadFile(f)}
-                    />
-                    <MenuItemBtn
-                      icon={<Pencil className="h-4 w-4 text-gray-500" />}
-                      label="Rename"
-                      onClick={() => openRenameModal("file", f.id, f.name)}
-                    />
-                    {tab === "active" ? (
-                      <MenuItemBtn
-                        icon={<Archive className="h-4 w-4 text-gray-500" />}
-                        label="Archive"
-                        onClick={() => actionArchiveFile(f.id)}
-                      />
-                    ) : (
-                      <MenuItemBtn
-                        icon={<Check className="h-4 w-4 text-gray-500" />}
-                        label="Restore"
-                        onClick={() => actionUnarchiveFile(f.id)}
-                      />
-                    )}
-                  </ActionMenu>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
 
             {scopedFiles.length === 0 && !loading && (
-              <div className="px-3 py-10 text-center">
-                <div className="text-sm font-semibold text-gray-900">No matching documents</div>
-                <div className="mt-2 text-sm text-gray-500">Try changing your search, filters, or sort option.</div>
+              <div className="px-3 py-12 text-center">
+                <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50">
+                  <FileText className="h-5 w-5 text-gray-400" />
+                </div>
+                <div className="mt-3 text-sm font-semibold text-gray-950">No matching documents</div>
+                <div className="mt-1 text-sm text-gray-500">Try changing your search, filters, or sort option.</div>
               </div>
             )}
           </div>
         </section>
       </div>
 
-      {/* Rename */}
       <Modal
         open={renameOpen}
         title={renameKind === "folder" ? "Rename Folder" : "Rename Document"}
@@ -1282,7 +1311,6 @@ export default function AdminDocuments() {
         </div>
       </Modal>
 
-      {/* New folder */}
       <Modal open={newFolderOpen} title="New Folder" onClose={() => setNewFolderOpen(false)}>
         <div className="space-y-3">
           <div className="text-sm text-gray-600">Create a folder to organize documents.</div>
@@ -1303,7 +1331,6 @@ export default function AdminDocuments() {
         </div>
       </Modal>
 
-      {/* File upload */}
       <Modal open={uploadFileOpen} title="File Upload" onClose={() => setUploadFileOpen(false)}>
         <div className="space-y-3">
           <div className="text-sm text-gray-600">
@@ -1326,15 +1353,14 @@ export default function AdminDocuments() {
         </div>
       </Modal>
 
-      {/* Folder upload */}
       <Modal open={uploadFolderOpen} title="Folder Upload" onClose={() => setUploadFolderOpen(false)}>
         <div className="space-y-3">
           <div className="text-sm text-gray-600">
-            Select a folder (browser will pick multiple files). Files will be added to the selected folder.
+            Select a folder. Files will be added to the selected folder.
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-semibold text-gray-500">Target folder</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Target folder</div>
             <select
               className={inputBase}
               value={uploadFolderTargetId}
@@ -1369,14 +1395,13 @@ export default function AdminDocuments() {
         </div>
       </Modal>
 
-      {/* Confirm archive folder */}
       <Modal
         open={confirmArchiveFolderOpen}
         title="Archive Folder"
         onClose={() => setConfirmArchiveFolderOpen(false)}
       >
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
             <Info className="mt-0.5 h-4 w-4 text-gray-500" />
             <div className="text-sm text-gray-700">Archiving a folder will also archive all documents inside it.</div>
           </div>
@@ -1386,20 +1411,19 @@ export default function AdminDocuments() {
               Cancel
             </button>
             <button className={btnDanger} type="button" onClick={confirmArchiveFolder}>
-              <Archive className="h-4 w-4 text-red-700" /> Archive Folder
+              <Archive className="h-4 w-4" /> Archive Folder
             </button>
           </div>
         </div>
       </Modal>
 
-      {/* Confirm restore folder */}
       <Modal
         open={confirmRestoreFolderOpen}
         title="Restore Folder"
         onClose={() => setConfirmRestoreFolderOpen(false)}
       >
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
             <Info className="mt-0.5 h-4 w-4 text-gray-500" />
             <div className="text-sm text-gray-700">
               Restoring a folder will also restore all archived documents inside it.
