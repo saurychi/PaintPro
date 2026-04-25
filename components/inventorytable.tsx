@@ -1,120 +1,113 @@
-'use client'
+import React from 'react'
 
-import { useState } from 'react'
-import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { InventoryItem } from '@/lib/inventoryitem'
-
-export interface InventoryTableProps {
-  data: InventoryItem[]
-  onRowClick?: (id: string) => void
-  onSelectionChange?: (selectedIds: string[]) => void
+type InventoryTableProps = {
+  data: any[]
+  type: "materials" | "equipment"
+  isLoading: boolean
+  onRowClick: (item: any) => void
 }
 
-export function InventoryTable({ data, onRowClick, onSelectionChange }: InventoryTableProps) {
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-
-  const handleSelectRow = (id: string) => {
-    const newSelected = new Set(selectedRows)
-    if (newSelected.has(id)) newSelected.delete(id)
-    else newSelected.add(id)
-
-    setSelectedRows(newSelected)
-    onSelectionChange?.(Array.from(newSelected))
+export default function InventoryTable({ data, type, isLoading, onRowClick }: InventoryTableProps) {
+  if (isLoading) {
+    return (
+      <div className="space-y-4 w-full">
+        <div className="h-10 w-full bg-gray-200 animate-pulse rounded-md" />
+        <div className="h-10 w-full bg-gray-200 animate-pulse rounded-md" />
+        <div className="h-10 w-full bg-gray-200 animate-pulse rounded-md" />
+      </div>
+    )
   }
 
-  const handleSelectAll = (_checked?: boolean | 'indeterminate') => {
-    const newSelected = new Set<string>()
-    if (selectedRows.size !== data.length) {
-      data.forEach((item) => newSelected.add(item.id))
-    }
-    setSelectedRows(newSelected)
-    onSelectionChange?.(Array.from(newSelected))
+  if (data.length === 0) {
+    return (
+      <div className="m-auto flex flex-col items-center justify-center text-gray-400 py-12">
+        <p className="text-sm">No {type} found.</p>
+      </div>
+    )
   }
-
-  const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`
-
-  const headerChecked: boolean | 'indeterminate' =
-    selectedRows.size === 0
-      ? false
-      : selectedRows.size === data.length
-        ? true
-        : 'indeterminate'
 
   return (
-    <div className="w-full bg-white rounded-lg shadow-sm overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-gray-50 border-b border-gray-200">
-            <TableHead className="w-12 px-4 py-3">
-              <Checkbox checked={headerChecked} onCheckedChange={handleSelectAll} />
-            </TableHead>
-
-            <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide">
-              Material ID
-            </TableHead>
-            <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide">
-              Name
-            </TableHead>
-            <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide">
-              Material Type
-            </TableHead>
-            <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide text-right">
-              Unit Cost (AUS)
-            </TableHead>
-            <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide text-right">
-              In Stock
-            </TableHead>
-            <TableHead className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wide">
-              Location Stored
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-
-        <TableBody>
-          {data.map((item) => (
-            <TableRow
-              key={item.id}
-              onClick={() => onRowClick?.(item.id)}
-              className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
-            >
-              <TableCell className="w-12 px-4 py-4">
-                <Checkbox
-                  checked={selectedRows.has(item.id)}
-                  onCheckedChange={() => handleSelectRow(item.id)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </TableCell>
-
-              <TableCell className="px-4 py-4 text-sm font-medium text-gray-900">
-                {item.id}
-              </TableCell>
-              <TableCell className="px-4 py-4 text-sm text-gray-700">
-                {item.name}
-              </TableCell>
-              <TableCell className="px-4 py-4 text-sm text-gray-700">
-                {item.unitType}
-              </TableCell>
-              <TableCell className="px-4 py-4 text-sm text-gray-700 text-right">
-                {formatCurrency(item.unitCost)}
-              </TableCell>
-              <TableCell className="px-4 py-4 text-sm text-gray-700 text-right">
-                {item.inStock}
-              </TableCell>
-              <TableCell className="px-4 py-4 text-sm text-gray-700">
-                {item.location}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="flex-1 overflow-auto custom-scrollbar rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table className="w-full text-sm text-left">
+        <thead className="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0 z-10 shadow-[0_1px_0_#e5e7eb]">
+          <tr>
+            <th className="px-5 py-3.5 font-semibold">Item Name</th>
+            <th className="px-5 py-3.5 font-semibold">Location</th>
+            <th className="px-5 py-3.5 font-semibold">Supplier</th>
+            <th className="px-5 py-3.5 font-semibold">
+              {type === 'materials' ? 'Stock Details' : 'Condition / Status'}
+            </th>
+            <th className="px-5 py-3.5 font-semibold text-right">Unit Cost</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {data.map((item) => {
+            const id = item.material_id || item.equipment_id;
+            
+            return (
+              <tr 
+                key={id} 
+                onClick={() => onRowClick(item)}
+                className="hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                <td className="px-5 py-3">
+                  <div className="font-semibold text-gray-900">{item.name}</div>
+                  {item.tag && (
+                    <span 
+                      className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase tracking-wide" 
+                      style={{ 
+                        color: item.tag.color || '#6b7280', 
+                        borderColor: item.tag.color || '#e5e7eb', 
+                        backgroundColor: `${item.tag.color || '#e5e7eb'}15` 
+                      }}
+                    >
+                      {item.tag.tag_name}
+                    </span>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-gray-600">
+                  {item.location || <span className="text-gray-400 italic">Unassigned</span>}
+                </td>
+                <td className="px-5 py-3 text-gray-600">
+                  {item.supplier ? (
+                    <span 
+                      className="inline-block px-2.5 py-0.5 text-xs font-medium rounded-full border"
+                      style={{
+                        color: item.supplier.color || '#d97706',
+                        borderColor: item.supplier.color || '#fcd34d',
+                        backgroundColor: `${item.supplier.color || '#fcd34d'}15`
+                      }}
+                    >
+                      {item.supplier.supplier_name}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">-</span>
+                  )}
+                </td>
+                <td className="px-5 py-3">
+                  {type === 'materials' ? (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-gray-900 font-medium">In Stock: {item.current_in_stock || 0}</span>
+                      <span className="text-xs text-gray-500">Reorder Pt: {item.reorder_point}</span>
+                      <span className="text-xs text-gray-500">Unit: {item.unit}</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-0.5">
+                      <span className={`font-medium ${item.status === 'Available' ? 'text-[#00c065]' : 'text-red-500'}`}>
+                        {item.status}
+                      </span>
+                      <span className="text-xs text-gray-500 capitalize">{item.condition || "Unknown Condition"}</span>
+                    </div>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-right font-semibold text-gray-900">
+                  ₱{(item.unit_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

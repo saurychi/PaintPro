@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InventoryToolbar } from './inventorytoolbar';
-import { InventoryTable } from './inventorytable';
+import  InventoryTable from './inventorytable';
 import type { InventoryItem } from "@/lib/inventoryitem"
 
 const MOCK_MATERIALS: InventoryItem[] = [
