@@ -75,6 +75,28 @@ export default function SigninClient() {
         } catch (storageErr) {
           console.error("Failed to read client access storage:", storageErr)
         }
+
+        // Cookie fallback — set by the client settings logout so auto-login
+        // survives localStorage being cleared or a new browser session.
+        try {
+          const cookieMatch = document.cookie
+            .split("; ")
+            .find((row) => row.startsWith("paintpro_client_access="))
+
+          if (cookieMatch) {
+            const raw = cookieMatch.split("=").slice(1).join("=")
+            const parsed = JSON.parse(decodeURIComponent(raw))
+            if (parsed?.project_id && parsed?.project_code) {
+              try {
+                localStorage.setItem("paintpro_client_access", JSON.stringify(parsed))
+              } catch {}
+              router.replace("/client")
+              return
+            }
+          }
+        } catch (cookieErr) {
+          console.error("Failed to read client access cookie:", cookieErr)
+        }
       } catch (e) {
         console.error(e)
         setError("Failed to verify your account. Try again.")

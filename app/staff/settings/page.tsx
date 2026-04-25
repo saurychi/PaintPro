@@ -4,20 +4,113 @@ import React, { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
+import rawCountries from "@/lib/data/country-by-calling-code.json"
 
 const ACCENT = "#00c065"
 const ACCENT_HOVER = "#00a054"
 
-function StaffSettings() {
+type CountryRaw = { country: string; calling_code: number }
+type CountryOption = { label: string; code: string }
+
+type DbUser = {
+  id: string
+  username: string
+  email: string | null
+  phone: string | null
+  role: "client" | "staff" | "manager" | "admin"
+}
+
+function rolePill(role: DbUser["role"]) {
+  if (role === "admin") return "border-gray-200 bg-gray-100 text-gray-800"
+  if (role === "manager") return "border-purple-200 bg-purple-500/10 text-purple-700"
+  if (role === "staff") return "border-blue-200 bg-blue-500/10 text-blue-700"
+  return "border-emerald-200 bg-emerald-500/10 text-emerald-700"
+}
+
+function roleLabel(role: DbUser["role"]) {
+  if (role === "admin") return "Admin"
+  if (role === "manager") return "Manager"
+  if (role === "staff") return "Staff"
+  return "Client"
+}
+
+function parsePhone(raw?: string | null) {
+  const fallback = { countryCode: "+63", local: "" }
+  if (!raw) return fallback
+  const s = String(raw).trim()
+  const m = s.match(/^(\+\d+)\s*(.*)$/)
+  if (!m) return { ...fallback, local: s }
+  return { countryCode: m[1], local: (m[2] || "").trim() }
+}
+
+function formatPhoneFull(countryCode: string, local: string) {
+  const cc = countryCode.trim()
+  const lc = local.trim()
+  if (!lc) return null
+  return `${cc} ${lc}`
+}
+
+function SectionTitle({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string
+  subtitle?: string
+  right?: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: ACCENT }}
+            aria-hidden="true"
+          />
+          <p className="text-sm font-semibold text-gray-900">{title}</p>
+        </div>
+        {subtitle ? <p className="mt-1 text-sm text-gray-600">{subtitle}</p> : null}
+      </div>
+      {right ? <div className="shrink-0">{right}</div> : null}
+    </div>
+  )
+}
+
+const btnBase =
+  "inline-flex items-center justify-center rounded-lg text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25"
+const btnNeutral =
+  `${btnBase} border border-gray-200 bg-white px-3 h-9 text-gray-900 hover:bg-gray-50 hover:shadow-md`
+const btnPrimary =
+  `${btnBase} bg-[#00c065] px-3 h-9 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`
+const btnDanger =
+  `${btnBase} border border-red-200 bg-white px-4 py-2 text-red-600 hover:bg-red-50 hover:shadow-md`
+
+export default function AdminSettings() {
   const router = useRouter()
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
 
-  const [profile, setProfile] = useState({
-    firstName: "First Name",
-    lastName: "Last Name",
-    email: "Email",
-    phone: "0X XXXX XXXX",
+  const countries: CountryOption[] = useMemo(() => {
+    const codes = Array.from(
+      new Set(
+        (rawCountries as CountryRaw[])
+          .filter((c) => c?.calling_code)
+          .map((c) => `+${c.calling_code}`)
+      )
+    ).sort((a, b) => a.localeCompare(b))
+    return codes.map((code) => ({ label: code, code }))
+  }, [])
+
+  const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState<string | null>(null)
+
+  const [profile, setProfile] = useState<DbUser>({
+    id: "",
+    username: "",
+    email: null,
+    phone: null,
+    role: "client",
   })
 
   const [toggles, setToggles] = useState({
@@ -27,93 +120,111 @@ function StaffSettings() {
     assignEmployees: true,
   })
 
-  const [pw, setPw] = useState({ next: "", confirm: "" })
-  const [pwBusy, setPwBusy] = useState(false)
-  const [pwMsg, setPwMsg] = useState<string | null>(null)
-  const [pwErr, setPwErr] = useState<string | null>(null)
+  const [phoneEditing, setPhoneEditing] = useState(false)
+  const [phoneBusy, setPhoneBusy] = useState(false)
+  const [phoneMsg, setPhoneMsg] = useState<string | null>(null)
+  const [phoneErr, setPhoneErr] = useState<string | null>(null)
 
-  const [hidePasswordSection, setHidePasswordSection] = useState(true)
-
-  const [showPwNext, setShowPwNext] = useState(false)
-  const [showPwConfirm, setShowPwConfirm] = useState(false)
+  const [phoneDraft, setPhoneDraft] = useState({
+    countryCode: "+63",
+    local: "",
+  })
 
   useEffect(() => {
-    const checkSession = async () => {
-      const { data, error } = await supabase.auth.getSession()
+    const boot = async () => {
+      setLoading(true)
+      setLoadErr(null)
+
+      const { data, error: sessErr } = await supabase.auth.getSession()
+      if (sessErr) console.error(sessErr)
+
       const session = data.session
-
-      if (error) {
-        console.error(error)
-      }
-
       if (!session) {
         router.replace("/auth/signin")
         return
       }
 
-      // If Google is linked, hide the change password section.
-      const providers = (session.user.app_metadata as any)?.providers as string[] | undefined
-      const provider = (session.user.app_metadata as any)?.provider as string | undefined
+      try {
+        // Fetch from public.users (table name "users" in public schema)
+        const { data: row, error } = await supabase
+          .from("users")
+          .select("id, username, email, phone, role")
+          .eq("id", session.user.id)
+          .maybeSingle<DbUser>()
 
-      const hasGoogle = (providers?.includes("google") ?? false) || provider === "google"
+        if (error) throw error
+        if (!row) {
+          await supabase.auth.signOut()
+          router.replace("/auth/invite?reason=not_invited")
+          return
+        }
 
-      setHidePasswordSection(hasGoogle)
+        const mergedEmail = row.email ?? (session.user.email || null)
+        const merged: DbUser = { ...row, email: mergedEmail }
 
-      // If password section is hidden, clear any values and messages
-      if (hasGoogle) {
-        setPw({ next: "", confirm: "" })
-        setPwErr(null)
-        setPwMsg(null)
-        setShowPwNext(false)
-        setShowPwConfirm(false)
+        setProfile(merged)
+        setPhoneDraft(parsePhone(merged.phone))
+      } catch (e: any) {
+        console.error(e)
+        setLoadErr(e?.message || "Failed to load profile.")
+      } finally {
+        setLoading(false)
       }
     }
 
-    checkSession()
+    boot()
   }, [router])
-
-  const handleProfileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setProfile((prev) => ({ ...prev, [name]: value }))
-  }
 
   const handleToggle = (key: keyof typeof toggles) => {
     setToggles((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
-  const handleChangePassword = async () => {
-    setPwErr(null)
-    setPwMsg(null)
+  const startEditPhone = () => {
+    setPhoneErr(null)
+    setPhoneMsg(null)
+    setPhoneDraft(parsePhone(profile.phone))
+    setPhoneEditing(true)
+  }
 
-    const next = pw.next.trim()
-    const confirm = pw.confirm.trim()
+  const cancelEditPhone = () => {
+    setPhoneErr(null)
+    setPhoneMsg(null)
+    setPhoneDraft(parsePhone(profile.phone))
+    setPhoneEditing(false)
+  }
 
-    if (!next || next.length < 8) {
-      setPwErr("Password must be at least 8 characters.")
-      return
-    }
-    if (next !== confirm) {
-      setPwErr("Passwords do not match.")
-      return
-    }
+  const savePhone = async () => {
+    setPhoneErr(null)
+    setPhoneMsg(null)
+
+    const phoneFull = formatPhoneFull(phoneDraft.countryCode, phoneDraft.local)
 
     try {
-      setPwBusy(true)
-      const { error } = await supabase.auth.updateUser({ password: next })
-      if (error) {
-        setPwErr(error.message || "Failed to change password.")
+      setPhoneBusy(true)
+
+      const { data, error: sessErr } = await supabase.auth.getSession()
+      if (sessErr) throw sessErr
+      const session = data.session
+      if (!session) {
+        router.replace("/auth/signin")
         return
       }
 
-      setPw({ next: "", confirm: "" })
-      setPwMsg("Password updated successfully.")
-      setShowPwNext(false)
-      setShowPwConfirm(false)
+      const { error } = await supabase
+        .from("users")
+        .update({ phone: phoneFull, updated_at: new Date().toISOString() })
+        .eq("id", session.user.id)
+
+      if (error) throw error
+
+      setProfile((p) => ({ ...p, phone: phoneFull }))
+      setPhoneEditing(false)
+      setPhoneMsg("Saved.")
     } catch (e: any) {
       console.error(e)
-      setPwErr(e?.message || "Failed to change password.")
+      setPhoneErr(e?.message || "Failed to save phone.")
     } finally {
-      setPwBusy(false)
+      setPhoneBusy(false)
     }
   }
 
@@ -126,126 +237,147 @@ function StaffSettings() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-svh flex items-center justify-center bg-white px-6">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin" />
+          <p className="text-sm text-gray-600">Loading settings…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Shared controls style for phone select/input (same length in both modes)
+  const phoneSelectClass =
+    "h-10 w-full rounded-lg border border-gray-200 bg-white px-2 pr-8 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+  const phoneInputClass =
+    [
+      "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm outline-none",
+      "focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20",
+      "sm:max-w-[260px]",
+    ].join(" ")
+
   return (
     <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
       <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
 
       <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
         <div className="h-full overflow-y-auto pr-1">
-          <div className="w-full space-y-8">
-            {/* Profile */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Profile</h2>
-              </div>
+          <Card>
+            <div className="grid gap-6">
+              {loadErr ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                  {loadErr}
+                </div>
+              ) : null}
 
-              <Card>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Field label="First name">
-                    <TextInput
-                      name="firstName"
-                      value={profile.firstName}
-                      onChange={handleProfileChange}
-                      placeholder="First name"
-                    />
-                  </Field>
+              {/* Profile */}
+              <div className="grid gap-4">
+                <SectionTitle
+                  title="Profile"
+                  subtitle="Account details"
+                  right={
+                    <span
+                      className={[
+                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                        rolePill(profile.role),
+                      ].join(" ")}
+                    >
+                      {roleLabel(profile.role)}
+                    </span>
+                  }
+                />
 
-                  <Field label="Last name">
-                    <TextInput
-                      name="lastName"
-                      value={profile.lastName}
-                      onChange={handleProfileChange}
-                      placeholder="Last name"
-                    />
-                  </Field>
-
-                  <div className="md:col-span-2">
-                    <div className="my-1 h-px w-full bg-gray-200" />
+                <div className="rounded-lg border border-gray-200 bg-white">
+                  <div className="px-4 py-4">
+                    <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
+                      <div className="text-sm font-semibold text-gray-900">Username</div>
+                      <div className="text-sm font-semibold text-gray-900">{profile.username || ""}</div>
+                    </div>
                   </div>
 
-                  <Field className="md:col-span-2" label="Email">
-                    <IconInput
-                      icon={
-                        <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                          <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
-                          <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
-                        </svg>
-                      }
-                    >
-                      <TextInput
-                        type="email"
-                        name="email"
-                        value={profile.email}
-                        onChange={handleProfileChange}
-                        placeholder="Email"
-                        className="pl-10"
-                      />
-                    </IconInput>
-                  </Field>
+                  <div className="h-px w-full bg-gray-200" />
 
-                  <Field className="md:col-span-2" label="Phone number">
-                    <IconInput
-                      icon={
-                        <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                          <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                        </svg>
-                      }
-                    >
-                      <TextInput
-                        type="tel"
-                        name="phone"
-                        value={profile.phone}
-                        onChange={handleProfileChange}
-                        placeholder="Phone number"
-                        className="pl-10"
-                      />
-                    </IconInput>
-                  </Field>
-                </div>
-
-                <div className="mt-4 flex items-center gap-3">
-                  <PrimaryButton>Save</PrimaryButton>
-
-                  <button
-                    type="button"
-                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.98]"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </Card>
-            </div>
-
-            {/* Appearance */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Appearance</h2>
-              </div>
-
-              <Card>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">Dark mode</p>
-                    <p className="mt-1 text-sm text-gray-600">Switch between light and dark interface.</p>
+                  <div className="px-4 py-4">
+                    <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
+                      <div className="text-sm font-semibold text-gray-900">Email</div>
+                      <div className="text-sm font-semibold text-gray-900">{profile.email || ""}</div>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setTheme(isDark ? "light" : "dark")}
-                    className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.98]"
-                  >
-                    {isDark ? "Light mode" : "Dark mode"}
-                  </button>
-                </div>
-              </Card>
-            </div>
 
-            {/* Preferences */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Preferences</h2>
+                  <div className="h-px w-full bg-gray-200" />
+
+                  {/* Phone */}
+                  <div className="px-4 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">Phone</p>
+                        <p className="mt-1 text-sm text-gray-600">Used for contact and job updates</p>
+                      </div>
+
+                      {!phoneEditing ? (
+                        <button type="button" onClick={startEditPhone} className={btnNeutral}>
+                          Edit
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={cancelEditPhone}
+                            disabled={phoneBusy}
+                            className={`${btnNeutral} disabled:opacity-60`}
+                          >
+                            Cancel
+                          </button>
+                          <button type="button" onClick={savePhone} disabled={phoneBusy} className={btnPrimary}>
+                            {phoneBusy ? "Saving..." : "Save"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3 grid gap-2">
+                      {/* SAME controls in both modes so width and look match */}
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
+                        <select
+                          value={phoneDraft.countryCode}
+                          onChange={(e) => setPhoneDraft((p) => ({ ...p, countryCode: e.target.value }))}
+                          disabled={!phoneEditing}
+                          className={`${phoneSelectClass} ${!phoneEditing ? "bg-gray-50 text-gray-900" : ""} disabled:cursor-not-allowed`}
+                        >
+                          {countries.map((c) => (
+                            <option key={c.code} value={c.code}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+
+                        <input
+                          value={phoneDraft.local}
+                          onChange={(e) => setPhoneDraft((p) => ({ ...p, local: e.target.value }))}
+                          disabled={!phoneEditing}
+                          inputMode="tel"
+                          autoComplete="tel-national"
+                          maxLength={20}
+                          className={`${phoneInputClass} ${!phoneEditing ? "bg-gray-50 text-gray-900" : ""} disabled:cursor-not-allowed`}
+                          placeholder="9xx xxx xxxx"
+                        />
+                      </div>
+
+                      {phoneErr ? <p className="text-sm font-semibold text-red-600">{phoneErr}</p> : null}
+                      {phoneMsg ? <p className="text-sm font-semibold text-emerald-700">{phoneMsg}</p> : null}
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <Card>
+              <div className="h-px w-full bg-gray-200" />
+
+              {/* Preferences */}
+              <div className="grid gap-3">
+                <SectionTitle title="Preferences" subtitle="Notifications and behavior" />
+
                 <div className="space-y-3">
                   <ToggleRow
                     label="Receive notifications from job updates"
@@ -272,110 +404,45 @@ function StaffSettings() {
                     onClick={() => handleToggle("assignEmployees")}
                   />
                 </div>
-              </Card>
-            </div>
-
-            {/* Authentication */}
-            <div className="pb-6">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Authentication</h2>
               </div>
 
-              <Card>
-                {!hidePasswordSection ? (
-                  <>
+              {/* Appearance */}
+              <div className="pt-2">
+                <div className="h-px w-full bg-gray-200" />
+                <div className="mt-5 grid gap-3">
+                  <SectionTitle title="Appearance" subtitle="Control the look and feel of the interface." />
+
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Change password</p>
-                      <p className="mt-1 text-sm text-gray-600">Update your account password.</p>
-
-                      {/* ✅ NEW: separate row per field + show/hide per label */}
-                      <div className="mt-4 grid grid-cols-1 gap-4">
-                        <div>
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <label className="block text-sm font-semibold text-gray-900">New password</label>
-                            <button
-                              type="button"
-                              onClick={() => setShowPwNext((v) => !v)}
-                              className="text-sm font-semibold text-[#00c065] transition hover:text-[#00a054] active:scale-[0.98]"
-                            >
-                              {showPwNext ? "Hide" : "Show"}
-                            </button>
-                          </div>
-                          <TextInput
-                            type={showPwNext ? "text" : "password"}
-                            value={pw.next}
-                            onChange={(e) => setPw((p) => ({ ...p, next: e.target.value }))}
-                            placeholder="At least 8 characters"
-                          />
-                        </div>
-
-                        <div>
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <label className="block text-sm font-semibold text-gray-900">Confirm new password</label>
-                            <button
-                              type="button"
-                              onClick={() => setShowPwConfirm((v) => !v)}
-                              className="text-sm font-semibold text-[#00c065] transition hover:text-[#00a054] active:scale-[0.98]"
-                            >
-                              {showPwConfirm ? "Hide" : "Show"}
-                            </button>
-                          </div>
-                          <TextInput
-                            type={showPwConfirm ? "text" : "password"}
-                            value={pw.confirm}
-                            onChange={(e) => setPw((p) => ({ ...p, confirm: e.target.value }))}
-                            placeholder="Repeat password"
-                          />
-                        </div>
-                      </div>
-
-                      {pwErr ? <p className="mt-3 text-sm font-semibold text-red-600">{pwErr}</p> : null}
-                      {pwMsg ? <p className="mt-3 text-sm font-semibold text-emerald-700">{pwMsg}</p> : null}
-
-                      <div className="mt-4 flex items-center justify-end">
-                        <button
-                          type="button"
-                          onClick={handleChangePassword}
-                          disabled={pwBusy}
-                          className={[
-                            "inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm",
-                            "transition-all duration-200 ease-out",
-                            "bg-[#00c065] hover:bg-[#00a054] hover:shadow-md",
-                            "active:scale-[0.98]",
-                            "disabled:cursor-not-allowed disabled:opacity-60",
-                          ].join(" ")}
-                        >
-                          {pwBusy ? "Updating..." : "Update password"}
-                        </button>
-                      </div>
+                      <p className="text-sm font-semibold text-gray-900">Dark mode</p>
+                      <p className="mt-1 text-sm text-gray-600">Switch between light and dark interface.</p>
                     </div>
-
-                    <div className="my-6 h-px w-full bg-gray-200" />
-                  </>
-                ) : null}
-
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Log out of this PC</p>
-                  <p className="mt-1 text-sm text-gray-600">You will be redirected to the sign-in page after logging out.</p>
-
-                  <div className="mt-4">
                     <button
                       type="button"
-                      onClick={handleLogout}
-                      className={[
-                        "rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm",
-                        "transition-all duration-200 ease-out",
-                        "hover:bg-red-50 hover:shadow-md",
-                        "active:scale-[0.98]",
-                      ].join(" ")}
+                      onClick={() => setTheme(isDark ? "light" : "dark")}
+                      className={btnNeutral}
                     >
+                      {isDark ? "Light mode" : "Dark mode"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Session */}
+              <div className="pt-2">
+                <div className="h-px w-full bg-gray-200" />
+                <div className="mt-5 grid gap-3">
+                  <SectionTitle title="Session" subtitle="Sign out of your account on this device." />
+
+                  <div>
+                    <button type="button" onClick={handleLogout} className={btnDanger}>
                       Logout
                     </button>
                   </div>
                 </div>
-              </Card>
+              </div>
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </div>
@@ -383,59 +450,11 @@ function StaffSettings() {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">{children}</div>
-}
-
-function Field({
-  label,
-  children,
-  className,
-}: {
-  label: string
-  children: React.ReactNode
-  className?: string
-}) {
   return (
-    <div className={className}>
-      <label className="mb-2 block text-sm font-semibold text-gray-900">{label}</label>
-      {children}
+    <div className="w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
+      <div className="p-4">{children}</div>
     </div>
-  )
-}
-
-function TextInput({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={[
-        "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm",
-        "placeholder:text-gray-400 focus:border-[#00c065] focus:outline-none focus:ring-2 focus:ring-[#00c065]/20",
-        className,
-      ].join(" ")}
-    />
-  )
-}
-
-function IconInput({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="relative">
-      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">{icon}</div>
-      {children}
-    </div>
-  )
-}
-
-function PrimaryButton({ children }: { children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 ease-out active:scale-[0.98]"
-      style={{ backgroundColor: ACCENT }}
-      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = ACCENT_HOVER)}
-      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = ACCENT)}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -454,7 +473,7 @@ function ToggleRow({
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.99]"
+      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 hover:shadow-md active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25"
       aria-pressed={active}
     >
       <div className="flex items-start justify-between gap-4">
@@ -486,5 +505,3 @@ function ToggleRow({
     </button>
   )
 }
-
-export default StaffSettings

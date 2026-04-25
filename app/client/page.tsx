@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useClientProject } from "./ClientShellClient";
 import JobProgressCard, {
   type ProcessItem,
 } from "@/components/dashboard/jobProgressCard";
 import DashboardInsightCard from "@/components/dashboard/dashboardInsightCard";
+import PendingDocumentsCard from "@/components/dashboard/pendingDocumentsCard";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +24,9 @@ type OverviewResponse = {
 // ─── helpers (same pattern as admin/page.tsx) ─────────────────────────────────
 
 function normalizeStatus(value?: string | null) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function asArray<T = unknown>(value: unknown): T[] {
@@ -100,7 +104,12 @@ function lastDateLabel(values: Array<string | null | undefined>) {
 function getTaskStatus(rawStatus: string): StepVisualStatus {
   const n = normalizeStatus(rawStatus);
   if (n === "completed" || n === "done" || n === "finished") return "done";
-  if (n === "in_progress" || n === "active" || n === "ongoing" || n === "ready_to_start")
+  if (
+    n === "in_progress" ||
+    n === "active" ||
+    n === "ongoing" ||
+    n === "ready_to_start"
+  )
     return "active";
   return "pending";
 }
@@ -124,7 +133,9 @@ function collectEmployeeLabels(subTask: Record<string, unknown>) {
 
   for (const entry of collections) {
     const nested =
-      asRecord(entry.user) || asRecord(entry.employee) || asRecord(entry.profile);
+      asRecord(entry.user) ||
+      asRecord(entry.employee) ||
+      asRecord(entry.profile);
     const label = readString(
       entry.username,
       entry.full_name,
@@ -142,49 +153,42 @@ function collectEmployeeLabels(subTask: Record<string, unknown>) {
   return unique(labels);
 }
 
+// Ordered list of project-status values that represent the job-creation workflow.
+// A project moves through these sequentially; each value means "this step is now active".
+const JOB_CREATION_STATUSES = [
+  "main_task_pending",
+  "sub_task_pending",
+  "materials_pending",
+  "equipment_pending",
+  "schedule_pending",
+  "employee_assignment_pending",
+  "cost_estimation_pending",
+  "overview_pending",
+  "quotation_pending",
+];
+
+function getProjectPhase(
+  normalized: string,
+): "job_creation" | "ready" | "in_progress" | "completed" | "cancelled" {
+  if (JOB_CREATION_STATUSES.includes(normalized)) return "job_creation";
+  if (normalized === "ready_to_start") return "ready";
+  if (normalized === "in_progress") return "in_progress";
+  if (normalized === "completed") return "completed";
+  if (normalized === "cancelled") return "cancelled";
+  return "job_creation";
+}
+
 function buildProcessItems(
   mainTasks: Record<string, unknown>[],
-  projectStart: string | null,
   projectEnd: string | null,
   projectStatus: string,
 ): ProcessItem[] {
   const normalized = normalizeStatus(projectStatus);
+  const phase = getProjectPhase(normalized);
   const items: ProcessItem[] = [];
 
-  const startOfWorkStatus: StepVisualStatus =
-    normalized === "ready_to_start"
-      ? "active"
-      : normalized === "in_progress" || normalized === "completed"
-        ? "done"
-        : "pending";
-
-  items.push({
-    id: "start-of-work",
-    title: "Start of Work",
-    status: startOfWorkStatus,
-    startLabel: formatDateTime(projectStart),
-    endLabel:
-      startOfWorkStatus === "done"
-        ? formatDateTime(projectStart)
-        : startOfWorkStatus === "active"
-          ? "Working on it..."
-          : "-",
-    children: [
-      {
-        id: "project-kickoff",
-        title: "Project Kickoff",
-        status: startOfWorkStatus,
-        startLabel: formatDateTime(projectStart),
-        endLabel:
-          startOfWorkStatus === "done"
-            ? formatDateTime(projectStart)
-            : startOfWorkStatus === "active"
-              ? "Working on it..."
-              : "-",
-      },
-    ],
-  });
-
+  // "Start of Work" is active once job creation is done (ready_to_start),
+  // done once the project is actually in progress or completed.
   for (let i = 0; i < mainTasks.length; i++) {
     const mt = mainTasks[i];
     const subTasks = [
@@ -285,9 +289,9 @@ function buildProcessItems(
   }
 
   const manageEndStatus: StepVisualStatus =
-    normalized === "completed"
+    phase === "completed"
       ? "done"
-      : normalized === "in_progress"
+      : phase === "in_progress"
         ? "active"
         : "pending";
 
@@ -348,7 +352,11 @@ export default function ClientDashboardPage() {
         const data = (await res.json()) as OverviewResponse;
 
         if (!res.ok) {
-          setFetchError(data?.error || "Failed to load project.");
+          const msg =
+            [data?.error, data?.details].filter(Boolean).join(" — ") ||
+            "Failed to load project data.";
+          setFetchError(msg);
+          toast.error("Could not load project", { description: msg });
           return;
         }
 
@@ -365,8 +373,11 @@ export default function ClientDashboardPage() {
         }
         setOpenProcessIds(defaultOpen);
         setOpenSubtaskIds(new Set());
-      } catch {
-        setFetchError("Failed to load project.");
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to load project data.";
+        setFetchError(msg);
+        toast.error("Could not load project", { description: msg });
       } finally {
         setLoadingDetails(false);
       }
@@ -377,26 +388,29 @@ export default function ClientDashboardPage() {
 
   const projectStatus = readString(project?.status, project?.rawStatus);
 
-  const projectStart =
-    readString(
-      project?.scheduledStartDatetime,
-      project?.scheduled_start_datetime,
-      project?.startDatetime,
-      project?.start_datetime,
-    ) || null;
-
   const projectEnd =
     readString(
-      project?.scheduledEndDatetime,
       project?.scheduled_end_datetime,
-      project?.endDatetime,
-      project?.end_datetime,
+      project?.scheduledEndDatetime,
     ) || null;
 
   const processItems = useMemo(
-    () => buildProcessItems(mainTasks, projectStart, projectEnd, projectStatus),
-    [mainTasks, projectStart, projectEnd, projectStatus],
+    () => buildProcessItems(mainTasks, projectEnd, projectStatus),
+    [mainTasks, projectEnd, projectStatus],
   );
+
+  const pendingDocumentProject = useMemo(() => {
+    if (!project) return null;
+
+    return {
+      project_id: readString(project.project_id, project.id) || projectId,
+      project_code: readString(project.project_code, project.projectCode),
+      title: readString(project.title),
+      status: projectStatus,
+      updated_at: readString(project.updated_at, project.updatedAt),
+      created_at: readString(project.created_at, project.createdAt),
+    };
+  }, [project, projectId, projectStatus]);
 
   function toggleProcessRow(id: string) {
     setOpenProcessIds((prev) => {
@@ -426,8 +440,7 @@ export default function ClientDashboardPage() {
           <a
             href="/auth/signin"
             className="mt-3 inline-block text-sm font-medium hover:underline"
-            style={{ color: "var(--cp-brand)" }}
-          >
+            style={{ color: "var(--cp-brand)" }}>
             Sign in again
           </a>
         </div>
@@ -436,7 +449,8 @@ export default function ClientDashboardPage() {
   }
 
   const projectTitle = readString(project?.title) || "Your Project";
-  const projectCode = readString(project?.project_code, project?.projectCode) || "—";
+  const projectCode =
+    readString(project?.project_code, project?.projectCode) || "—";
   const siteAddress = readString(project?.site_address, project?.siteAddress);
 
   return (
@@ -444,14 +458,17 @@ export default function ClientDashboardPage() {
       <div className="flex h-full flex-col p-6">
         {/* Header */}
         <div className="shrink-0">
-          <h1 className="text-2xl font-semibold" style={{ color: "var(--cp-text)" }}>
+          <h1
+            className="text-2xl font-semibold"
+            style={{ color: "var(--cp-text)" }}>
             {projectTitle}
           </h1>
           <div
             className="mt-1 flex flex-wrap items-center gap-3 text-sm"
-            style={{ color: "var(--cp-text-muted)" }}
-          >
-            <span className="font-mono font-medium" style={{ color: "var(--cp-text-2)" }}>
+            style={{ color: "var(--cp-text-muted)" }}>
+            <span
+              className="font-mono font-medium"
+              style={{ color: "var(--cp-text-2)" }}>
               {projectCode}
             </span>
             {siteAddress ? <span>{siteAddress}</span> : null}
@@ -459,7 +476,10 @@ export default function ClientDashboardPage() {
               <span style={{ color: "var(--cp-danger)" }}>{fetchError}</span>
             ) : null}
             {loadingDetails ? (
-              <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--cp-text-faint)" }} />
+              <Loader2
+                className="h-4 w-4 animate-spin"
+                style={{ color: "var(--cp-text-faint)" }}
+              />
             ) : null}
           </div>
         </div>
@@ -467,8 +487,7 @@ export default function ClientDashboardPage() {
         {/* Body */}
         <div
           className="mt-6 grid min-h-0 flex-1 gap-4 overflow-hidden"
-          style={{ gridTemplateColumns: "minmax(0,7fr) minmax(0,3fr)" }}
-        >
+          style={{ gridTemplateColumns: "minmax(0,7fr) minmax(0,3fr)" }}>
           <div className="min-h-0 overflow-hidden">
             <JobProgressCard
               title="Project Progress"
@@ -484,12 +503,21 @@ export default function ClientDashboardPage() {
             />
           </div>
 
-          <div className="min-h-0 overflow-hidden">
-            <DashboardInsightCard
-              processItems={processItems as ProcessItem[]}
-              loadingDetails={loadingDetails}
-              projectId={projectId}
-            />
+          <div className="grid min-h-0 grid-rows-[minmax(150px,0.38fr)_minmax(0,1fr)] gap-4 overflow-hidden">
+            <div className="min-h-0 overflow-hidden">
+              <PendingDocumentsCard
+                selectedProject={pendingDocumentProject}
+                loading={loadingDetails}
+              />
+            </div>
+
+            <div className="min-h-0 overflow-hidden">
+              <DashboardInsightCard
+                processItems={processItems as ProcessItem[]}
+                loadingDetails={loadingDetails}
+                projectId={projectId}
+              />
+            </div>
           </div>
         </div>
       </div>
