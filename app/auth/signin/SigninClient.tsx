@@ -160,37 +160,35 @@ export default function SigninClient() {
     try {
       setLoading(true)
 
-      const { data, error: rpcError } = await supabase.rpc("get_client_project_by_code", {
-        p_project_code: code,
+      const res = await fetch("/api/auth/client-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectCode: code, remember: rememberClientAccess }),
       })
 
-      if (rpcError) {
-        setError(rpcError.message || "Failed to verify client code.")
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data?.error || "Failed to verify client code.")
         return
       }
 
-      const project = Array.isArray(data) ? data[0] : data
-
-      if (!project) {
-        setError("Client code not found.")
-        return
-      }
-
-      const accessPayload = JSON.stringify({
-        project_id: project.project_id,
-        project_code: project.project_code,
+      // Keep in storage so the auto-redirect check on next visit still works
+      const payload = JSON.stringify({
+        project_id: data.projectId,
+        project_code: data.projectCode,
       })
 
       try {
         localStorage.removeItem("paintpro_client_access")
         sessionStorage.removeItem("paintpro_client_access")
-      } catch {}
 
-      if (rememberClientAccess) {
-        localStorage.setItem("paintpro_client_access", accessPayload)
-      } else {
-        sessionStorage.setItem("paintpro_client_access", accessPayload)
-      }
+        if (rememberClientAccess) {
+          localStorage.setItem("paintpro_client_access", payload)
+        } else {
+          sessionStorage.setItem("paintpro_client_access", payload)
+        }
+      } catch {}
 
       router.replace("/client")
     } catch (err) {

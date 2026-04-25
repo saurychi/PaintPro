@@ -3,12 +3,18 @@
 import React, { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
+import { useClientProject } from "../ClientShellClient"
 
-const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
+const ACCENT = "var(--cp-brand)"
+const ACCENT_HOVER = "var(--cp-brand-hover)"
 
 function ClientSettings() {
   const router = useRouter()
+  const { projectId } = useClientProject()
+  const isClientAccess = Boolean(projectId)
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
 
   const [profile, setProfile] = useState({
     firstName: "First Name",
@@ -29,12 +35,16 @@ function ClientSettings() {
   const [pwMsg, setPwMsg] = useState<string | null>(null)
   const [pwErr, setPwErr] = useState<string | null>(null)
 
-  const [hidePasswordSection, setHidePasswordSection] = useState(true)
+  // Cookie-based clients don't have a Supabase account — always hide password section
+  const [hidePasswordSection, setHidePasswordSection] = useState(isClientAccess)
 
   const [showPwNext, setShowPwNext] = useState(false)
   const [showPwConfirm, setShowPwConfirm] = useState(false)
 
   useEffect(() => {
+    // Cookie-based client: no Supabase session needed, skip the check entirely
+    if (isClientAccess) return
+
     const checkSession = async () => {
       const { data, error } = await supabase.auth.getSession()
       const session = data.session
@@ -56,7 +66,6 @@ function ClientSettings() {
 
       setHidePasswordSection(hasGoogle)
 
-      // If password section is hidden, clear any values and messages
       if (hasGoogle) {
         setPw({ next: "", confirm: "" })
         setPwErr(null)
@@ -67,7 +76,7 @@ function ClientSettings() {
     }
 
     checkSession()
-  }, [router])
+  }, [router, isClientAccess])
 
   const handleProfileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -116,16 +125,31 @@ function ClientSettings() {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut()
+      if (isClientAccess) {
+        // Clear the project-code cookie and any local storage
+        await fetch("/api/auth/client-access", { method: "DELETE" })
+        try {
+          localStorage.removeItem("paintpro_client_access")
+          sessionStorage.removeItem("paintpro_client_access")
+        } catch {}
+      } else {
+        await supabase.auth.signOut()
+      }
       router.replace("/auth/signin?choose=1")
     } catch (error) {
       console.error("Error signing out:", error)
+      router.replace("/auth/signin?choose=1")
     }
   }
 
   return (
-    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
-      <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
+    <div
+      className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6"
+      style={{ color: "var(--cp-text)" }}
+    >
+      <h1 className="text-2xl font-semibold" style={{ color: "var(--cp-text)" }}>
+        Settings
+      </h1>
 
       <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
         <div className="h-full overflow-y-auto pr-1">
@@ -133,7 +157,7 @@ function ClientSettings() {
             {/* Profile */}
             <div>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Profile</h2>
+                <h2 className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Profile</h2>
               </div>
 
               <Card>
@@ -205,9 +229,41 @@ function ClientSettings() {
 
                   <button
                     type="button"
-                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.98]"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98]"
+                    style={{
+                      border: "1px solid var(--cp-border)",
+                      background: "var(--cp-surface)",
+                      color: "var(--cp-text)",
+                    }}
                   >
                     Cancel
+                  </button>
+                </div>
+              </Card>
+            </div>
+
+            {/* Appearance */}
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Appearance</h2>
+              </div>
+              <Card>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Dark mode</p>
+                    <p className="mt-1 text-sm" style={{ color: "var(--cp-text-muted)" }}>Switch between light and dark interface.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTheme(isDark ? "light" : "dark")}
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.98]"
+                    style={{
+                      border: "1px solid var(--cp-border-2)",
+                      background: isDark ? "var(--cp-brand-light-2)" : "var(--cp-surface)",
+                      color: "var(--cp-text-2)",
+                    }}
+                  >
+                    {isDark ? "Light mode" : "Dark mode"}
                   </button>
                 </div>
               </Card>
@@ -216,7 +272,7 @@ function ClientSettings() {
             {/* Preferences */}
             <div>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Preferences</h2>
+                <h2 className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Preferences</h2>
               </div>
 
               <Card>
@@ -252,25 +308,25 @@ function ClientSettings() {
             {/* Authentication */}
             <div className="pb-6">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900">Authentication</h2>
+                <h2 className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Authentication</h2>
               </div>
 
               <Card>
                 {!hidePasswordSection ? (
                   <>
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Change password</p>
-                      <p className="mt-1 text-sm text-gray-600">Update your account password.</p>
+                      <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Change password</p>
+                      <p className="mt-1 text-sm" style={{ color: "var(--cp-text-muted)" }}>Update your account password.</p>
 
-                      {/* ✅ NEW: separate row per field + show/hide per label */}
                       <div className="mt-4 grid grid-cols-1 gap-4">
                         <div>
                           <div className="mb-2 flex items-center justify-between gap-3">
-                            <label className="block text-sm font-semibold text-gray-900">New password</label>
+                            <label className="block text-sm font-semibold" style={{ color: "var(--cp-text)" }}>New password</label>
                             <button
                               type="button"
                               onClick={() => setShowPwNext((v) => !v)}
-                              className="text-sm font-semibold text-[#00c065] transition hover:text-[#00a054] active:scale-[0.98]"
+                              className="text-sm font-semibold transition active:scale-[0.98]"
+                              style={{ color: "var(--cp-brand)" }}
                             >
                               {showPwNext ? "Hide" : "Show"}
                             </button>
@@ -285,11 +341,12 @@ function ClientSettings() {
 
                         <div>
                           <div className="mb-2 flex items-center justify-between gap-3">
-                            <label className="block text-sm font-semibold text-gray-900">Confirm new password</label>
+                            <label className="block text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Confirm new password</label>
                             <button
                               type="button"
                               onClick={() => setShowPwConfirm((v) => !v)}
-                              className="text-sm font-semibold text-[#00c065] transition hover:text-[#00a054] active:scale-[0.98]"
+                              className="text-sm font-semibold transition active:scale-[0.98]"
+                              style={{ color: "var(--cp-brand)" }}
                             >
                               {showPwConfirm ? "Hide" : "Show"}
                             </button>
@@ -303,45 +360,46 @@ function ClientSettings() {
                         </div>
                       </div>
 
-                      {pwErr ? <p className="mt-3 text-sm font-semibold text-red-600">{pwErr}</p> : null}
-                      {pwMsg ? <p className="mt-3 text-sm font-semibold text-emerald-700">{pwMsg}</p> : null}
+                      {pwErr ? (
+                        <p className="mt-3 text-sm font-semibold" style={{ color: "var(--cp-danger)" }}>{pwErr}</p>
+                      ) : null}
+                      {pwMsg ? (
+                        <p className="mt-3 text-sm font-semibold" style={{ color: "var(--cp-success)" }}>{pwMsg}</p>
+                      ) : null}
 
                       <div className="mt-4 flex items-center justify-end">
                         <button
                           type="button"
                           onClick={handleChangePassword}
                           disabled={pwBusy}
-                          className={[
-                            "inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm",
-                            "transition-all duration-200 ease-out",
-                            "bg-[#00c065] hover:bg-[#00a054] hover:shadow-md",
-                            "active:scale-[0.98]",
-                            "disabled:cursor-not-allowed disabled:opacity-60",
-                          ].join(" ")}
+                          className="inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 ease-out hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                          style={{ background: "var(--cp-brand)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--cp-brand-hover)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "var(--cp-brand)")}
                         >
                           {pwBusy ? "Updating..." : "Update password"}
                         </button>
                       </div>
                     </div>
 
-                    <div className="my-6 h-px w-full bg-gray-200" />
+                    <div className="my-6 h-px w-full" style={{ background: "var(--cp-border)" }} />
                   </>
                 ) : null}
 
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">Log out of this PC</p>
-                  <p className="mt-1 text-sm text-gray-600">You will be redirected to the sign-in page after logging out.</p>
+                  <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Log out of this PC</p>
+                  <p className="mt-1 text-sm" style={{ color: "var(--cp-text-muted)" }}>You will be redirected to the sign-in page after logging out.</p>
 
                   <div className="mt-4">
                     <button
                       type="button"
                       onClick={handleLogout}
-                      className={[
-                        "rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm",
-                        "transition-all duration-200 ease-out",
-                        "hover:bg-red-50 hover:shadow-md",
-                        "active:scale-[0.98]",
-                      ].join(" ")}
+                      className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-all duration-200 ease-out hover:shadow-md active:scale-[0.98]"
+                      style={{
+                        border: "1px solid var(--cp-danger)",
+                        background: "var(--cp-surface)",
+                        color: "var(--cp-danger)",
+                      }}
                     >
                       Logout
                     </button>
@@ -357,7 +415,14 @@ function ClientSettings() {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">{children}</div>
+  return (
+    <div
+      className="w-full rounded-lg p-4 shadow-sm"
+      style={{ border: "1px solid var(--cp-border)", background: "var(--cp-surface)" }}
+    >
+      {children}
+    </div>
+  )
 }
 
 function Field({
@@ -371,21 +436,25 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <label className="mb-2 block text-sm font-semibold text-gray-900">{label}</label>
+      <label className="mb-2 block text-sm font-semibold" style={{ color: "var(--cp-text)" }}>{label}</label>
       {children}
     </div>
   )
 }
 
-function TextInput({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+function TextInput({ className = "", style, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={[
-        "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm",
-        "placeholder:text-gray-400 focus:border-[#00c065] focus:outline-none focus:ring-2 focus:ring-[#00c065]/20",
-        className,
-      ].join(" ")}
+      className={["w-full rounded-lg px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2", className].join(" ")}
+      style={{
+        border: "1px solid var(--cp-border)",
+        background: "var(--cp-surface)",
+        color: "var(--cp-text)",
+        // @ts-expect-error CSS var ring
+        "--tw-ring-color": "var(--cp-brand-light)",
+        ...style,
+      }}
     />
   )
 }
@@ -428,33 +497,40 @@ function ToggleRow({
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.99]"
+      className="w-full rounded-lg p-4 text-left shadow-sm transition-all duration-200 ease-out active:scale-[0.99]"
+      style={{ border: "1px solid var(--cp-border)", background: "var(--cp-surface)" }}
       aria-pressed={active}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900">{label}</p>
-          {description ? <p className="mt-1 text-sm text-gray-600">{description}</p> : null}
+          <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>{label}</p>
+          {description ? (
+            <p className="mt-1 text-sm" style={{ color: "var(--cp-text-muted)" }}>{description}</p>
+          ) : null}
         </div>
 
         <div className="shrink-0 flex flex-col items-end">
-          <div className="relative h-8 w-16 rounded-lg border border-gray-200 bg-white shadow-sm p-1" aria-hidden="true">
+          <div
+            className="relative h-8 w-16 rounded-lg p-1 shadow-sm"
+            style={{ border: "1px solid var(--cp-border)", background: "var(--cp-surface)" }}
+            aria-hidden="true"
+          >
             <div
               className="absolute inset-0 rounded-lg transition-opacity"
-              style={{
-                backgroundColor: ACCENT,
-                opacity: active ? 0.12 : 0,
-              }}
+              style={{ backgroundColor: ACCENT, opacity: active ? 0.12 : 0 }}
             />
             <div
-              className="relative h-6 w-1/2 rounded-md border border-gray-200 bg-white shadow-sm transition-transform"
+              className="relative h-6 w-1/2 rounded-md shadow-sm transition-transform"
               style={{
                 transform: active ? "translateX(100%)" : "translateX(0%)",
-                borderColor: active ? ACCENT : undefined,
+                border: active ? `1px solid ${ACCENT}` : "1px solid var(--cp-border)",
+                background: "var(--cp-surface)",
               }}
             />
           </div>
-          <p className="mt-1 text-[10px] text-gray-500">{active ? "On" : "Off"}</p>
+          <p className="mt-1 text-[10px]" style={{ color: "var(--cp-text-faint)" }}>
+            {active ? "On" : "Off"}
+          </p>
         </div>
       </div>
     </button>

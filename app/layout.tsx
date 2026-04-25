@@ -1,5 +1,6 @@
 import localFont from "next/font/local";
 import { Toaster } from "@/components/ui/sonner"
+import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css";
 
 const paintProFont = localFont({
@@ -18,16 +19,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${paintProFont.variable}`}>
+    <html lang="en" className={`${paintProFont.variable}`} suppressHydrationWarning>
       <body>
-        {children}
-        <Toaster
-          position="bottom-right"
-          closeButton
-          toastOptions={{
-            className: "pointer-events-auto z-[99999]",
-          }}
-        />
+        <ThemeProvider>
+          {children}
+          <Toaster
+            position="bottom-right"
+            closeButton
+            toastOptions={{
+              className: "pointer-events-auto z-[99999]",
+            }}
+          />
+        </ThemeProvider>
       </body>
     </html>
   );

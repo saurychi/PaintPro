@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 import rawCountries from "@/lib/data/country-by-calling-code.json"
 
 const ACCENT = "#00c065"
