@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Fragment } from "react";
+import { useRouter } from "next/navigation";
 import { Transition } from "@headlessui/react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
@@ -37,6 +38,22 @@ type Props = {
 
 const GREEN = "#7ED957";
 const SCROLL_TRACK = "#EAF7E4";
+
+const JOB_CREATION_CHILD_ROUTES: Record<string, string> = {
+  // Manually put your child task routes here.
+  // The key must match the child.id from your processItems data.
+
+  "project-kickoff": "/admin/job-creation/main-task-assignment",
+
+  // Example:
+  "main-task-assignment": "/admin/job-creation/main-task-assignment",
+  "sub-task-assignment": "/admin/job-creation/sub-task-assignment",
+  "materials-assignment": "/admin/job-creation/materials-assignment",
+  "equipment-assignment": "/admin/job-creation/equipment-assignment",
+  "project-schedule": "/admin/job-creation/project-schedule",
+  "employee-assignment": "/admin/job-creation/employee-assignment",
+  "quotation-generation": "/admin/job-creation/quotation-generation",
+};
 
 function statusLabel(status: StepVisualStatus) {
   if (status === "done") return "Completed";
@@ -173,6 +190,8 @@ export default function JobProgressCard({
   handleStartMainTasks,
   className = "",
 }: Props) {
+  const router = useRouter();
+
   return (
     <section
       className={[
@@ -233,8 +252,8 @@ export default function JobProgressCard({
                 No progress steps yet.
               </div>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {processItems.map((group) => {
+              <div>
+                {processItems.map((group, groupIndex) => {
                   const hasChildren = Boolean(group.children?.length);
                   const open = openProcessIds.has(group.id);
 
@@ -243,9 +262,22 @@ export default function JobProgressCard({
                   ).length;
 
                   const totalCount = group.children?.length ?? 0;
+                  const isJobCreationGroup =
+                    group.id === "job-creation" ||
+                    group.title.toLowerCase().trim() === "job creation";
+                  const isLastGroup = groupIndex === processItems.length - 1;
 
                   return (
-                    <div key={group.id} className="py-2">
+                    <div
+                      key={group.id}
+                      className={[
+                        "py-2",
+                        !isLastGroup
+                          ? isJobCreationGroup
+                            ? "border-b border-gray-100/40"
+                            : "border-b border-gray-100"
+                          : "",
+                      ].join(" ")}>
                       <button
                         type="button"
                         disabled={!hasChildren}
@@ -342,12 +374,20 @@ export default function JobProgressCard({
                               const dim = child.status === "done";
                               const childOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
+                              const childRoute = isJobCreationGroup
+                                ? JOB_CREATION_CHILD_ROUTES[child.id]
+                                : undefined;
 
                               return (
                                 <div key={child.id} className="relative">
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      if (childRoute) {
+                                        router.push(childRoute);
+                                        return;
+                                      }
+
                                       if (child.id === "project-kickoff") {
                                         handleStartMainTasks();
                                         return;
@@ -406,36 +446,52 @@ export default function JobProgressCard({
                                       </div>
 
                                       <div className="col-span-3">
-                                        <div
-                                          className={[
-                                            "text-xs",
-                                            dim
-                                              ? "text-gray-200"
-                                              : "text-gray-700",
-                                          ].join(" ")}>
-                                          {child.startLabel || "-"}
-                                        </div>
+                                        {!isJobCreationGroup ? (
+                                          <div
+                                            className={[
+                                              "text-xs",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-700",
+                                            ].join(" ")}>
+                                            {child.startLabel || "-"}
+                                          </div>
+                                        ) : null}
                                       </div>
 
                                       <div className="col-span-3">
                                         <div
                                           className={[
-                                            "flex items-center justify-between gap-2 text-xs",
+                                            "flex items-center justify-end gap-2 text-xs",
                                             dim
                                               ? "text-gray-200"
                                               : "text-gray-700",
                                           ].join(" ")}>
-                                          <span>{child.endLabel || "-"}</span>
+                                          {isJobCreationGroup ? (
+                                            childRoute ? (
+                                              <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100">
+                                                Open Page
+                                              </span>
+                                            ) : null
+                                          ) : (
+                                            <>
+                                              <span>
+                                                {child.endLabel || "-"}
+                                              </span>
 
-                                          {hasDetail ? (
-                                            <ChevronRight
-                                              className={[
-                                                "h-4 w-4 shrink-0 text-gray-300 transition-transform",
-                                                childOpen ? "rotate-90" : "",
-                                              ].join(" ")}
-                                              aria-hidden
-                                            />
-                                          ) : null}
+                                              {hasDetail ? (
+                                                <ChevronRight
+                                                  className={[
+                                                    "h-4 w-4 shrink-0 text-gray-300 transition-transform",
+                                                    childOpen
+                                                      ? "rotate-90"
+                                                      : "",
+                                                  ].join(" ")}
+                                                  aria-hidden
+                                                />
+                                              ) : null}
+                                            </>
+                                          )}
                                         </div>
                                       </div>
                                     </div>

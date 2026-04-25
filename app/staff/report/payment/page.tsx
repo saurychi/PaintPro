@@ -1,9 +1,6 @@
-// app/staff/report/payment/page.tsx
 "use client";
 
 import { useMemo, useState } from "react";
-import styles from "./payment.module.css";
-import { cn } from "@/lib/utils";
 import {
   Search,
   CalendarDays,
@@ -25,9 +22,9 @@ type PaymentRow = {
   staffId: string;
   role: string;
   status: PayStatus;
-  periodLabel: string; // e.g. "Jan 01–15, 2026"
-  issuedLabel: string; // e.g. "Jan 16, 2026"
-  dueLabel: string; // e.g. "Jan 20, 2026"
+  periodLabel: string;
+  issuedLabel: string;
+  dueLabel: string;
   amount: number;
 };
 
@@ -35,13 +32,27 @@ const STATUS_META: Record<
   PayStatus,
   { label: string; pill: string; accent: string }
 > = {
-  PAID: { label: "Paid", pill: styles.pillPaid, accent: styles.accentPaid },
+  PAID: {
+    label: "Paid",
+    pill:
+      "border border-green-500/20 bg-green-500/15 text-green-950",
+    accent:
+      "border-green-500/25 bg-green-500/[0.06]",
+  },
   PENDING: {
     label: "Pending",
-    pill: styles.pillPending,
-    accent: styles.accentPending,
+    pill:
+      "border border-amber-500/20 bg-amber-500/15 text-orange-950",
+    accent:
+      "border-amber-500/25 bg-amber-500/[0.08]",
   },
-  OVERDUE: { label: "Overdue", pill: styles.pillOverdue, accent: styles.accentOverdue },
+  OVERDUE: {
+    label: "Overdue",
+    pill:
+      "border border-red-500/20 bg-red-500/[0.12] text-red-950",
+    accent:
+      "border-red-500/25 bg-red-500/[0.06]",
+  },
 };
 
 const MOCK_ROWS: PaymentRow[] = [
@@ -123,35 +134,29 @@ function addDays(iso: string, days: number) {
 
 export default function StaffReportPaymentPage() {
   const [query, setQuery] = useState("");
-
-  // Date range (backend-ready)
   const [dateFrom, setDateFrom] = useState("2026-01-01");
   const [dateTo, setDateTo] = useState(addDays("2026-01-01", 30));
-
-  // Status filter
   const [status, setStatus] = useState<"ALL" | PayStatus>("ALL");
-
-  // Menu
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // Pagination
   const pageSize = 6;
   const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    const base = MOCK_ROWS.filter((r) => (status === "ALL" ? true : r.status === status));
+    const base = MOCK_ROWS.filter((r) =>
+      status === "ALL" ? true : r.status === status
+    );
 
     const searched = !q
       ? base
       : base.filter((r) => {
-          const hay = `${r.payNo} ${r.staffName} ${r.staffId} ${r.role} ${r.periodLabel}`.toLowerCase();
+          const hay =
+            `${r.payNo} ${r.staffName} ${r.staffId} ${r.role} ${r.periodLabel}`.toLowerCase();
           return hay.includes(q);
         });
 
-    // Newest first by issuedLabel (string compare works with these labels only visually)
-    // Backend-ready: replace with issuedAt sorting later.
     return [...searched];
   }, [query, status]);
 
@@ -159,15 +164,26 @@ export default function StaffReportPaymentPage() {
     const paid = filtered.filter((r) => r.status === "PAID").length;
     const pending = filtered.filter((r) => r.status === "PENDING").length;
     const overdue = filtered.filter((r) => r.status === "OVERDUE").length;
-    return { paid, pending, overdue, total: filtered.length };
+
+    return {
+      paid,
+      pending,
+      overdue,
+      total: filtered.length,
+    };
   }, [filtered]);
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / pageSize)), [filtered.length]);
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filtered.length / pageSize)),
+    [filtered.length]
+  );
+
   const safePage = Math.min(page, totalPages);
 
   const pageRows = useMemo(() => {
     const start = (safePage - 1) * pageSize;
     const end = start + pageSize;
+
     return filtered.slice(start, end);
   }, [filtered, safePage]);
 
@@ -191,19 +207,29 @@ export default function StaffReportPaymentPage() {
   }
 
   return (
-    <div className={styles.page} onClick={closeMenus}>
+    <div
+      className="p-[18px_16px] text-gray-900 antialiased min-[561px]:p-[22px_26px]"
+      onClick={closeMenus}
+    >
       {/* Header */}
-      <div className={styles.headerRow} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.titleWrap}>
-          <h1 className={styles.title}>Payment</h1>
-          <div className={styles.subtitle}>Staff report • Backend-ready UI</div>
+      <div
+        className="flex flex-wrap items-start justify-between gap-[14px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex min-w-[260px] flex-col gap-1.5">
+          <h1 className="m-0 text-[34px] font-bold tracking-[-0.02em] text-gray-900 min-[561px]:text-[44px]">
+            Payment
+          </h1>
+          <div className="mt-0.5 text-xs font-normal text-black/55">
+            Staff report • Backend-ready UI
+          </div>
         </div>
 
-        <div className={styles.toolbar}>
-          <div className={styles.searchWrap}>
-            <Search className={styles.searchIcon} />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative h-[42px] w-[240px] rounded-full border border-gray-200 bg-white min-[921px]:w-[290px]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
-              className={styles.searchInput}
+              className="h-full w-full border-none bg-transparent px-3.5 pl-[34px] text-sm font-normal text-gray-900 outline-none"
               placeholder="Search staff, pay no, role..."
               value={query}
               onChange={(e) => {
@@ -213,22 +239,22 @@ export default function StaffReportPaymentPage() {
             />
           </div>
 
-          <div className={styles.rangeWrap}>
-            <div className={styles.rangeLabel}>
-              <CalendarDays className={styles.rangeIcon} />
+          <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5">
+            <div className="inline-flex items-center gap-2 text-xs font-medium text-gray-500">
+              <CalendarDays className="h-3.5 w-3.5" />
               Date range
             </div>
 
-            <div className={styles.rangeInputs}>
+            <div className="flex items-center gap-2.5">
               <input
-                className={styles.dateInput}
+                className="h-9 rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
               />
-              <span className={styles.rangeSep}>to</span>
+              <span className="text-xs font-normal text-gray-400">to</span>
               <input
-                className={styles.dateInput}
+                className="h-9 rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
@@ -236,16 +262,17 @@ export default function StaffReportPaymentPage() {
             </div>
           </div>
 
-          <div className={styles.statusWrap}>
-            <div className={styles.rangeLabel}>
-              <Filter className={styles.rangeIcon} />
+          <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5">
+            <div className="inline-flex items-center gap-2 text-xs font-medium text-gray-500">
+              <Filter className="h-3.5 w-3.5" />
               Status
             </div>
+
             <select
-              className={styles.select}
+              className="h-9 min-w-[180px] rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
               value={status}
               onChange={(e) => {
-                setStatus(e.target.value as any);
+                setStatus(e.target.value as "ALL" | PayStatus);
                 setPage(1);
               }}
             >
@@ -259,104 +286,142 @@ export default function StaffReportPaymentPage() {
       </div>
 
       {/* Stats */}
-      <div className={styles.statsGrid}>
-        <div className={cn(styles.statCard, styles.accentPaid)}>
-          <div className={styles.statLabel}>Paid</div>
-          <div className={styles.statValue}>{stats.paid}</div>
+      <div className="mt-3.5 grid grid-cols-1 gap-3 min-[561px]:grid-cols-2 min-[1221px]:grid-cols-4">
+        <div className={`min-h-[88px] rounded-[14px] border bg-white p-3.5 ${STATUS_META.PAID.accent}`}>
+          <div className="text-xs font-medium text-gray-900/70">Paid</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {stats.paid}
+          </div>
         </div>
 
-        <div className={cn(styles.statCard, styles.accentPending)}>
-          <div className={styles.statLabel}>Pending</div>
-          <div className={styles.statValue}>{stats.pending}</div>
+        <div className={`min-h-[88px] rounded-[14px] border bg-white p-3.5 ${STATUS_META.PENDING.accent}`}>
+          <div className="text-xs font-medium text-gray-900/70">Pending</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {stats.pending}
+          </div>
         </div>
 
-        <div className={cn(styles.statCard, styles.accentOverdue)}>
-          <div className={styles.statLabel}>Overdue</div>
-          <div className={styles.statValue}>{stats.overdue}</div>
+        <div className={`min-h-[88px] rounded-[14px] border bg-white p-3.5 ${STATUS_META.OVERDUE.accent}`}>
+          <div className="text-xs font-medium text-gray-900/70">Overdue</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {stats.overdue}
+          </div>
         </div>
 
-        <div className={styles.statCard}>
-          <div className={styles.statLabel}>Total</div>
-          <div className={styles.statValue}>{stats.total}</div>
+        <div className="min-h-[88px] rounded-[14px] border border-gray-200 bg-white p-3.5">
+          <div className="text-xs font-medium text-gray-900/70">Total</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {stats.total}
+          </div>
         </div>
       </div>
 
       {/* Table */}
-      <div className={styles.sectionTopRow}>
-        <div className={styles.sectionLabel}>Payment Log</div>
-        <div className={styles.miniMeta}>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-[14px]">
+        <div className="text-sm font-semibold text-gray-900">Payment Log</div>
+        <div className="text-xs font-normal text-gray-500">
           Showing {pageRows.length} of {filtered.length}
         </div>
       </div>
 
-      <div className={styles.table}>
-        <div className={styles.tableHeader}>
-          <div className={styles.cellStaff}>STAFF</div>
-          <div className={styles.cellPayNo}>PAY NO</div>
-          <div className={styles.cellStatus}>STATUS</div>
-          <div className={styles.cellPeriod}>PERIOD</div>
-          <div className={styles.cellDue}>DUE</div>
-          <div className={styles.cellAmount}>AMOUNT</div>
-          <div className={styles.cellActions} />
+      <div className="mt-2.5 overflow-hidden rounded-[14px] border border-gray-200 bg-white">
+        <div className="grid grid-cols-[1.2fr_0.9fr_0.7fr_0px_0px_0.7fr_60px] items-center border-b border-gray-200 px-3 py-3 text-xs font-medium tracking-[0.02em] text-gray-500 min-[561px]:grid-cols-[1.2fr_0.9fr_0.7fr_0.9fr_0px_0.7fr_60px] min-[921px]:grid-cols-[1.2fr_0.9fr_0.7fr_0.9fr_0.8fr_0.7fr_60px]">
+          <div className="min-w-0">STAFF</div>
+          <div className="min-w-0">PAY NO</div>
+          <div>STATUS</div>
+          <div className="hidden min-[561px]:block">PERIOD</div>
+          <div className="hidden min-[921px]:block">DUE</div>
+          <div className="text-right">AMOUNT</div>
+          <div />
         </div>
 
         {pageRows.map((r) => {
           const meta = STATUS_META[r.status];
 
           return (
-            <div key={r.id} className={styles.tableRow}>
-              <div className={styles.cellStaff}>
-                <div className={styles.staffName}>{r.staffName}</div>
-                <div className={styles.staffSub}>
+            <div
+              key={r.id}
+              className="grid grid-cols-[1.2fr_0.9fr_0.7fr_0px_0px_0.7fr_60px] items-center border-b border-slate-100 px-3 py-3.5 text-sm font-normal last:border-b-0 min-[561px]:grid-cols-[1.2fr_0.9fr_0.7fr_0.9fr_0px_0.7fr_60px] min-[921px]:grid-cols-[1.2fr_0.9fr_0.7fr_0.9fr_0.8fr_0.7fr_60px]"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-gray-900">
+                  {r.staffName}
+                </div>
+                <div className="mt-1 truncate text-xs font-normal text-gray-500">
                   {r.staffId} • {r.role}
                 </div>
               </div>
 
-              <div className={styles.cellPayNo}>
-                <div className={styles.payNo}>{r.payNo}</div>
-                <div className={styles.paySub}>Issued {r.issuedLabel}</div>
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-gray-900">
+                  {r.payNo}
+                </div>
+                <div className="mt-1 truncate text-xs font-normal text-gray-500">
+                  Issued {r.issuedLabel}
+                </div>
               </div>
 
-              <div className={styles.cellStatus}>
-                <span className={cn(styles.pill, meta.pill)}>{meta.label}</span>
+              <div>
+                <span
+                  className={`inline-flex h-6 items-center justify-center rounded-full px-3 text-xs font-semibold tracking-[0.02em] ${meta.pill}`}
+                >
+                  {meta.label}
+                </span>
               </div>
 
-              <div className={styles.cellPeriod}>{r.periodLabel}</div>
+              <div className="hidden truncate text-[13px] font-normal text-gray-700 min-[561px]:block">
+                {r.periodLabel}
+              </div>
 
-              <div className={styles.cellDue}>{r.dueLabel}</div>
+              <div className="hidden truncate text-[13px] font-normal text-gray-700 min-[921px]:block">
+                {r.dueLabel}
+              </div>
 
-              <div className={styles.cellAmount}>{formatMoney(r.amount)}</div>
+              <div className="truncate text-right text-[13px] font-normal text-gray-700">
+                {formatMoney(r.amount)}
+              </div>
 
-              <div className={styles.cellActions} onClick={(e) => e.stopPropagation()}>
+              <div
+                className="relative flex justify-center"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
-                  className={styles.kebabBtn}
+                  className="grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] border border-transparent bg-transparent hover:border-gray-200 hover:bg-gray-100"
                   type="button"
-                  onClick={() => setOpenMenuId((prev) => (prev === r.id ? null : r.id))}
+                  onClick={() =>
+                    setOpenMenuId((prev) => (prev === r.id ? null : r.id))
+                  }
                   aria-label="Row actions"
                 >
-                  <MoreVertical className={styles.kebabIcon} />
+                  <MoreVertical className="h-[18px] w-[18px] text-gray-900/55" />
                 </button>
 
                 {openMenuId === r.id && (
-                  <div className={cn(styles.menu, styles.menuRight)}>
-                    <button className={styles.menuItem} onClick={() => actionView(r)} type="button">
-                      <Eye className={styles.menuIcon} />
+                  <div className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-[0_10px_30px_rgba(0,0,0,0.1)]">
+                    <button
+                      className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-none bg-transparent p-2.5 text-sm font-medium text-gray-900 hover:bg-gray-100"
+                      onClick={() => actionView(r)}
+                      type="button"
+                    >
+                      <Eye className="h-4 w-4 text-gray-900/70" />
                       View
                     </button>
+
                     <button
-                      className={styles.menuItem}
+                      className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-none bg-transparent p-2.5 text-sm font-medium text-gray-900 hover:bg-gray-100"
                       onClick={() => actionDownloadPayslip(r)}
                       type="button"
                     >
-                      <Download className={styles.menuIcon} />
+                      <Download className="h-4 w-4 text-gray-900/70" />
                       Download payslip
                     </button>
+
                     <button
-                      className={styles.menuItem}
+                      className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-none bg-transparent p-2.5 text-sm font-medium text-gray-900 hover:bg-gray-100"
                       onClick={() => actionOpenReceipt(r)}
                       type="button"
                     >
-                      <Receipt className={styles.menuIcon} />
+                      <Receipt className="h-4 w-4 text-gray-900/70" />
                       Open receipt
                     </button>
                   </div>
@@ -367,37 +432,41 @@ export default function StaffReportPaymentPage() {
         })}
 
         {filtered.length === 0 && (
-          <div className={styles.emptyState}>
-            <div className={styles.emptyTitle}>No matching records</div>
-            <div className={styles.emptyText}>Try changing your search, filters, or date range.</div>
+          <div className="px-3 py-6 text-center">
+            <div className="text-[15px] font-semibold text-gray-900">
+              No matching records
+            </div>
+            <div className="mt-1.5 text-[13px] font-normal text-gray-500">
+              Try changing your search, filters, or date range.
+            </div>
           </div>
         )}
       </div>
 
       {/* Pagination */}
-      <div className={styles.pagination}>
+      <div className="mt-3.5 flex items-center justify-end gap-3">
         <button
-          className={styles.pageBtn}
+          className="inline-flex h-[34px] cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
           onClick={() => setPage((p) => Math.max(1, p - 1))}
           disabled={safePage <= 1}
         >
-          <ChevronLeft className={styles.pageIcon} />
+          <ChevronLeft className="h-4 w-4" />
           Prev
         </button>
 
-        <div className={styles.pageInfo}>
+        <div className="text-[13px] font-normal text-gray-700">
           Page <b>{safePage}</b> of <b>{totalPages}</b>
         </div>
 
         <button
-          className={styles.pageBtn}
+          className="inline-flex h-[34px] cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
           onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           disabled={safePage >= totalPages}
         >
           Next
-          <ChevronRight className={styles.pageIcon} />
+          <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     </div>
