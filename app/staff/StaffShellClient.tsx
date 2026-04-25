@@ -18,6 +18,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
           "transition-[padding-left] duration-300 ease-in-out",
           open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
         )}
+        style={{ background: "var(--app-bg)" }}
       >
         {children}
       </main>

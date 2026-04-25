@@ -8,6 +8,8 @@ type ProjectRow = {
   description: string | null;
   site_address: string | null;
   status: string | null;
+  scheduled_start_datetime: string | null;
+  scheduled_end_datetime: string | null;
   estimated_budget: number | null;
   estimated_cost: number | null;
   estimated_profit: number | null;
@@ -106,6 +108,8 @@ export async function GET(request: Request) {
         description,
         site_address,
         status,
+        scheduled_start_datetime,
+        scheduled_end_datetime,
         estimated_budget,
         estimated_cost,
         estimated_profit
