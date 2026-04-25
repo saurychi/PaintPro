@@ -45,56 +45,58 @@ const folderPickerProps = {
   directory: "true",
 } as any
 
-const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
-
 const typeMeta: Record<DocType, { label: string; pillClass: string; pillText: string }> = {
   INV: {
     label: "Invoice",
     pillText: "INV",
-    pillClass: "bg-[#00c065]/10 text-[#047857] border border-[#00c065]/20",
+    pillClass:
+      "border border-[#00c065]/20 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
   },
   PAY: {
     label: "Payroll",
     pillText: "PAY",
-    pillClass: "bg-red-50 text-red-700 border border-red-200",
+    pillClass:
+      "border border-red-200 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-300",
   },
   RCP: {
     label: "Receipt",
     pillText: "RCP",
-    pillClass: "bg-[#00c065]/10 text-[#047857] border border-[#00c065]/20",
+    pillClass:
+      "border border-[#00c065]/20 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
   },
   QTE: {
     label: "Quote",
     pillText: "QTE",
-    pillClass: "bg-[#00c065]/10 text-[#047857] border border-[#00c065]/20",
+    pillClass:
+      "border border-[#00c065]/20 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
   },
 }
 
 const cardShell =
-  "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+  "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700/70 dark:bg-slate-800 dark:shadow-slate-950/20"
 
-const cardAccent =
-  "before:block before:h-1 before:w-full before:bg-[#00c065]"
+const cardAccent = "before:block before:h-1 before:w-full before:bg-[#00c065]"
 
 const btnBase =
-  "inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
 
 const btnPrimary =
   "inline-flex h-9 items-center gap-2 rounded-lg bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#00a054] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
 
 const btnDanger =
-  "inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 shadow-sm transition-all duration-200 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25 active:scale-[0.98]"
+  "inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 shadow-sm transition-all duration-200 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25 active:scale-[0.98] dark:border-red-400/30 dark:bg-slate-800 dark:text-red-200 dark:hover:bg-red-950/30"
 
 const iconBtn =
-  "grid h-8 w-8 place-items-center rounded-lg border border-transparent bg-transparent text-gray-500 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "grid h-8 w-8 place-items-center rounded-lg border border-transparent bg-transparent text-gray-500 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-100"
 
-const menuBox = "min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/60"
+const menuBox =
+  "min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/60 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40"
+
 const menuItem =
-  "inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-800 transition hover:bg-gray-50"
+  "inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-800 transition hover:bg-gray-50 dark:text-slate-200 dark:hover:bg-slate-700"
 
 const inputBase =
-  "h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
+  "h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-100 dark:placeholder:text-slate-400"
 
 type Toast = { id: string; message: string; tone?: "default" | "success" | "danger" }
 type ArchiveTab = "active" | "archived"
@@ -112,7 +114,10 @@ function MenuItemBtn({
 }) {
   return (
     <button
-      className={cn(menuItem, tone === "danger" && "text-red-700 hover:bg-red-50")}
+      className={cn(
+        menuItem,
+        tone === "danger" && "text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
+      )}
       type="button"
       onClick={onClick}
     >
@@ -137,11 +142,11 @@ function Modal({
 
   return (
     <div className="fixed inset-0 z-[200]">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[560px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl shadow-gray-900/15">
+      <div className="absolute inset-0 bg-black/30 dark:bg-black/50" onClick={onClose} />
+      <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[560px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl shadow-gray-900/15 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/50">
         <div className="h-1 w-full bg-[#00c065]" />
-        <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
-          <div className="text-sm font-semibold text-gray-950">{title}</div>
+        <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-slate-700/70">
+          <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">{title}</div>
           <button className={iconBtn} type="button" onClick={onClose} aria-label="Close">
             <X className="h-4 w-4" />
           </button>
@@ -159,9 +164,11 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
         <div
           key={t.id}
           className={cn(
-            "rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-lg shadow-gray-200/70",
-            t.tone === "success" && "border-[#00c065]/25 bg-[#00c065]/10 text-[#047857]",
-            t.tone === "danger" && "border-red-200 bg-red-50 text-red-700"
+            "rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-lg shadow-gray-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:shadow-slate-950/40",
+            t.tone === "success" &&
+              "border-[#00c065]/25 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
+            t.tone === "danger" &&
+              "border-red-200 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-300"
           )}
         >
           {t.message}
@@ -360,6 +367,9 @@ export default function AdminDocuments() {
   const [confirmRestoreFolderOpen, setConfirmRestoreFolderOpen] = useState(false)
   const [restoreFolderTargetId, setRestoreFolderTargetId] = useState<string>("")
 
+  const [viewOpen, setViewOpen] = useState(false)
+  const [viewFile, setViewFile] = useState<FileItem | null>(null)
+
   const [toasts, setToasts] = useState<Toast[]>([])
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -421,8 +431,17 @@ export default function AdminDocuments() {
         ])
 
         if (cancelled) return
+
         setFolders(f)
         setFilesAll(a)
+
+        setArchivedFolderIds(
+          Object.fromEntries(f.filter((folder) => folder.isArchived).map((folder) => [folder.id, true]))
+        )
+
+        setArchivedFileIds(
+          Object.fromEntries(a.filter((file) => file.isArchived).map((file) => [file.id, true]))
+        )
       } catch (e: any) {
         if (cancelled) return
         setLoadError(e?.message ?? "Failed to load documents")
@@ -451,8 +470,9 @@ export default function AdminDocuments() {
       if (!f.folderId) continue
       if (!map[f.folderId]) map[f.folderId] = { count: 0, totalBytesApprox: 0 }
       map[f.folderId].count += 1
-      const m = /(\d+)\s*MB/i.exec(f.sizeLabel || "")
-      if (m) map[f.folderId].totalBytesApprox += Number(m[1]) * 1024 * 1024
+
+      const sizeValue = f.content ? new Blob([f.content]).size : 0
+      map[f.folderId].totalBytesApprox += sizeValue
     }
     return map
   }, [filesAll, archivedFileIds, showArchived])
@@ -547,44 +567,73 @@ export default function AdminDocuments() {
     return scopedFiles.filter((f) => ids.has(f.id))
   }
 
+  function canReadAsPlainContent(file: File) {
+    const name = file.name.toLowerCase()
+
+    return (
+      file.type.startsWith("text/") ||
+      file.type === "application/json" ||
+      name.endsWith(".txt") ||
+      name.endsWith(".csv") ||
+      name.endsWith(".json") ||
+      name.endsWith(".md") ||
+      name.endsWith(".html") ||
+      name.endsWith(".css") ||
+      name.endsWith(".js") ||
+      name.endsWith(".ts") ||
+      name.endsWith(".tsx")
+    )
+  }
+
+  function openViewFile(file: FileItem) {
+    setViewFile(file)
+    setViewOpen(true)
+    setOpenMenuKey(null)
+  }
+
   function actionDownloadFile(file: FileItem) {
-    const content = [
-      `PaintPro Document`,
-      `Name: ${file.name}`,
-      `Type: ${file.type}`,
-      `Created By: ${file.createdBy}`,
-      `Date: ${formatDateISO(file.dateISO)}`,
-      `Size: ${file.sizeLabel}`,
-      ``,
-      `This is a placeholder download while the database/storage is not finalized.`,
-    ].join("\n")
-
     const safeName = file.name.replace(/[^\w\- ]+/g, "").trim() || "document"
+    const content = file.content || "No content saved for this document."
+
     downloadTextFile(`${safeName}.txt`, content)
-    pushToast("Downloaded document.", "success")
+    pushToast("Exported saved content.", "success")
     setOpenMenuKey(null)
   }
 
-  function actionArchiveFile(fileId: string) {
-    setArchivedFileIds((prev) => ({ ...prev, [fileId]: true }))
-    setOpenMenuKey(null)
-    setSelectedIds((prev) => {
-      if (!prev[fileId]) return prev
-      const next = { ...prev }
-      delete next[fileId]
-      return next
-    })
-    pushToast("Document archived.", "success")
+  async function actionArchiveFile(fileId: string) {
+    try {
+      await archiveDocument(fileId)
+
+      setArchivedFileIds((prev) => ({ ...prev, [fileId]: true }))
+      setOpenMenuKey(null)
+      setSelectedIds((prev) => {
+        if (!prev[fileId]) return prev
+        const next = { ...prev }
+        delete next[fileId]
+        return next
+      })
+
+      pushToast("Document archived.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Archive failed.", "danger")
+    }
   }
 
-  function actionUnarchiveFile(fileId: string) {
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      delete next[fileId]
-      return next
-    })
-    setOpenMenuKey(null)
-    pushToast("Document restored.", "success")
+  async function actionUnarchiveFile(fileId: string) {
+    try {
+      await restoreDocument(fileId)
+
+      setArchivedFileIds((prev) => {
+        const next = { ...prev }
+        delete next[fileId]
+        return next
+      })
+
+      setOpenMenuKey(null)
+      pushToast("Document restored.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Restore failed.", "danger")
+    }
   }
 
   function requestArchiveFolder(folderId: string) {
@@ -593,22 +642,28 @@ export default function AdminDocuments() {
     setOpenMenuKey(null)
   }
 
-  function confirmArchiveFolder() {
+  async function confirmArchiveFolder() {
     const folderId = archiveFolderTargetId
     if (!folderId) return
 
-    setArchivedFolderIds((prev) => ({ ...prev, [folderId]: true }))
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of filesAll) if (f.folderId === folderId) next[f.id] = true
-      return next
-    })
+    try {
+      await archiveFolder(folderId)
 
-    if (activeFolderId === folderId) setActiveFolderId(null)
+      setArchivedFolderIds((prev) => ({ ...prev, [folderId]: true }))
+      setArchivedFileIds((prev) => {
+        const next = { ...prev }
+        for (const f of filesAll) if (f.folderId === folderId) next[f.id] = true
+        return next
+      })
 
-    setConfirmArchiveFolderOpen(false)
-    setArchiveFolderTargetId("")
-    pushToast("Folder archived.", "success")
+      if (activeFolderId === folderId) setActiveFolderId(null)
+
+      setConfirmArchiveFolderOpen(false)
+      setArchiveFolderTargetId("")
+      pushToast("Folder archived.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Folder archive failed.", "danger")
+    }
   }
 
   function requestRestoreFolder(folderId: string) {
@@ -617,25 +672,31 @@ export default function AdminDocuments() {
     setOpenMenuKey(null)
   }
 
-  function confirmRestoreFolder() {
+  async function confirmRestoreFolder() {
     const folderId = restoreFolderTargetId
     if (!folderId) return
 
-    setArchivedFolderIds((prev) => {
-      const next = { ...prev }
-      delete next[folderId]
-      return next
-    })
+    try {
+      await restoreFolder(folderId)
 
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of filesAll) if (f.folderId === folderId) delete next[f.id]
-      return next
-    })
+      setArchivedFolderIds((prev) => {
+        const next = { ...prev }
+        delete next[folderId]
+        return next
+      })
 
-    setConfirmRestoreFolderOpen(false)
-    setRestoreFolderTargetId("")
-    pushToast("Folder restored.", "success")
+      setArchivedFileIds((prev) => {
+        const next = { ...prev }
+        for (const f of filesAll) if (f.folderId === folderId) delete next[f.id]
+        return next
+      })
+
+      setConfirmRestoreFolderOpen(false)
+      setRestoreFolderTargetId("")
+      pushToast("Folder restored.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Folder restore failed.", "danger")
+    }
   }
 
   function openRenameModal(kind: "file" | "folder", id: string, currentName: string) {
@@ -646,55 +707,89 @@ export default function AdminDocuments() {
     setOpenMenuKey(null)
   }
 
-  function submitRename() {
+  async function submitRename() {
     const nextName = renameValue.trim()
     if (!nextName) return
 
-    if (renameKind === "folder") {
-      setFolders((prev) => prev.map((f) => (f.id === renameTargetId ? { ...f, name: nextName } : f)))
-      pushToast("Folder renamed.", "success")
-    } else {
-      setFilesAll((prev) => prev.map((f) => (f.id === renameTargetId ? { ...f, name: nextName } : f)))
-      pushToast("Document renamed.", "success")
-    }
+    try {
+      if (renameKind === "folder") {
+        await renameFolder(renameTargetId, nextName)
 
-    setRenameOpen(false)
+        setFolders((prev) => prev.map((f) => (f.id === renameTargetId ? { ...f, name: nextName } : f)))
+        pushToast("Folder renamed.", "success")
+      } else {
+        await renameDocument(renameTargetId, nextName)
+
+        setFilesAll((prev) => prev.map((f) => (f.id === renameTargetId ? { ...f, name: nextName } : f)))
+        pushToast("Document renamed.", "success")
+      }
+
+      setRenameOpen(false)
+    } catch (error: any) {
+      pushToast(error?.message ?? "Rename failed.", "danger")
+    }
   }
 
   function bulkDownload() {
     const items = selectedItems()
     const content = [
-      `PaintPro Bulk Download`,
+      `PaintPro Bulk Export`,
       `Count: ${items.length}`,
       ``,
-      ...items.map((f, i) => `${i + 1}. ${f.name} (${f.type}) - ${formatDateISO(f.dateISO)}`),
+      ...items.map((f, i) => {
+        return [
+          `${i + 1}. ${f.name} (${f.type}) - ${formatDateISO(f.dateISO)}`,
+          f.content || "No content saved for this document.",
+          "",
+        ].join("\n")
+      }),
     ].join("\n")
 
     downloadTextFile(`paintpro_bulk_${new Date().toISOString().slice(0, 10)}.txt`, content)
     clearSelection()
-    pushToast("Downloaded selection.", "success")
+    pushToast("Exported selected content.", "success")
   }
 
-  function bulkArchive() {
+  async function bulkArchive() {
     const items = selectedItems()
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of items) next[f.id] = true
-      return next
-    })
-    clearSelection()
-    pushToast("Selected documents archived.", "success")
+
+    try {
+      for (const item of items) {
+        await archiveDocument(item.id)
+      }
+
+      setArchivedFileIds((prev) => {
+        const next = { ...prev }
+        for (const f of items) next[f.id] = true
+        return next
+      })
+
+      clearSelection()
+      pushToast("Selected documents archived.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Bulk archive failed.", "danger")
+    }
   }
 
-  function bulkRestore() {
+  async function bulkRestore() {
     const items = selectedItems()
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of items) delete next[f.id]
-      return next
-    })
-    clearSelection()
-    pushToast("Selected documents restored.", "success")
+
+    try {
+      for (const item of items) {
+        await restoreDocument(item.id)
+      }
+
+      setArchivedFileIds((prev) => {
+        const next = { ...prev }
+        for (const f of items) delete next[f.id]
+        return next
+      })
+
+      clearSelection()
+      pushToast("Selected documents restored.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Bulk restore failed.", "danger")
+    }
   }
 
   function openNewFolder() {
@@ -703,14 +798,19 @@ export default function AdminDocuments() {
     setNewOpen(false)
   }
 
-  function submitNewFolder() {
+  async function submitNewFolder() {
     const name = newFolderName.trim()
     if (!name) return
-    const id = makeId("folder")
-    const newFolder: FolderItem = { id, name, fileCount: 0, sizeLabel: "0 MB" }
-    setFolders((prev) => [newFolder, ...prev])
-    setNewFolderOpen(false)
-    pushToast("Folder created.", "success")
+
+    try {
+      const newFolder = await createFolder(name)
+
+      setFolders((prev) => [newFolder, ...prev])
+      setNewFolderOpen(false)
+      pushToast("Folder created.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Failed to create folder.", "danger")
+    }
   }
 
   function openUploadFile() {
@@ -724,56 +824,96 @@ export default function AdminDocuments() {
     setNewOpen(false)
   }
 
-  function handleFilePicked(fileList: FileList | null) {
+  async function handleFilePicked(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return
-    const picked = fileList[0]
-    const iso = new Date().toISOString()
 
-    const newFile: FileItem = {
-      id: makeId("file"),
-      type: pickDocTypeFromFilename(picked.name),
-      name: picked.name.replace(/\.[^/.]+$/, ""),
-      createdBy: "admin@paintpro.com",
-      dateISO: iso,
-      dateLabel: "",
-      sizeLabel: safeBytesToMbLabel(picked.size),
-      folderId: activeFolderId ?? undefined,
+    try {
+      const picked = fileList[0]
+
+      if (!canReadAsPlainContent(picked)) {
+        pushToast("Only text-based files can be saved as content for now.", "danger")
+        return
+      }
+
+      const content = await picked.text()
+
+      const created = await createDocument({
+        folderId: activeFolderId,
+        documentType: pickDocTypeFromFilename(picked.name),
+        title: picked.name.replace(/\.[^/.]+$/, ""),
+        content,
+        contentType: picked.type || "text/plain",
+        originalFilename: picked.name,
+        createdBy: "admin@paintpro.com",
+      })
+
+      setFilesAll((prev) => [created, ...prev])
+      setUploadFileOpen(false)
+      pushToast("Document content saved.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Failed to save document content.", "danger")
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
-
-    setFilesAll((prev) => [newFile, ...prev])
-    setUploadFileOpen(false)
-    pushToast("File uploaded.", "success")
   }
 
-  function handleFolderPicked(fileList: FileList | null) {
+  async function handleFolderPicked(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return
-    const targetFolderId = uploadFolderTargetId || activeFolderId || ""
-    const iso = new Date().toISOString()
 
-    const toAdd: FileItem[] = Array.from(fileList).map((picked) => ({
-      id: makeId("file"),
-      type: pickDocTypeFromFilename(picked.name),
-      name: picked.name.replace(/\.[^/.]+$/, ""),
-      createdBy: "admin@paintpro.com",
-      dateISO: iso,
-      dateLabel: "",
-      sizeLabel: safeBytesToMbLabel(picked.size),
-      folderId: targetFolderId || undefined,
-    }))
+    try {
+      const targetFolderId = uploadFolderTargetId || activeFolderId || null
+      const createdFiles: FileItem[] = []
 
-    setFilesAll((prev) => [...toAdd, ...prev])
-    setUploadFolderOpen(false)
-    pushToast(`Folder uploaded: ${toAdd.length} files added.`, "success")
+      for (const picked of Array.from(fileList)) {
+        if (!canReadAsPlainContent(picked)) {
+          continue
+        }
+
+        const content = await picked.text()
+
+        const created = await createDocument({
+          folderId: targetFolderId,
+          documentType: pickDocTypeFromFilename(picked.name),
+          title: picked.name.replace(/\.[^/.]+$/, ""),
+          content,
+          contentType: picked.type || "text/plain",
+          originalFilename: picked.name,
+          createdBy: "admin@paintpro.com",
+        })
+
+        createdFiles.push(created)
+      }
+
+      if (createdFiles.length === 0) {
+        pushToast("No readable text-based files were found in that folder.", "danger")
+        return
+      }
+
+      setFilesAll((prev) => [...createdFiles, ...prev])
+      setUploadFolderOpen(false)
+      pushToast(`Saved content from ${createdFiles.length} files.`, "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Failed to save folder content.", "danger")
+    } finally {
+      if (folderInputRef.current) folderInputRef.current.value = ""
+    }
   }
 
   return (
-    <div className="min-h-full bg-[#f7f8fa] px-4 py-4 text-gray-900 sm:px-6" onClick={closeAll}>
+    <div
+      className="min-h-full bg-[#f7f8fa] px-4 py-4 text-gray-900 dark:bg-slate-700 dark:text-slate-100 sm:px-6"
+      onClick={closeAll}
+    >
       <ToastStack toasts={toasts} />
 
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-tight text-gray-950">Documents</h1>
-          <p className="mt-1 text-sm text-gray-500">Files, folders, exports, and project records.</p>
+          <h1 className="text-[22px] font-semibold tracking-tight text-gray-950 dark:text-slate-100">
+            Documents
+          </h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-slate-300">
+            Files, folders, exports, and project records.
+          </p>
         </div>
       </div>
 
@@ -781,28 +921,28 @@ export default function AdminDocuments() {
         {activeFolder && (
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <button
-              className="bg-transparent p-0 text-sm font-semibold text-[#00a054] hover:underline"
+              className="bg-transparent p-0 text-sm font-semibold text-[#00a054] hover:underline dark:text-emerald-300"
               onClick={goBackToRoot}
               type="button"
             >
               Folders
             </button>
-            <span className="text-gray-400">›</span>
-            <span className="text-sm font-semibold text-gray-900">{activeFolder.name}</span>
+            <span className="text-gray-400 dark:text-slate-500">›</span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">{activeFolder.name}</span>
 
             <button className={cn(btnBase, "ml-1")} onClick={goBackToRoot} type="button">
-              <ChevronLeft className="h-4 w-4 text-gray-500" />
+              <ChevronLeft className="h-4 w-4 text-gray-500 dark:text-slate-400" />
               Back
             </button>
           </div>
         )}
 
-        <div className={cn(cardShell, cardAccent, "mb-4")}>
+        <div className={cn(cardShell.replace("overflow-hidden", "overflow-visible"), cardAccent, "relative z-30 mb-4")}>
           <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center">
             <div className="relative w-full lg:w-[380px] xl:w-[440px]">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-slate-400" />
               <input
-                className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:placeholder:text-slate-400"
                 placeholder="Search documents, users, dates"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -810,12 +950,14 @@ export default function AdminDocuments() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 lg:ml-auto lg:flex-nowrap">
-              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-900/40">
                 <button
                   type="button"
                   className={cn(
                     "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                    tab === "active" ? "bg-[#00c065]/10 text-[#047857]" : "text-gray-600 hover:bg-gray-50"
+                    tab === "active"
+                      ? "bg-[#00c065]/10 text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300"
+                      : "text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700"
                   )}
                   onClick={() => {
                     setTab("active")
@@ -828,7 +970,9 @@ export default function AdminDocuments() {
                   type="button"
                   className={cn(
                     "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                    tab === "archived" ? "bg-[#00c065]/10 text-[#047857]" : "text-gray-600 hover:bg-gray-50"
+                    tab === "archived"
+                      ? "bg-[#00c065]/10 text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300"
+                      : "text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700"
                   )}
                   onClick={() => {
                     setTab("archived")
@@ -846,19 +990,19 @@ export default function AdminDocuments() {
                 </button>
 
                 {newOpen && (
-                  <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70">
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-[500] min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
                     <MenuItemBtn
-                      icon={<Folder className="h-4 w-4 text-gray-500" />}
+                      icon={<Folder className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                       label="New Folder"
                       onClick={openNewFolder}
                     />
                     <MenuItemBtn
-                      icon={<Upload className="h-4 w-4 text-gray-500" />}
+                      icon={<Upload className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                       label="File Upload"
                       onClick={openUploadFile}
                     />
                     <MenuItemBtn
-                      icon={<Folder className="h-4 w-4 text-gray-500" />}
+                      icon={<Folder className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                       label="Folder Upload"
                       onClick={openUploadFolder}
                     />
@@ -868,19 +1012,19 @@ export default function AdminDocuments() {
 
               <div className="relative" onClick={(e) => e.stopPropagation()}>
                 <button className={btnBase} type="button" onClick={() => setFiltersOpen((v) => !v)}>
-                  <SlidersHorizontal className="h-4 w-4 text-gray-500" />
+                  <SlidersHorizontal className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                   Filters
                 </button>
 
                 {filtersOpen && (
-                  <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[288px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70">
-                    <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-[500] min-w-[288px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
+                    <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-400">
                       Document Type
                     </div>
                     {filterItems.map((item) => (
                       <label
                         key={item.id}
-                        className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                        className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
                         <input
                           type="checkbox"
@@ -891,7 +1035,7 @@ export default function AdminDocuments() {
                         <span>{item.label}</span>
                       </label>
                     ))}
-                    <div className="mt-2 border-t border-gray-100 px-3 pb-1 pt-2 text-xs text-gray-500">
+                    <div className="mt-2 border-t border-gray-100 px-3 pb-1 pt-2 text-xs text-gray-500 dark:border-slate-700/70 dark:text-slate-400">
                       Archive is controlled by the Active/Archived tabs.
                     </div>
                   </div>
@@ -901,12 +1045,12 @@ export default function AdminDocuments() {
               <div className="relative" onClick={(e) => e.stopPropagation()}>
                 <button className={btnBase} type="button" onClick={() => setSortOpen((v) => !v)}>
                   <span>Sort:</span>
-                  <span className="font-semibold text-gray-950">{sortLabel}</span>
-                  <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                  <span className="font-semibold text-gray-950 dark:text-slate-100">{sortLabel}</span>
+                  <ArrowUpDown className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                 </button>
 
                 {sortOpen && (
-                  <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70">
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-[500] min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
                     {([
                       ["date_desc", "Newest"],
                       ["date_asc", "Oldest"],
@@ -934,45 +1078,47 @@ export default function AdminDocuments() {
 
         {(loading || loadError) && (
           <div className={cn(cardShell, "mb-4 p-3")}>
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-slate-100">
               {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+                <Loader2 className="h-4 w-4 animate-spin text-gray-500 dark:text-slate-400" />
               ) : (
                 <AlertTriangle className="h-4 w-4 text-amber-600" />
               )}
               {loading ? "Loading documents…" : "Could not load documents"}
             </div>
-            {loadError ? <div className="mt-1 text-sm text-gray-600">{loadError}</div> : null}
+            {loadError ? <div className="mt-1 text-sm text-gray-600 dark:text-slate-300">{loadError}</div> : null}
           </div>
         )}
 
         {isSearching && (
           <div className={cn(cardShell, "mb-4 p-4")}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-gray-900">
-                Search results for <span className="text-gray-700">“{query.trim()}”</span>
+              <div className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                Search results for <span className="text-gray-700 dark:text-slate-300">“{query.trim()}”</span>
               </div>
               <button className={btnBase} type="button" onClick={() => setQuery("")}>
-                <X className="h-4 w-4 text-gray-500" />
+                <X className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                 Clear search
               </button>
             </div>
-            <div className="mt-1 text-sm text-gray-500">Folders and recent are hidden while searching.</div>
+            <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+              Folders and recent are hidden while searching.
+            </div>
           </div>
         )}
 
         {!activeFolder && !isSearching && (
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
             <div className={cn(cardShell, cardAccent)}>
-              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-slate-700/70">
                 <div>
-                  <div className="text-sm font-semibold text-gray-950">Folders</div>
-                  <div className="mt-0.5 text-xs text-gray-500">Grouped document storage.</div>
+                  <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">Folders</div>
+                  <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">Grouped document storage.</div>
                 </div>
-                <div className="text-xs font-medium text-gray-500">{visibleFolders.length} folders</div>
+                <div className="text-xs font-medium text-gray-500 dark:text-slate-400">{visibleFolders.length} folders</div>
               </div>
 
-              <div className="divide-y divide-gray-100 px-3 py-2">
+              <div className="divide-y divide-gray-100 px-3 py-2 dark:divide-slate-700/70">
                 {visibleFolders.map((folder) => {
                   const stats = folderStats[folder.id]
                   const count = stats?.count ?? folder.fileCount
@@ -986,7 +1132,7 @@ export default function AdminDocuments() {
                   return (
                     <div
                       key={folder.id}
-                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-3 transition hover:bg-gray-50"
+                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-3 transition hover:bg-gray-50 dark:hover:bg-slate-700/60"
                     >
                       <button
                         type="button"
@@ -994,12 +1140,14 @@ export default function AdminDocuments() {
                         onClick={() => openFolder(folder.id)}
                         disabled={tab === "archived"}
                       >
-                        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#00c065]/10">
-                          <Folder className="h-5 w-5 text-[#00a054]" />
+                        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#00c065]/10 dark:bg-[#00c065]/15">
+                          <Folder className="h-5 w-5 text-[#00a054] dark:text-emerald-400" />
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-gray-950">{folder.name}</div>
-                          <div className="mt-1 text-xs text-gray-500">
+                          <div className="truncate text-sm font-semibold text-gray-950 dark:text-slate-100">
+                            {folder.name}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
                             {tab === "archived" ? "Archived folder" : folderMeta(count, sizeLabel)}
                           </div>
                         </div>
@@ -1013,17 +1161,17 @@ export default function AdminDocuments() {
                         {tab === "active" ? (
                           <>
                             <MenuItemBtn
-                              icon={<Folder className="h-4 w-4 text-gray-500" />}
+                              icon={<Folder className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Open"
                               onClick={() => openFolder(folder.id)}
                             />
                             <MenuItemBtn
-                              icon={<Pencil className="h-4 w-4 text-gray-500" />}
+                              icon={<Pencil className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Rename"
                               onClick={() => openRenameModal("folder", folder.id, folder.name)}
                             />
                             <MenuItemBtn
-                              icon={<Archive className="h-4 w-4 text-gray-500" />}
+                              icon={<Archive className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Archive"
                               onClick={() => requestArchiveFolder(folder.id)}
                             />
@@ -1031,12 +1179,12 @@ export default function AdminDocuments() {
                         ) : (
                           <>
                             <MenuItemBtn
-                              icon={<Check className="h-4 w-4 text-gray-500" />}
+                              icon={<Check className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Restore"
                               onClick={() => requestRestoreFolder(folder.id)}
                             />
                             <MenuItemBtn
-                              icon={<Pencil className="h-4 w-4 text-gray-500" />}
+                              icon={<Pencil className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Rename"
                               onClick={() => openRenameModal("folder", folder.id, folder.name)}
                             />
@@ -1048,7 +1196,7 @@ export default function AdminDocuments() {
                 })}
 
                 {visibleFolders.length === 0 && (
-                  <div className="px-3 py-8 text-sm text-gray-500">
+                  <div className="px-3 py-8 text-sm text-gray-500 dark:text-slate-400">
                     {tab === "archived" ? "No archived folders." : "No folders to display."}
                   </div>
                 )}
@@ -1056,19 +1204,21 @@ export default function AdminDocuments() {
             </div>
 
             <div className={cn(cardShell, cardAccent)}>
-              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-slate-700/70">
                 <div>
-                  <div className="text-sm font-semibold text-gray-950">Recent</div>
-                  <div className="mt-0.5 text-xs text-gray-500">Latest uploaded and generated files.</div>
+                  <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">Recent</div>
+                  <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                    Latest uploaded and generated files.
+                  </div>
                 </div>
-                <div className="text-xs font-medium text-gray-500">
+                <div className="text-xs font-medium text-gray-500 dark:text-slate-400">
                   {tab === "archived" ? "—" : `${recentFiles.length} items`}
                 </div>
               </div>
 
               <div className="px-3 py-3">
                 {tab === "archived" ? (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 text-sm text-gray-600">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 text-sm text-gray-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
                     Recent is available only for Active documents.
                   </div>
                 ) : (
@@ -1080,7 +1230,7 @@ export default function AdminDocuments() {
                       return (
                         <div
                           key={f.id}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm transition hover:bg-gray-50"
+                          className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700/70"
                         >
                           <div className="flex min-w-0 items-center gap-3">
                             <span
@@ -1092,8 +1242,10 @@ export default function AdminDocuments() {
                               {meta.pillText}
                             </span>
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-semibold text-gray-950">{f.name}</div>
-                              <div className="mt-1 text-xs text-gray-500">
+                              <div className="truncate text-sm font-semibold text-gray-950 dark:text-slate-100">
+                                {f.name}
+                              </div>
+                              <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
                                 {formatDateISO(f.dateISO)} • {f.sizeLabel}
                               </div>
                             </div>
@@ -1105,17 +1257,22 @@ export default function AdminDocuments() {
                             onClose={() => setOpenMenuKey(null)}
                           >
                             <MenuItemBtn
-                              icon={<Download className="h-4 w-4 text-gray-500" />}
-                              label="Download"
+                              icon={<Info className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
+                              label="View Content"
+                              onClick={() => openViewFile(f)}
+                            />
+                            <MenuItemBtn
+                              icon={<Download className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
+                              label="Export Content"
                               onClick={() => actionDownloadFile(f)}
                             />
                             <MenuItemBtn
-                              icon={<Pencil className="h-4 w-4 text-gray-500" />}
+                              icon={<Pencil className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Rename"
                               onClick={() => openRenameModal("file", f.id, f.name)}
                             />
                             <MenuItemBtn
-                              icon={<Archive className="h-4 w-4 text-gray-500" />}
+                              icon={<Archive className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                               label="Archive"
                               onClick={() => actionArchiveFile(f.id)}
                             />
@@ -1125,7 +1282,7 @@ export default function AdminDocuments() {
                     })}
 
                     {recentFiles.length === 0 && !loading && (
-                      <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
                         No recent documents match your filters.
                       </div>
                     )}
@@ -1139,19 +1296,23 @@ export default function AdminDocuments() {
         <section className="mt-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-xs font-semibold text-gray-500">{isSearching ? "Search Results" : "All Files"}</div>
-              <div className="text-xs text-gray-500">• {scopedFiles.length} results</div>
-              {activeFolder && <div className="text-xs text-gray-500">• {activeFolder.name}</div>}
-              <div className="text-xs font-semibold text-gray-500">• {tab === "active" ? "Active" : "Archived"}</div>
+              <div className="text-xs font-semibold text-gray-500 dark:text-slate-300">
+                {isSearching ? "Search Results" : "All Files"}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-slate-400">• {scopedFiles.length} results</div>
+              {activeFolder && <div className="text-xs text-gray-500 dark:text-slate-400">• {activeFolder.name}</div>}
+              <div className="text-xs font-semibold text-gray-500 dark:text-slate-300">
+                • {tab === "active" ? "Active" : "Archived"}
+              </div>
             </div>
 
             {selectedCount > 0 && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-[#00c065]/10 px-2.5 py-1 text-xs font-semibold text-[#047857]">
+                <span className="rounded-full bg-[#00c065]/10 px-2.5 py-1 text-xs font-semibold text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300">
                   {selectedCount} selected
                 </span>
                 <button
-                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-transparent bg-transparent px-3 text-sm font-semibold text-[#047857] transition-colors hover:bg-[#00c065]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-transparent bg-transparent px-3 text-sm font-semibold text-[#047857] transition-colors hover:bg-[#00c065]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] dark:text-emerald-300 dark:hover:bg-[#00c065]/15"
                   onClick={clearSelection}
                   type="button"
                 >
@@ -1162,11 +1323,11 @@ export default function AdminDocuments() {
                 {tab === "active" ? (
                   <>
                     <button className={btnBase} type="button" onClick={bulkDownload}>
-                      <Download className="h-4 w-4 text-gray-500" />
-                      Download
+                      <Download className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                      Export
                     </button>
                     <button className={btnBase} type="button" onClick={bulkArchive}>
-                      <Archive className="h-4 w-4 text-gray-500" />
+                      <Archive className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                       Archive
                     </button>
                   </>
@@ -1181,7 +1342,7 @@ export default function AdminDocuments() {
           </div>
 
           <div className={cn(cardShell, cardAccent)}>
-            <div className="grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]">
+            <div className="grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:border-slate-700/70 dark:bg-slate-800 dark:text-slate-400">
               <div className="flex justify-center">
                 <input
                   type="checkbox"
@@ -1197,7 +1358,7 @@ export default function AdminDocuments() {
               <div />
             </div>
 
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-100 dark:divide-slate-700/70">
               {scopedFiles.map((f) => {
                 const meta = typeMeta[f.type]
                 const checked = Boolean(selectedIds[f.id])
@@ -1207,8 +1368,8 @@ export default function AdminDocuments() {
                   <div
                     key={f.id}
                     className={cn(
-                      "grid grid-cols-[52px_1fr_280px_180px_60px] items-center px-3 py-3 text-sm transition hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]",
-                      checked && "bg-[#00c065]/10 hover:bg-[#00c065]/10"
+                      "grid grid-cols-[52px_1fr_280px_180px_60px] items-center px-3 py-3 text-sm transition hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:hover:bg-slate-700/60",
+                      checked && "bg-[#00c065]/10 hover:bg-[#00c065]/10 dark:hover:bg-[#00c065]/15"
                     )}
                   >
                     <div className="flex justify-center">
@@ -1233,8 +1394,8 @@ export default function AdminDocuments() {
                         </span>
 
                         <div className="min-w-0">
-                          <div className="truncate font-semibold text-gray-950">{f.name}</div>
-                          <div className="mt-1 truncate text-xs text-gray-500">
+                          <div className="truncate font-semibold text-gray-950 dark:text-slate-100">{f.name}</div>
+                          <div className="mt-1 truncate text-xs text-gray-500 dark:text-slate-400">
                             {meta.label}
                             {f.sizeLabel !== "—" ? ` • ${f.sizeLabel}` : ""}
                           </div>
@@ -1242,8 +1403,12 @@ export default function AdminDocuments() {
                       </div>
                     </div>
 
-                    <div className="truncate text-sm text-gray-700 max-[920px]:hidden">{f.createdBy}</div>
-                    <div className="whitespace-nowrap text-sm text-gray-700">{formatDateISO(f.dateISO)}</div>
+                    <div className="truncate text-sm text-gray-700 max-[920px]:hidden dark:text-slate-300">
+                      {f.createdBy}
+                    </div>
+                    <div className="whitespace-nowrap text-sm text-gray-700 dark:text-slate-300">
+                      {formatDateISO(f.dateISO)}
+                    </div>
 
                     <ActionMenu
                       isOpen={openMenuKey === key}
@@ -1251,24 +1416,29 @@ export default function AdminDocuments() {
                       onClose={() => setOpenMenuKey(null)}
                     >
                       <MenuItemBtn
-                        icon={<Download className="h-4 w-4 text-gray-500" />}
-                        label="Download"
+                        icon={<Info className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
+                        label="View Content"
+                        onClick={() => openViewFile(f)}
+                      />
+                      <MenuItemBtn
+                        icon={<Download className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
+                        label="Export Content"
                         onClick={() => actionDownloadFile(f)}
                       />
                       <MenuItemBtn
-                        icon={<Pencil className="h-4 w-4 text-gray-500" />}
+                        icon={<Pencil className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                         label="Rename"
                         onClick={() => openRenameModal("file", f.id, f.name)}
                       />
                       {tab === "active" ? (
                         <MenuItemBtn
-                          icon={<Archive className="h-4 w-4 text-gray-500" />}
+                          icon={<Archive className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                           label="Archive"
                           onClick={() => actionArchiveFile(f.id)}
                         />
                       ) : (
                         <MenuItemBtn
-                          icon={<Check className="h-4 w-4 text-gray-500" />}
+                          icon={<Check className="h-4 w-4 text-gray-500 dark:text-slate-400" />}
                           label="Restore"
                           onClick={() => actionUnarchiveFile(f.id)}
                         />
@@ -1281,16 +1451,44 @@ export default function AdminDocuments() {
 
             {scopedFiles.length === 0 && !loading && (
               <div className="px-3 py-12 text-center">
-                <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50">
-                  <FileText className="h-5 w-5 text-gray-400" />
+                <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50 dark:bg-slate-700">
+                  <FileText className="h-5 w-5 text-gray-400 dark:text-slate-400" />
                 </div>
-                <div className="mt-3 text-sm font-semibold text-gray-950">No matching documents</div>
-                <div className="mt-1 text-sm text-gray-500">Try changing your search, filters, or sort option.</div>
+                <div className="mt-3 text-sm font-semibold text-gray-950 dark:text-slate-100">
+                  No matching documents
+                </div>
+                <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                  Try changing your search, filters, or sort option.
+                </div>
               </div>
             )}
           </div>
         </section>
       </div>
+
+      <Modal open={viewOpen} title={viewFile?.name ?? "Document Content"} onClose={() => setViewOpen(false)}>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-slate-400">
+            <span>{viewFile?.originalFilename ?? "Saved content"}</span>
+            <span>•</span>
+            <span>{viewFile?.contentType ?? "text/plain"}</span>
+            <span>•</span>
+            <span>{viewFile?.sizeLabel ?? "—"}</span>
+          </div>
+
+          <div className="max-h-[55vh] overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800 dark:text-slate-200">
+              {viewFile?.content || "No content saved for this document."}
+            </pre>
+          </div>
+
+          <div className="flex justify-end">
+            <button className={btnBase} type="button" onClick={() => setViewOpen(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={renameOpen}
@@ -1298,7 +1496,7 @@ export default function AdminDocuments() {
         onClose={() => setRenameOpen(false)}
       >
         <div className="space-y-3">
-          <div className="text-sm text-gray-600">Enter a new name.</div>
+          <div className="text-sm text-gray-600 dark:text-slate-300">Enter a new name.</div>
           <input className={inputBase} value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
           <div className="flex justify-end gap-2">
             <button className={btnBase} type="button" onClick={() => setRenameOpen(false)}>
@@ -1313,7 +1511,7 @@ export default function AdminDocuments() {
 
       <Modal open={newFolderOpen} title="New Folder" onClose={() => setNewFolderOpen(false)}>
         <div className="space-y-3">
-          <div className="text-sm text-gray-600">Create a folder to organize documents.</div>
+          <div className="text-sm text-gray-600 dark:text-slate-300">Create a folder to organize documents.</div>
           <input
             className={inputBase}
             placeholder="Folder name"
@@ -1333,8 +1531,9 @@ export default function AdminDocuments() {
 
       <Modal open={uploadFileOpen} title="File Upload" onClose={() => setUploadFileOpen(false)}>
         <div className="space-y-3">
-          <div className="text-sm text-gray-600">
-            Pick a file to add. It will be added {activeFolder ? `to "${activeFolder.name}"` : "to the root"}.
+          <div className="text-sm text-gray-600 dark:text-slate-300">
+            Pick a text-based file to save its content. It will be added{" "}
+            {activeFolder ? `to "${activeFolder.name}"` : "to the root"}.
           </div>
           <input
             ref={fileInputRef}
@@ -1355,23 +1554,27 @@ export default function AdminDocuments() {
 
       <Modal open={uploadFolderOpen} title="Folder Upload" onClose={() => setUploadFolderOpen(false)}>
         <div className="space-y-3">
-          <div className="text-sm text-gray-600">
-            Select a folder. Files will be added to the selected folder.
+          <div className="text-sm text-gray-600 dark:text-slate-300">
+            Select a folder. Only readable text-based files will be saved as content.
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Target folder</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-400">
+              Target folder
+            </div>
             <select
               className={inputBase}
               value={uploadFolderTargetId}
               onChange={(e) => setUploadFolderTargetId(e.target.value)}
             >
               <option value="">Root (no folder)</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
+              {folders
+                .filter((f) => !archivedFolderIds[f.id])
+                .map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -1401,9 +1604,11 @@ export default function AdminDocuments() {
         onClose={() => setConfirmArchiveFolderOpen(false)}
       >
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-            <Info className="mt-0.5 h-4 w-4 text-gray-500" />
-            <div className="text-sm text-gray-700">Archiving a folder will also archive all documents inside it.</div>
+          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <Info className="mt-0.5 h-4 w-4 text-gray-500 dark:text-slate-400" />
+            <div className="text-sm text-gray-700 dark:text-slate-300">
+              Archiving a folder will also archive all documents inside it.
+            </div>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -1423,9 +1628,9 @@ export default function AdminDocuments() {
         onClose={() => setConfirmRestoreFolderOpen(false)}
       >
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-            <Info className="mt-0.5 h-4 w-4 text-gray-500" />
-            <div className="text-sm text-gray-700">
+          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <Info className="mt-0.5 h-4 w-4 text-gray-500 dark:text-slate-400" />
+            <div className="text-sm text-gray-700 dark:text-slate-300">
               Restoring a folder will also restore all archived documents inside it.
             </div>
           </div>
