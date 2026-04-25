@@ -10,7 +10,7 @@ import EmployeesCard from "../../components/dashboard/employeesCard";
 import JobProgressCard from "../../components/dashboard/jobProgressCard";
 import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
 import JobNumberCard from "@/components/jobNumberCard";
-import NotificationsCard from "@/components/notificationsCard";
+import NotificationsCard from "@/components/dashboard/notificationsCard";
 
 type StepVisualStatus = "done" | "active" | "pending";
 
@@ -310,7 +310,6 @@ function getStepStatus(
 
   return "pending";
 }
-
 
 function getStatusLabel(projectStatus: string) {
   const status = normalizeStatus(projectStatus);
@@ -1071,7 +1070,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="min-h-0 overflow-hidden">
-              <NotificationsCard notifications={[]} />
+              <NotificationsCard limit={4} />
             </div>
 
             <div className="min-h-0 overflow-hidden">

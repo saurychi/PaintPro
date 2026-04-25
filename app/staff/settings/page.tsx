@@ -3,12 +3,15 @@
 import React, { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 
 const ACCENT = "#00c065"
 const ACCENT_HOVER = "#00a054"
 
 function StaffSettings() {
   const router = useRouter()
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
 
   const [profile, setProfile] = useState({
     firstName: "First Name",
@@ -208,6 +211,29 @@ function StaffSettings() {
                     className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.98]"
                   >
                     Cancel
+                  </button>
+                </div>
+              </Card>
+            </div>
+
+            {/* Appearance */}
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-gray-900">Appearance</h2>
+              </div>
+
+              <Card>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Dark mode</p>
+                    <p className="mt-1 text-sm text-gray-600">Switch between light and dark interface.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTheme(isDark ? "light" : "dark")}
+                    className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 active:scale-[0.98]"
+                  >
+                    {isDark ? "Light mode" : "Dark mode"}
                   </button>
                 </div>
               </Card>
