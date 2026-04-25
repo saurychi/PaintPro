@@ -1053,6 +1053,7 @@ export default function DashboardPage() {
           <div className="min-h-0 overflow-hidden">
             <JobProgressCard
               selectedProject={selectedProject}
+              projectId={selectedProjectId}
               loadingDetails={loadingProjects || loadingDetails}
               navigating={loadingProjects || loadingDetails}
               processItems={processItems}
