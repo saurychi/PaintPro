@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   ArrowUpDown,
@@ -9,20 +9,18 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  Loader2,
   PhilippinePeso,
   Search,
   SlidersHorizontal,
 } from "lucide-react"
 
+import {
+  getReportProjects,
+  type ReportProjectRow,
+} from "@/lib/data/reports.repo"
+
 type ReportView = "weekly" | "monthly" | "yearly"
-type StatusFilter =
-  | "all"
-  | "main_task_pending"
-  | "quotation_pending"
-  | "ready_to_start"
-  | "in_progress"
-  | "completed"
-  | "cancelled"
 type SortKey =
   | "updated_desc"
   | "updated_asc"
@@ -30,80 +28,6 @@ type SortKey =
   | "title_desc"
   | "budget_desc"
   | "profit_desc"
-
-type ProjectStatus = Exclude<StatusFilter, "all">
-
-type ProjectReportRow = {
-  projectId: string
-  projectCode: string
-  title: string
-  clientName: string
-  siteAddress: string
-  status: ProjectStatus
-  priority: "low" | "medium" | "high"
-  startDatetime: string | null
-  endDatetime: string | null
-  estimatedBudget: number
-  estimatedCost: number
-  estimatedProfit: number
-  markupRate: number
-  createdAt: string
-  updatedAt: string
-}
-
-const demoProjects: ProjectReportRow[] = [
-  {
-    projectId: "p1",
-    projectCode: "PP-94VS-MXUI",
-    title: "Testing Project",
-    clientName: "Daniel Foster",
-    siteAddress: "71 Wellington Street Perth WA 6000 Australia",
-    status: "quotation_pending",
-    priority: "medium",
-    startDatetime: "2026-04-27T08:00:00",
-    endDatetime: "2026-05-03T17:00:00",
-    estimatedBudget: 245300,
-    estimatedCost: 176400,
-    estimatedProfit: 68900,
-    markupRate: 30,
-    createdAt: "2026-04-25T09:30:00",
-    updatedAt: "2026-04-27T14:01:00",
-  },
-  {
-    projectId: "p2",
-    projectCode: "PP-GE99-T2ZH",
-    title: "Turner Residence Refresh",
-    clientName: "Sophie Turner",
-    siteAddress: "Royal Street",
-    status: "in_progress",
-    priority: "high",
-    startDatetime: "2026-04-24T08:00:00",
-    endDatetime: "2026-04-30T17:00:00",
-    estimatedBudget: 188500,
-    estimatedCost: 133200,
-    estimatedProfit: 55300,
-    markupRate: 28,
-    createdAt: "2026-04-21T11:12:00",
-    updatedAt: "2026-04-26T15:45:00",
-  },
-  {
-    projectId: "p3",
-    projectCode: "PP-YCQT-9KR2",
-    title: "Living Room Repaint",
-    clientName: "Amelia Grant",
-    siteAddress: "Cebu City",
-    status: "completed",
-    priority: "low",
-    startDatetime: "2026-04-15T09:00:00",
-    endDatetime: "2026-04-18T16:30:00",
-    estimatedBudget: 82500,
-    estimatedCost: 57100,
-    estimatedProfit: 25400,
-    markupRate: 25,
-    createdAt: "2026-04-10T10:00:00",
-    updatedAt: "2026-04-18T16:50:00",
-  },
-]
 
 const cardShell =
   "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700/70 dark:bg-slate-800 dark:shadow-slate-950/20"
@@ -120,6 +44,10 @@ function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
+function endOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+}
+
 function getWeekRange(today: Date) {
   const d = startOfDay(today)
   const day = d.getDay()
@@ -131,21 +59,21 @@ function getWeekRange(today: Date) {
   const end = new Date(start)
   end.setDate(start.getDate() + 6)
 
-  return { start, end }
+  return { start, end: endOfDay(end) }
 }
 
 function getMonthRange(today: Date) {
   const start = new Date(today.getFullYear(), today.getMonth(), 1)
   const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
 
-  return { start, end }
+  return { start, end: endOfDay(end) }
 }
 
 function getYearRange(today: Date) {
   const start = new Date(today.getFullYear(), 0, 1)
   const end = new Date(today.getFullYear(), 11, 31)
 
-  return { start, end }
+  return { start, end: endOfDay(end) }
 }
 
 function getRange(view: ReportView, today: Date) {
@@ -180,7 +108,9 @@ function formatDateTime(value: string | null) {
   }).format(date)
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) return "—"
+
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
 
@@ -199,20 +129,38 @@ function currency(value: number) {
   }).format(value)
 }
 
-function statusLabel(status: ProjectStatus) {
-  const labels: Record<ProjectStatus, string> = {
+function titleCaseStatus(status: string) {
+  return status
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
     main_task_pending: "Main Task Pending",
+    sub_task_pending: "Sub Task Pending",
+    materials_pending: "Materials Pending",
+    equipment_pending: "Equipment Pending",
+    schedule_pending: "Schedule Pending",
+    employee_assignment_pending: "Employee Assignment Pending",
+    cost_estimation_pending: "Cost Estimation Pending",
+    overview_pending: "Overview Pending",
     quotation_pending: "Quotation Pending",
+    invoice_agreement_pending: "Invoice Agreement Pending",
+    invoice_pending: "Invoice Pending",
+    payment_pending: "Payment Pending",
     ready_to_start: "Ready to Start",
     in_progress: "In Progress",
     completed: "Completed",
     cancelled: "Cancelled",
   }
 
-  return labels[status] ?? status
+  return labels[status] ?? titleCaseStatus(status)
 }
 
-function statusBadgeClass(status: ProjectStatus) {
+function statusBadgeClass(status: string) {
   if (status === "completed") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-500/15 dark:text-emerald-300"
   }
@@ -229,10 +177,19 @@ function statusBadgeClass(status: ProjectStatus) {
     return "border-red-200 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-300"
   }
 
-  return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/25 dark:bg-amber-500/15 dark:text-amber-300"
+  if (
+    status.includes("pending") ||
+    status.includes("quotation") ||
+    status.includes("invoice") ||
+    status.includes("payment")
+  ) {
+    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/25 dark:bg-amber-500/15 dark:text-amber-300"
+  }
+
+  return "border-gray-200 bg-gray-50 text-gray-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
 }
 
-function priorityBadgeClass(priority: ProjectReportRow["priority"]) {
+function priorityBadgeClass(priority: ReportProjectRow["priority"]) {
   if (priority === "high") {
     return "border-red-200 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-300"
   }
@@ -244,26 +201,14 @@ function priorityBadgeClass(priority: ProjectReportRow["priority"]) {
   return "border-gray-200 bg-gray-50 text-gray-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
 }
 
-function parseDateOrNull(value: string | null) {
-  if (!value) return null
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-
-  return startOfDay(date)
-}
-
-function isWithinRange(date: Date, start: Date, end: Date) {
-  const t = date.getTime()
-
-  return t >= start.getTime() && t <= end.getTime()
-}
-
 export default function ReportListPage() {
   const [view, setView] = useState<ReportView>("monthly")
   const [query, setQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [statusFilter, setStatusFilter] = useState("all")
   const [sortKey, setSortKey] = useState<SortKey>("updated_desc")
+  const [projects, setProjects] = useState<ReportProjectRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const today = useMemo(() => new Date(), [])
   const range = useMemo(() => getRange(view, today), [view, today])
@@ -272,36 +217,54 @@ export default function ReportListPage() {
     [range.start, range.end]
   )
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadProjects() {
+      setLoading(true)
+      setLoadError(null)
+
+      try {
+        const rows = await getReportProjects({
+          rangeStartISO: range.start.toISOString(),
+          rangeEndISO: range.end.toISOString(),
+          status: statusFilter,
+          sort: sortKey,
+        })
+
+        if (!cancelled) {
+          setProjects(rows)
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setProjects([])
+          setLoadError(error?.message ?? "Failed to load project reports")
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadProjects()
+
+    return () => {
+      cancelled = true
+    }
+  }, [range.start, range.end, statusFilter, sortKey])
+
   const filteredProjects = useMemo(() => {
     const q = query.trim().toLowerCase()
 
-    let rows = demoProjects.filter((project) => {
-      const updated = parseDateOrNull(project.updatedAt)
-      const matchesRange = updated ? isWithinRange(updated, range.start, range.end) : true
+    if (!q) return projects
 
-      const matchesSearch =
-        !q ||
-        `${project.projectCode} ${project.title} ${project.clientName} ${project.siteAddress}`
-          .toLowerCase()
-          .includes(q)
-
-      const matchesStatus = statusFilter === "all" || project.status === statusFilter
-
-      return matchesRange && matchesSearch && matchesStatus
+    return projects.filter((project) => {
+      return `${project.projectCode} ${project.title} ${project.clientName} ${project.siteAddress} ${project.status}`
+        .toLowerCase()
+        .includes(q)
     })
-
-    rows = rows.slice().sort((a, b) => {
-      if (sortKey === "updated_asc") return Date.parse(a.updatedAt) - Date.parse(b.updatedAt)
-      if (sortKey === "title_asc") return a.title.localeCompare(b.title)
-      if (sortKey === "title_desc") return b.title.localeCompare(a.title)
-      if (sortKey === "budget_desc") return b.estimatedBudget - a.estimatedBudget
-      if (sortKey === "profit_desc") return b.estimatedProfit - a.estimatedProfit
-
-      return Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
-    })
-
-    return rows
-  }, [query, range.start, range.end, statusFilter, sortKey])
+  }, [projects, query])
 
   const totals = useMemo(() => {
     return filteredProjects.reduce(
@@ -373,7 +336,7 @@ export default function ReportListPage() {
               Projects
             </div>
             <div className="mt-2 text-2xl font-semibold text-gray-950 dark:text-slate-100">
-              {filteredProjects.length}
+              {loading ? "—" : filteredProjects.length}
             </div>
             <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
               Matching projects in selected range
@@ -388,7 +351,7 @@ export default function ReportListPage() {
               Total Budget
             </div>
             <div className="mt-2 text-2xl font-semibold text-gray-950 dark:text-slate-100">
-              {currency(totals.budget)}
+              {loading ? "—" : currency(totals.budget)}
             </div>
             <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
               Combined estimated project budget
@@ -403,7 +366,7 @@ export default function ReportListPage() {
               Estimated Profit
             </div>
             <div className="mt-2 text-2xl font-semibold text-gray-950 dark:text-slate-100">
-              {currency(totals.profit)}
+              {loading ? "—" : currency(totals.profit)}
             </div>
             <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
               Revenue estimate less estimated cost
@@ -439,12 +402,22 @@ export default function ReportListPage() {
                 <SlidersHorizontal className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-slate-400" />
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                  className="h-9 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-9 pr-9 text-sm font-semibold text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 focus:ring-2 focus:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:bg-slate-700 sm:w-[210px]"
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="h-9 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-9 pr-9 text-sm font-semibold text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 focus:ring-2 focus:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:bg-slate-700 sm:w-[230px]"
                 >
                   <option value="all">All statuses</option>
                   <option value="main_task_pending">Main Task Pending</option>
+                  <option value="sub_task_pending">Sub Task Pending</option>
+                  <option value="materials_pending">Materials Pending</option>
+                  <option value="equipment_pending">Equipment Pending</option>
+                  <option value="schedule_pending">Schedule Pending</option>
+                  <option value="employee_assignment_pending">Employee Assignment Pending</option>
+                  <option value="cost_estimation_pending">Cost Estimation Pending</option>
+                  <option value="overview_pending">Overview Pending</option>
                   <option value="quotation_pending">Quotation Pending</option>
+                  <option value="invoice_agreement_pending">Invoice Agreement Pending</option>
+                  <option value="invoice_pending">Invoice Pending</option>
+                  <option value="payment_pending">Payment Pending</option>
                   <option value="ready_to_start">Ready to Start</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>
@@ -530,13 +503,19 @@ export default function ReportListPage() {
                   </td>
 
                   <td className="px-3 py-3 align-middle">
-                    <div className="truncate text-gray-700 dark:text-slate-300" title={project.clientName}>
+                    <div
+                      className="truncate text-gray-700 dark:text-slate-300"
+                      title={project.clientName}
+                    >
                       {project.clientName}
                     </div>
                   </td>
 
                   <td className="px-3 py-3 align-middle">
-                    <div className="line-clamp-2 break-words text-sm leading-5 text-gray-700 dark:text-slate-300" title={project.siteAddress}>
+                    <div
+                      className="line-clamp-2 break-words text-sm leading-5 text-gray-700 dark:text-slate-300"
+                      title={project.siteAddress}
+                    >
                       {project.siteAddress}
                     </div>
                   </td>
@@ -593,7 +572,25 @@ export default function ReportListPage() {
             </tbody>
           </table>
 
-          {filteredProjects.length === 0 && (
+          {loading && (
+            <div className="flex items-center justify-center gap-2 px-4 py-12 text-sm font-semibold text-gray-500 dark:text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading project reports...
+            </div>
+          )}
+
+          {!loading && loadError && (
+            <div className="px-4 py-12 text-center">
+              <div className="text-sm font-semibold text-red-600 dark:text-red-300">
+                Failed to load project reports
+              </div>
+              <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                {loadError}
+              </div>
+            </div>
+          )}
+
+          {!loading && !loadError && filteredProjects.length === 0 && (
             <div className="px-4 py-12 text-center">
               <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50 dark:bg-slate-700">
                 <CalendarDays className="h-5 w-5 text-gray-400 dark:text-slate-400" />
