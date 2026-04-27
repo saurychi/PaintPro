@@ -13,6 +13,7 @@ import JobProgressCard, {
 } from "../../components/dashboard/jobProgressCard";
 import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
 import NotificationsCard from "@/components/dashboard/notificationsCard";
+import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
 
 type RawProject = {
@@ -1100,6 +1101,10 @@ export default function DashboardPage() {
     });
   }, [overviewProject, selectedProject, mainTasks]);
 
+  const employeeReviewItems = useMemo(() => {
+    return buildEmployeeReviewItems(mainTasks);
+  }, [mainTasks]);
+
   function toggleProcessRow(id: string) {
     setOpenProcessIds((prev) => {
       const next = new Set(prev);
@@ -1194,6 +1199,7 @@ export default function DashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
+              employeeReviewItems={employeeReviewItems}
               onRefresh={() => setDetailsRefreshKey((k) => k + 1)}
               reviewSummary={reviewSummary}
             />

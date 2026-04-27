@@ -7,6 +7,13 @@ import { Transition } from "@headlessui/react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import DownpaymentModal from "@/components/project-creation/DownpaymentModal";
 import ProjectReviewModal from "@/components/dashboard/ProjectReviewModal";
+import FinalPaymentModal from "@/components/progressCard/FinalPaymentModal";
+import EmployeeManagementModal from "@/components/progressCard/EmployeeManagementModal";
+import { supabase } from "@/lib/supabaseClient";
+import type {
+  EmployeeManagementFinishPayload,
+  EmployeeReviewItem,
+} from "@/lib/planning/employeePerformance";
 import type { ProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
 
 export type StepVisualStatus = "done" | "active" | "pending";
@@ -43,6 +50,7 @@ type Props = {
   onFinishSubtask?: (subtaskId: string) => Promise<void>;
   onRefresh?: () => void;
   currentUserId?: string | null;
+  employeeReviewItems?: EmployeeReviewItem[];
   reviewSummary?: ProjectReviewSummary | null;
   className?: string;
 };
@@ -136,6 +144,11 @@ const END_OF_WORK_STEP_BY_ID = Object.fromEntries(
 const END_OF_WORK_STATUS_ORDER = END_OF_WORK_STEPS.map(
   (step) => step.pendingStatus,
 );
+
+const INVOICE_GENERATION_OPEN_STATUSES = new Set([
+  "invoice_pending",
+  "invoice_agreement_pending",
+]);
 
 function readProjectStatus(project: unknown): string {
   if (!project || typeof project !== "object") return "";
@@ -515,6 +528,7 @@ export default function JobProgressCard({
   onFinishSubtask,
   onRefresh,
   currentUserId,
+  employeeReviewItems = [],
   reviewSummary = null,
   className = "",
 }: Props) {
@@ -530,19 +544,47 @@ export default function JobProgressCard({
   >(null);
   const [downpaymentModalOpen, setDownpaymentModalOpen] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [finalPaymentModalOpen, setFinalPaymentModalOpen] = useState(false);
+  const [employeeManagementModalOpen, setEmployeeManagementModalOpen] =
+    useState(false);
+  const [employeeManagementSaving, setEmployeeManagementSaving] =
+    useState(false);
   const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(
     null,
   );
   const [confirmingFinishTitle, setConfirmingFinishTitle] = useState("");
   const [finishing, setFinishing] = useState(false);
+  const [resolvedCurrentUserId, setResolvedCurrentUserId] = useState<string | null>(
+    currentUserId || null,
+  );
 
   const selectedProjectStatus = readProjectStatus(selectedProject);
   const effectiveProjectId = projectId || readProjectId(selectedProject);
   const effectiveProjectStatus = projectStatusOverride || selectedProjectStatus;
+  const effectiveCurrentUserId = currentUserId || resolvedCurrentUserId;
 
   useEffect(() => {
     setProjectStatusOverride(null);
   }, [selectedProjectStatus, effectiveProjectId]);
+
+  useEffect(() => {
+    if (currentUserId) {
+      setResolvedCurrentUserId(currentUserId);
+      return;
+    }
+
+    let active = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (active) {
+        setResolvedCurrentUserId(data.user?.id || null);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [currentUserId]);
 
   useEffect(() => {
     setStartOfWorkDone(
@@ -664,6 +706,96 @@ export default function JobProgressCard({
       toast.error("Could not finish subtask", { description: message });
     } finally {
       setFinishing(false);
+    }
+  }
+
+  async function handleEmployeeManagementFinish(
+    payload: EmployeeManagementFinishPayload,
+  ) {
+    if (!effectiveProjectId) {
+      throw new Error("Missing project ID.");
+    }
+
+    const employee = employeeReviewItems.find(
+      (item) => item.userId === payload.employeeId,
+    );
+
+    if (!employee) {
+      throw new Error("Employee review target not found.");
+    }
+
+    try {
+      setEmployeeManagementSaving(true);
+
+      const response = await fetch("/api/planning/saveEmployeePerformance", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId: effectiveProjectId,
+          userId: employee.userId,
+          note: payload.note,
+          rating: payload.rating,
+          salaryAmount: Number(employee.salaryAmount ?? 0),
+          totalEstimatedHours: Number(employee.totalEstimatedHours ?? 0),
+          hourlyWage: Number(employee.hourlyWage ?? 0),
+          reviewedBy: effectiveCurrentUserId,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to save employee performance.",
+        );
+      }
+
+      if (payload.isLastEmployee) {
+        setEmployeeManagementModalOpen(false);
+
+        const action = getEndOfWorkAction(
+          "employee-management",
+          effectiveProjectStatus,
+        );
+
+        if (
+          action?.nextStatus &&
+          action.successTitle &&
+          action.successDescription
+        ) {
+          await handleEndOfWorkStepAction(
+            "employee-management",
+            action.nextStatus,
+            action.successTitle,
+            action.successDescription,
+          );
+        } else {
+          onRefresh?.();
+          toast.success("Employee reviews saved");
+        }
+
+        return;
+      }
+
+      toast.success("Employee review saved", {
+        description: `Saved review for ${employee.username}.`,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to save employee performance.";
+
+      toast.error("Could not save employee review", {
+        description: message,
+      });
+
+      throw error;
+    } finally {
+      setEmployeeManagementSaving(false);
     }
   }
 
@@ -1161,14 +1293,18 @@ export default function JobProgressCard({
 
                                             if (!action) return null;
 
+                                            const isInvoiceGenerationAction =
+                                              child.id === "invoice-generation";
                                             const actionDisabled =
                                               !effectiveProjectId ||
                                               Boolean(
                                                 updatingEndOfWorkStepId,
                                               ) ||
-                                              (child.id !==
-                                                "invoice-generation" &&
-                                                !action.nextStatus);
+                                              (isInvoiceGenerationAction
+                                                ? !INVOICE_GENERATION_OPEN_STATUSES.has(
+                                                    effectiveProjectStatus,
+                                                  )
+                                                : !action.nextStatus);
 
                                             return (
                                               <button
@@ -1188,6 +1324,26 @@ export default function JobProgressCard({
                                                   ) {
                                                     router.push(
                                                       `/admin/projects/invoice-generation?projectId=${effectiveProjectId}`,
+                                                    );
+                                                    return;
+                                                  }
+
+                                                  if (
+                                                    child.id ===
+                                                    "receive-payment"
+                                                  ) {
+                                                    setFinalPaymentModalOpen(
+                                                      true,
+                                                    );
+                                                    return;
+                                                  }
+
+                                                  if (
+                                                    child.id ===
+                                                    "employee-management"
+                                                  ) {
+                                                    setEmployeeManagementModalOpen(
+                                                      true,
                                                     );
                                                     return;
                                                   }
@@ -1447,6 +1603,32 @@ export default function JobProgressCard({
               }
             : null
         }
+      />
+
+      <FinalPaymentModal
+        open={finalPaymentModalOpen}
+        projectId={effectiveProjectId}
+        onClose={() => setFinalPaymentModalOpen(false)}
+        onConfirmed={() => {
+          setFinalPaymentModalOpen(false);
+          setProjectStatusOverride("employee_management_pending");
+          toast.success("Payment recorded", {
+            description: "Project moved to employee management.",
+          });
+          onRefresh?.();
+        }}
+      />
+
+      <EmployeeManagementModal
+        key={`${effectiveProjectId || "no-project"}-${String(
+          employeeManagementModalOpen,
+        )}`}
+        open={employeeManagementModalOpen}
+        employees={employeeReviewItems}
+        loading={loadingDetails}
+        saving={employeeManagementSaving}
+        onClose={() => setEmployeeManagementModalOpen(false)}
+        onFinish={handleEmployeeManagementFinish}
       />
 
       {/* Finish subtask confirmation modal */}
