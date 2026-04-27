@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Plus, Search, Pencil, MessageSquare, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
-import { createOrGetConversation } from "@/lib/messages"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -218,8 +217,14 @@ export default function Staff() {
     if (!currentUserId) return
     setMessagingId(emp.id)
     try {
-      const convId = await createOrGetConversation(currentUserId, emp.id)
-      localStorage.setItem("pendingConvId", convId)
+      const res = await fetch("/api/messages/conversation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: emp.id }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? "Failed to open conversation.")
+      localStorage.setItem("pendingConvId", json.conversationId)
       router.push("/admin/messages")
     } catch (e) {
       console.error("Failed to open conversation:", e)
@@ -645,7 +650,7 @@ function StaffModal({
                 onChange={onPickPhoto}
                 className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border file:border-gray-200 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-gray-900 hover:file:bg-gray-50"
               />
-              <p className="mt-1 text-xs text-gray-500">Local preview only.</p>
+              <p className="mt-1 text-xs text-gray-500">Preview only — photo upload not yet supported.</p>
             </div>
           </div>
 
