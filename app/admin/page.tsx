@@ -7,27 +7,12 @@ import CurrentJobCard, {
   CurrentJobOption,
 } from "../../components/dashboard/currentJobCard";
 import EmployeesCard from "../../components/dashboard/employeesCard";
-import JobProgressCard from "../../components/dashboard/jobProgressCard";
+import JobProgressCard, {
+  type StepVisualStatus,
+  type ProcessItem,
+} from "../../components/dashboard/jobProgressCard";
 import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
-import JobNumberCard from "@/components/jobNumberCard";
 import NotificationsCard from "@/components/dashboard/notificationsCard";
-
-type StepVisualStatus = "done" | "active" | "pending";
-
-type ProcessDetail = {
-  employees: string[];
-  estimatedHours: string;
-};
-
-type ProcessItem = {
-  id: string;
-  title: string;
-  status: StepVisualStatus;
-  startLabel: string;
-  endLabel: string;
-  children?: ProcessItem[];
-  detail?: ProcessDetail;
-};
 
 type RawProject = {
   id: string;
@@ -290,9 +275,10 @@ function getCurrentWorkflowIndex(status: string) {
 
   if (index >= 0) return index;
 
-  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length;
-  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 1;
-  if (normalized === "completed") return WORKFLOW_STEPS.length + 2;
+  if (normalized === "downpayment_pending") return WORKFLOW_STEPS.length;
+  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length + 1;
+  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 2;
+  if (normalized === "completed") return WORKFLOW_STEPS.length + 3;
   if (normalized === "cancelled") return -2;
 
   return 0;
@@ -812,6 +798,7 @@ export default function DashboardPage() {
 
   const [mainTasks, setMainTasks] = useState<Record<string, unknown>[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
 
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
@@ -901,7 +888,7 @@ export default function DashboardPage() {
     }
 
     loadProjectOverview();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, detailsRefreshKey]);
 
   const projectsForSelectedDate = useMemo(() => {
     const matchingProjects = projects.filter((project) =>
@@ -982,14 +969,6 @@ export default function DashboardPage() {
     });
   }
 
-  function handleStartMainTasks() {
-    if (!selectedProjectId) return;
-
-    router.push(
-      `/admin/job-creation/main-task-assignment?projectId=${selectedProjectId}`,
-    );
-  }
-
   function handleDashboardProjectChange(projectId: string) {
     const nextProject = projects.find((project) => project.id === projectId);
 
@@ -1062,7 +1041,7 @@ export default function DashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
-              handleStartMainTasks={handleStartMainTasks}
+              onRefresh={() => setDetailsRefreshKey((k) => k + 1)}
             />
           </div>
 

@@ -4,7 +4,8 @@ import React, { useState, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import DownpaymentModal from "@/components/project-creation/DownpaymentModal";
 
 export type StepVisualStatus = "done" | "active" | "pending";
 
@@ -36,6 +37,7 @@ type Props = {
   toggleProcessRow: (id: string) => void;
   toggleSubtaskRow: (id: string) => void;
   onFinishSubtask?: (subtaskId: string) => Promise<void>;
+  onRefresh?: () => void;
   currentUserId?: string | null;
   className?: string;
 };
@@ -59,8 +61,10 @@ function readProjectStatus(project: unknown): string {
   if (!project || typeof project !== "object") return "";
 
   const record = project as Record<string, unknown>;
+  const rawStatus = record.rawStatus;
   const status = record.status;
 
+  if (typeof rawStatus === "string" && rawStatus) return rawStatus;
   return typeof status === "string" ? status : "";
 }
 
@@ -158,6 +162,56 @@ function GroupProgressRing({
   );
 }
 
+function isStartOfWorkGroup(group: ProcessItem) {
+  return (
+    group.id === "start-of-work" ||
+    group.title.toLowerCase().trim() === "start of work"
+  );
+}
+
+function buildStartOfWorkChildren(group: ProcessItem) {
+  const children = group.children ?? [];
+
+  if (!isStartOfWorkGroup(group)) return children;
+
+  const alreadyHasDownpayment = children.some(
+    (child) => child.id === "manage-downpayment",
+  );
+
+  if (alreadyHasDownpayment) return children;
+
+  const projectKickoffIndex = children.findIndex(
+    (child) => child.id === "project-kickoff",
+  );
+
+  const projectKickoff = children.find(
+    (child) => child.id === "project-kickoff",
+  );
+
+  const downpaymentStep: ProcessItem = {
+    id: "manage-downpayment",
+    title: "Manage Downpayment",
+    status:
+      group.status === "done" || projectKickoff?.status === "done"
+        ? "done"
+        : group.status === "active"
+          ? "active"
+          : "pending",
+    startLabel: "",
+    endLabel: "",
+  };
+
+  if (projectKickoffIndex === -1) {
+    return [downpaymentStep, ...children];
+  }
+
+  return [
+    ...children.slice(0, projectKickoffIndex),
+    downpaymentStep,
+    ...children.slice(projectKickoffIndex),
+  ];
+}
+
 function ProgressSkeleton() {
   return (
     <div className="space-y-2 px-3 py-3">
@@ -198,6 +252,7 @@ export default function JobProgressCard({
   toggleProcessRow,
   toggleSubtaskRow,
   onFinishSubtask,
+  onRefresh,
   currentUserId,
   className = "",
 }: Props) {
@@ -205,7 +260,10 @@ export default function JobProgressCard({
 
   const [startingProject, setStartingProject] = useState(false);
   const [startOfWorkDone, setStartOfWorkDone] = useState(false);
-  const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(null);
+  const [downpaymentModalOpen, setDownpaymentModalOpen] = useState(false);
+  const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(
+    null,
+  );
   const [confirmingFinishTitle, setConfirmingFinishTitle] = useState("");
   const [finishing, setFinishing] = useState(false);
 
@@ -270,12 +328,21 @@ export default function JobProgressCard({
       setConfirmingFinishId(null);
       toast.success("Subtask completed");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to finish subtask.";
+      const message =
+        err instanceof Error ? err.message : "Failed to finish subtask.";
       toast.error("Could not finish subtask", { description: message });
     } finally {
       setFinishing(false);
     }
   }
+
+  const isPastJobCreation = [
+    "downpayment_pending",
+    "ready_to_start",
+    "in_progress",
+    "completed",
+    "cancelled",
+  ].includes(selectedProjectStatus);
 
   const jobCreationDone = processItems.some(
     (item) =>
@@ -304,9 +371,20 @@ export default function JobProgressCard({
             </p>
           </div>
 
-          {navigating ? (
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-gray-400" />
-          ) : null}
+          <div className="flex items-center gap-2">
+            {navigating ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />
+            ) : null}
+            {onRefresh ? (
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loadingDetails}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50">
+                <RefreshCw className={["h-3.5 w-3.5", loadingDetails ? "animate-spin" : ""].join(" ")} />
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -346,23 +424,24 @@ export default function JobProgressCard({
             ) : (
               <div>
                 {processItems.map((group, groupIndex) => {
-                  const hasChildren = Boolean(group.children?.length);
+                  const groupChildren = buildStartOfWorkChildren(group);
+                  const hasChildren = groupChildren.length > 0;
                   const open = openProcessIds.has(group.id);
 
-                  const isStartOfWorkGroup =
-                    group.id === "start-of-work" ||
-                    group.title.toLowerCase().trim() === "start of work";
+                  const currentIsStartOfWorkGroup = isStartOfWorkGroup(group);
 
                   const effectiveGroupStatus: StepVisualStatus =
-                    isStartOfWorkGroup && startOfWorkDone
+                    currentIsStartOfWorkGroup && startOfWorkDone
                       ? "done"
                       : group.status;
 
-                  const doneCount = (group.children ?? []).filter(
-                    (child) => child.status === "done",
-                  ).length;
+                  const doneCount = groupChildren.filter((child) => {
+                    if (child.id === "project-kickoff" && startOfWorkDone)
+                      return true;
+                    return child.status === "done";
+                  }).length;
 
-                  const totalCount = group.children?.length ?? 0;
+                  const totalCount = groupChildren.length;
                   const isJobCreationGroup =
                     group.id === "job-creation" ||
                     group.title.toLowerCase().trim() === "job creation";
@@ -471,7 +550,7 @@ export default function JobProgressCard({
                         leaveTo="opacity-0 -translate-y-1">
                         <div>
                           <div className="mt-1 space-y-0">
-                            {group.children?.map((child) => {
+                            {groupChildren.map((child) => {
                               const isProjectKickoff =
                                 child.id === "project-kickoff";
 
@@ -529,11 +608,7 @@ export default function JobProgressCard({
                                             </span>
                                           </div>
                                         </div>
-
-                                        {/* Empty middle column */}
                                         <div className="col-span-3" />
-
-                                        {/* Navigation button — right-aligned, greyed when done */}
                                         <div className="col-span-3 flex justify-end">
                                           {childRoute ? (
                                             <button
@@ -545,10 +620,10 @@ export default function JobProgressCard({
                                                     : childRoute,
                                                 )
                                               }
-                                              disabled={dim}
+                                              disabled={dim || isPastJobCreation}
                                               className={[
                                                 "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
-                                                dim
+                                                dim || isPastJobCreation
                                                   ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
                                                   : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
                                               ].join(" ")}>
@@ -558,20 +633,71 @@ export default function JobProgressCard({
                                         </div>
                                       </div>
                                     </div>
-                                  ) : child.id === "project-kickoff" ? (
-                                    /* ── Project Kickoff: div wrapper with Start Project button ── */
+                                  ) : child.id === "manage-downpayment" ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
                                       <div className="grid grid-cols-12 items-center gap-3">
-                                        {/* Status icon */}
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
-                                              <StepIcon status={child.status} />
+                                              <StepIcon
+                                                status={effectiveChildStatus}
+                                              />
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="col-span-5 min-w-0">
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <div
+                                              className={[
+                                                "truncate text-sm font-medium",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800",
+                                              ].join(" ")}>
+                                              {child.title}
+                                            </div>
+
+                                            <span
+                                              className={[
+                                                "shrink-0 text-xs",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-400",
+                                              ].join(" ")}>
+                                              {statusLabel(
+                                                effectiveChildStatus,
+                                              )}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="col-span-3" />
+                                        <div className="col-span-3 flex justify-end">
+                                          <button
+                                            type="button"
+                                            onClick={() => setDownpaymentModalOpen(true)}
+                                            disabled={selectedProjectStatus !== "downpayment_pending"}
+                                            className={[
+                                              "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                              selectedProjectStatus === "downpayment_pending"
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
+                                                : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300",
+                                            ].join(" ")}>
+                                            Manage
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : child.id === "project-kickoff" ? (
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                      <div className="grid grid-cols-12 items-center gap-3">
+                                        <div className="col-span-1">
+                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                              <StepIcon status={effectiveChildStatus} />
                                             </span>
                                           </div>
                                         </div>
 
-                                        {/* Title + status label */}
                                         <div className="col-span-5 min-w-0">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
@@ -596,11 +722,7 @@ export default function JobProgressCard({
                                             </span>
                                           </div>
                                         </div>
-
-                                        {/* Empty middle column */}
                                         <div className="col-span-3" />
-
-                                        {/* Start Project button */}
                                         <div className="col-span-3 flex justify-end">
                                           <button
                                             type="button"
@@ -630,10 +752,10 @@ export default function JobProgressCard({
                                       </div>
                                     </div>
                                   ) : (
-                                    /* ── Regular child: div wrapper with optional Finish button ── */
                                     <div
                                       onClick={() => {
-                                        if (hasDetail) toggleSubtaskRow(child.id);
+                                        if (hasDetail)
+                                          toggleSubtaskRow(child.id);
                                       }}
                                       className={[
                                         "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50",
@@ -693,7 +815,9 @@ export default function JobProgressCard({
                                           <div
                                             className={[
                                               "flex items-center justify-end gap-2 text-xs",
-                                              dim ? "text-gray-200" : "text-gray-700",
+                                              dim
+                                                ? "text-gray-200"
+                                                : "text-gray-700",
                                             ].join(" ")}>
                                             <span>{child.endLabel || "-"}</span>
                                             {hasDetail ? (
@@ -772,13 +896,19 @@ export default function JobProgressCard({
 
                                             {onFinishSubtask &&
                                             currentUserId &&
-                                            child.detail?.employeeIds?.includes(currentUserId) &&
+                                            child.detail?.employeeIds?.includes(
+                                              currentUserId,
+                                            ) &&
                                             child.status !== "done" ? (
                                               <button
                                                 type="button"
                                                 onClick={() => {
-                                                  setConfirmingFinishId(child.id);
-                                                  setConfirmingFinishTitle(child.title);
+                                                  setConfirmingFinishId(
+                                                    child.id,
+                                                  );
+                                                  setConfirmingFinishTitle(
+                                                    child.title,
+                                                  );
                                                 }}
                                                 className="ml-auto shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100">
                                                 Finish
@@ -803,6 +933,19 @@ export default function JobProgressCard({
           </div>
         </div>
       </div>
+
+      <DownpaymentModal
+        open={downpaymentModalOpen}
+        projectId={projectId}
+        onClose={() => setDownpaymentModalOpen(false)}
+        onConfirmed={() => {
+          setDownpaymentModalOpen(false);
+          toast.success("Downpayment confirmed", {
+            description: "Project is now ready to start.",
+          });
+          onRefresh?.();
+        }}
+      />
 
       {/* Finish subtask confirmation modal */}
       {confirmingFinishId ? (
