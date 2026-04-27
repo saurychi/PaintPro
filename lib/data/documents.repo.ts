@@ -223,6 +223,20 @@ export async function renameDocument(documentId: string, title: string) {
   await parseResponse<{ ok: boolean }>(response)
 }
 
+export async function moveDocument(documentId: string, folderId: string | null) {
+  const response = await fetch("/api/documents/files", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "move",
+      documentId,
+      folderId,
+    }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
 export async function archiveDocument(documentId: string) {
   const response = await fetch("/api/documents/files", {
     method: "PATCH",
