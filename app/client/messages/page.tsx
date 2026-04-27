@@ -4,7 +4,7 @@ import React, { useMemo, useState, useEffect, useRef } from "react"
 import { Search, MessageSquare } from "lucide-react"
 import { useClientProject } from "../ClientShellClient"
 import { supabase } from "@/lib/supabaseClient"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
 
@@ -31,6 +31,7 @@ type StaffUser = {
   username: string
   role: string
   profile_image_url: string | null
+  assignedTasks?: string // NEW: Holds the tasks they are doing
 }
 
 export default function ClientMessages() {
@@ -63,7 +64,6 @@ export default function ClientMessages() {
     scrollToBottom()
   }, [chatHistory])
 
-  // Load conversations list — also retrieves clientId tied to this project
   const loadConversations = async (selectChatId?: string) => {
     const res = await fetch("/api/messages/project-chat")
     if (!res.ok) { setIsLoading(false); return }
@@ -79,13 +79,11 @@ export default function ClientMessages() {
     setIsLoading(false)
   }
 
-  // Initial load
   useEffect(() => {
     if (!projectId) { setIsLoading(false); return }
     loadConversations()
   }, [projectId])
 
-  // Fetch messages when active chat changes
   useEffect(() => {
     if (!activeChatId) return
     async function loadMessages() {
@@ -95,7 +93,6 @@ export default function ClientMessages() {
     loadMessages()
   }, [activeChatId])
 
-  // Realtime listener for incoming staff replies
   useEffect(() => {
     if (!activeChatId) return
 
@@ -111,7 +108,6 @@ export default function ClientMessages() {
         },
         (payload) => {
           const newMessage = payload.new as Message
-          // Skip messages we sent ourselves (already added optimistically)
           if (newMessage.client_id === clientId) return
           setChatHistory((prev) => {
             if (prev.some((m) => m.id === newMessage.id)) return prev
@@ -191,9 +187,11 @@ export default function ClientMessages() {
     }
   }
 
+  // NEW: Updated to allow searching by task name
   const filteredUsers = availableUsers.filter((u) =>
     u.username.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-    u.role.toLowerCase().includes(userSearchQuery.toLowerCase())
+    u.role.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+    (u.assignedTasks && u.assignedTasks.toLowerCase().includes(userSearchQuery.toLowerCase()))
   )
 
   const activeChat = useMemo(
@@ -221,7 +219,6 @@ export default function ClientMessages() {
       <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
         <div className="flex gap-6 h-full overflow-hidden">
 
-          {/* Conversation Sidebar */}
           <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
             <div className="flex items-center justify-between mb-3 shrink-0">
               <p className="text-sm font-semibold text-gray-900">Conversations</p>
@@ -255,10 +252,8 @@ export default function ClientMessages() {
             </div>
           </aside>
 
-          {/* Chat Area */}
           {activeChat ? (
             <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
-              {/* Header */}
               <div className="p-4 border-b border-gray-200 flex items-center gap-3 shrink-0">
                 <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
                   <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
@@ -272,7 +267,6 @@ export default function ClientMessages() {
                 </div>
               </div>
 
-              {/* Messages List */}
               <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
                 {chatHistory.length === 0 && (
                   <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
@@ -300,7 +294,6 @@ export default function ClientMessages() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Input Area */}
               <div className="p-4 border-t border-gray-200 shrink-0">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
                   <input
@@ -333,16 +326,18 @@ export default function ClientMessages() {
         </div>
       </div>
 
-      {/* New Chat Modal */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
         <DialogContent className="max-w-md bg-white border-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] p-0">
           <DialogHeader className="p-6 pb-4 border-b border-gray-100">
             <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
+            <DialogDescription className="sr-only">
+              Search and select a user to start a new conversation.
+            </DialogDescription>
             <div className="relative mt-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by name or role..."
+                placeholder="Search by name, role, or assigned task..."
                 value={userSearchQuery}
                 onChange={(e) => setUserSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 bg-gray-50 border-0 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00c065]/20"
@@ -373,7 +368,12 @@ export default function ClientMessages() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{user.username}</p>
-                      <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                      
+                      {/* NEW: Displaying the dynamic task assignment */}
+                      <p className="text-xs text-gray-500 truncate capitalize">
+                        {user.assignedTasks || user.role}
+                      </p>
+                      
                     </div>
                   </button>
                 ))}
