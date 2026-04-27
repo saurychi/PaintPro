@@ -13,6 +13,7 @@ import { PieChart, Pie, Cell } from "recharts";
 import JobProgressCard, {
   type ProcessItem,
 } from "@/components/dashboard/jobProgressCard";
+import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
 
 const ACCENT = "#00c065";
@@ -1322,6 +1323,10 @@ export default function AdminProjectsPage() {
     });
   }, [overviewProject, selectedProject, mainTasks]);
 
+  const employeeReviewItems = useMemo(() => {
+    return buildEmployeeReviewItems(mainTasks);
+  }, [mainTasks]);
+
   const projectCodeValue =
     selectedProject?.projectCode || selectedProject?.project_code || "No Code";
 
@@ -1473,6 +1478,7 @@ export default function AdminProjectsPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
+              employeeReviewItems={employeeReviewItems}
               onRefresh={() => setDetailsRefreshKey((k) => k + 1)}
               reviewSummary={reviewSummary}
             />

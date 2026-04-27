@@ -9,6 +9,7 @@ import JobProgressCard, {
 } from "@/components/dashboard/jobProgressCard";
 import DashboardInsightCard from "@/components/dashboard/dashboardInsightCard";
 import PendingDocumentsCard from "@/components/dashboard/pendingDocumentsCard";
+import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -556,6 +557,10 @@ export default function ClientDashboardPage() {
     });
   }, [project, mainTasks]);
 
+  const employeeReviewItems = useMemo(() => {
+    return buildEmployeeReviewItems(mainTasks);
+  }, [mainTasks]);
+
   const pendingDocumentProject = useMemo(() => {
     if (!project) return null;
 
@@ -660,6 +665,7 @@ export default function ClientDashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
+              employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
             />
           </div>

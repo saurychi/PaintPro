@@ -72,7 +72,11 @@ type UserRow = {
   id: string;
   username: string | null;
   email: string | null;
+  phone: string | null;
+  role: string | null;
   specialty: string | null;
+  profile_image_url: string | null;
+  hourly_wage: number | null;
 };
 
 type ParsedEquipment = {
@@ -89,7 +93,11 @@ type AssignedStaffOverviewRow = {
     id: string;
     username: string | null;
     email: string | null;
+    phone: string | null;
+    role: string | null;
     specialty: string | null;
+    profile_image_url: string | null;
+    hourly_wage: number | null;
   } | null;
 };
 
@@ -411,7 +419,9 @@ export async function GET(request: Request) {
     if (userIds.length > 0) {
       const { data: usersData, error: usersError } = await supabaseAdmin
         .from("users")
-        .select("id, username, email, specialty")
+        .select(
+          "id, username, email, phone, role, specialty, profile_image_url, hourly_wage",
+        )
         .in("id", userIds)
         .returns<UserRow[]>();
 
@@ -448,7 +458,11 @@ export async function GET(request: Request) {
               id: user.id,
               username: user.username,
               email: user.email,
+              phone: user.phone,
+              role: user.role,
               specialty: user.specialty,
+              profile_image_url: user.profile_image_url,
+              hourly_wage: user.hourly_wage,
             }
           : null,
       });
