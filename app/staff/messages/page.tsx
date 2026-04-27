@@ -10,7 +10,7 @@ import {
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare } from "lucide-react"
+import { Search, MessageSquare, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
@@ -35,6 +35,7 @@ export default function AdminMessages() {
 
   // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // 1. Get current user
   useEffect(() => {
@@ -114,6 +115,11 @@ export default function AdminMessages() {
     loadMessages()
   }, [activeChatId])
 
+  // Focus input whenever a conversation is opened
+  useEffect(() => {
+    if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
+  }, [activeChatId])
+
   // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
   useEffect(() => {
     if (!currentUserId) return
@@ -179,6 +185,7 @@ export default function AdminMessages() {
       console.error("Error sending message:", error)
     } finally {
       setIsSending(false)
+      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
 
@@ -227,7 +234,24 @@ export default function AdminMessages() {
   )
 
   if (isLoading) {
-    return <div className="p-6 text-gray-500 font-medium">Loading messages...</div>
+    return (
+      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+        <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
+        <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+          <div className="flex gap-6 h-full overflow-hidden">
+            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
+              <p className="text-sm font-semibold text-gray-900 mb-3 shrink-0">Conversations</p>
+              <div className="flex-1 flex items-center justify-center">
+                <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
+              </div>
+            </aside>
+            <div className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm flex items-center justify-center min-w-0">
+              <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -331,15 +355,16 @@ export default function AdminMessages() {
               <div className="p-4 border-t border-gray-200 shrink-0">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
                   <input
+                    ref={inputRef}
                     type="text"
                     placeholder="Enter your message..."
                     className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    disabled={isSending}
                   />
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleSendMessage}
                     disabled={isSending || !inputMessage.trim()}
                     className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
