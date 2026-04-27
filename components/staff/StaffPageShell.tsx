@@ -28,11 +28,11 @@ export default function StaffPageShell({
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-6 top-6 h-32 rounded-[28px] bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_58%),linear-gradient(135deg,rgba(236,253,245,0.92),rgba(255,255,255,0.98)_70%)]"
+        className="pointer-events-none absolute inset-x-6 top-6 h-32 rounded-[28px] bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_58%),linear-gradient(135deg,rgba(236,253,245,0.92),rgba(255,255,255,0.98)_70%)] dark:opacity-10"
       />
 
       <div className="relative flex h-full min-h-0 flex-col">
-        <header className="overflow-hidden rounded-[28px] border border-emerald-100/80 bg-white/90 shadow-[0_18px_48px_rgba(15,23,42,0.06)] backdrop-blur-sm">
+        <header className="overflow-hidden rounded-[28px] border border-emerald-100/80 bg-white/90 shadow-[0_18px_48px_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-gray-700/80 dark:bg-gray-800/90">
           <div className="h-1 w-full bg-[#00c065]" />
 
           <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
