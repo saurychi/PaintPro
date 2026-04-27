@@ -54,6 +54,7 @@ export default function ClientMessages() {
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -93,6 +94,11 @@ export default function ClientMessages() {
       if (res.ok) setChatHistory(await res.json())
     }
     loadMessages()
+  }, [activeChatId])
+
+  // Focus input whenever a conversation is opened
+  useEffect(() => {
+    if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
   // Realtime listener for incoming staff replies
@@ -158,6 +164,7 @@ export default function ClientMessages() {
       console.error("Error sending message:", error)
     } finally {
       setIsSending(false)
+      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
 
@@ -321,15 +328,16 @@ export default function ClientMessages() {
               <div className="p-4 border-t border-gray-200 shrink-0">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
                   <input
+                    ref={inputRef}
                     type="text"
                     placeholder="Enter your message..."
                     className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    disabled={isSending}
                   />
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleSendMessage}
                     disabled={isSending || !inputMessage.trim()}
                     className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
