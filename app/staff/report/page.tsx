@@ -53,7 +53,7 @@ export default function StaffReportPage() {
                   <div className="text-base font-semibold text-gray-900">
                     {tile.title}
                   </div>
-                  <div className="mt-1 line-clamp-2 text-xs font-normal leading-[1.35] text-gray-900/65">
+                  <div className="mt-1 line-clamp-2 text-xs font-normal leading-[1.35] text-gray-900/65 dark:text-gray-400">
                     {tile.subtitle}
                   </div>
                 </div>
