@@ -5,46 +5,52 @@ import { CalendarDays, ChevronLeft, ChevronRight, Filter, Search } from "lucide-
 
 import StaffPageShell from "@/components/staff/StaffPageShell";
 import {
-  getAttendancePrimaryDate,
-  getAttendanceStatusLabel,
-  type StaffAttendanceRecord,
-  type StaffAttendanceStatus,
-} from "@/lib/staff/attendance";
+  getPayrollPrimaryDate,
+  getPayrollStatusLabel,
+  type StaffPayrollRecord,
+  type StaffPayrollStatus,
+} from "@/lib/staff/payroll";
 import { cn } from "@/lib/utils";
 
-type AttendanceResponse = {
-  records?: StaffAttendanceRecord[];
+type PayrollResponse = {
+  records?: StaffPayrollRecord[];
   error?: string;
   details?: string;
 };
 
-type StatusFilter = "ALL" | StaffAttendanceStatus;
+type StatusFilter = "ALL" | StaffPayrollStatus;
 
 const STATUS_META: Record<
-  StaffAttendanceStatus,
+  StaffPayrollStatus,
   { label: string; pill: string; card: string }
 > = {
-  ASSIGNED: {
-    label: "Assigned",
-    pill: "border border-slate-400/25 bg-slate-500/[0.08] text-slate-900",
-    card: "border-slate-300 bg-slate-50",
-  },
-  UPCOMING: {
-    label: "Upcoming",
-    pill: "border border-sky-500/20 bg-sky-500/15 text-sky-950",
-    card: "border-sky-500/25 bg-sky-500/[0.06]",
-  },
-  IN_PROGRESS: {
-    label: "In Progress",
-    pill: "border border-amber-500/20 bg-amber-500/15 text-orange-950",
-    card: "border-amber-500/25 bg-amber-500/[0.08]",
-  },
-  COMPLETED: {
-    label: "Completed",
+  REVIEWED: {
+    label: "Reviewed",
     pill: "border border-green-500/20 bg-green-500/15 text-green-950",
     card: "border-green-500/25 bg-green-500/[0.06]",
   },
+  UNREVIEWED: {
+    label: "Unreviewed",
+    pill: "border border-amber-500/20 bg-amber-500/15 text-orange-950",
+    card: "border-amber-500/25 bg-amber-500/[0.08]",
+  },
 };
+
+function formatMoney(amount?: number | null) {
+  if (amount == null || !Number.isFinite(amount)) return "--";
+
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatHours(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "--";
+  return `${Math.round(value * 10) / 10}h`;
+}
 
 function formatDateTime(value?: string | null) {
   if (!value) return "--";
@@ -61,11 +67,6 @@ function formatDateTime(value?: string | null) {
   });
 }
 
-function formatHours(value?: number | null) {
-  if (value == null || !Number.isFinite(value)) return "--";
-  return `${Math.round(value * 10) / 10}h`;
-}
-
 function toDateInputValue(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -74,8 +75,8 @@ function toDateInputValue(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function getDateIso(record: StaffAttendanceRecord) {
-  const raw = getAttendancePrimaryDate(record);
+function getDateIso(record: StaffPayrollRecord) {
+  const raw = getPayrollPrimaryDate(record);
   if (!raw) return "";
 
   const date = new Date(raw);
@@ -84,35 +85,37 @@ function getDateIso(record: StaffAttendanceRecord) {
   return date.toISOString().slice(0, 10);
 }
 
-export default function StaffAttendanceReportPage() {
+export default function StaffReportPaymentPage() {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("ALL");
-  const [fromISO, setFromISO] = useState(() => toDateInputValue(new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)));
+  const [fromISO, setFromISO] = useState(
+    () => toDateInputValue(new Date(Date.now() - 1000 * 60 * 60 * 24 * 90)),
+  );
   const [toISO, setToISO] = useState(() => toDateInputValue());
+  const [status, setStatus] = useState<StatusFilter>("ALL");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [records, setRecords] = useState<StaffAttendanceRecord[]>([]);
+  const [records, setRecords] = useState<StaffPayrollRecord[]>([]);
 
   const pageSize = 8;
 
   useEffect(() => {
     let alive = true;
 
-    async function loadAttendance() {
+    async function loadPayroll() {
       try {
         setLoading(true);
         setLoadError(null);
 
-        const response = await fetch("/api/staff/attendance", {
+        const response = await fetch("/api/staff/payroll", {
           cache: "no-store",
         });
-        const data = (await response.json()) as AttendanceResponse;
+        const data = (await response.json()) as PayrollResponse;
 
         if (!response.ok) {
           throw new Error(
             [data?.error, data?.details].filter(Boolean).join(": ") ||
-              "Failed to load attendance records.",
+              "Failed to load payroll records.",
           );
         }
 
@@ -125,14 +128,14 @@ export default function StaffAttendanceReportPage() {
         setLoadError(
           error instanceof Error
             ? error.message
-            : "Failed to load attendance records.",
+            : "Failed to load payroll records.",
         );
       } finally {
         if (alive) setLoading(false);
       }
     }
 
-    loadAttendance();
+    loadPayroll();
 
     return () => {
       alive = false;
@@ -158,10 +161,9 @@ export default function StaffAttendanceReportPage() {
           const haystack = [
             record.projectCode,
             record.projectTitle,
-            record.mainTaskName,
-            record.subTaskName,
-            record.siteAddress || "",
-            getAttendanceStatusLabel(record.status),
+            record.reviewedByName || "",
+            record.note || "",
+            getPayrollStatusLabel(record.status),
           ]
             .join(" ")
             .toLowerCase();
@@ -173,14 +175,24 @@ export default function StaffAttendanceReportPage() {
   }, [fromISO, query, records, status, toISO]);
 
   const totals = useMemo(() => {
-    const count = (targetStatus: StaffAttendanceStatus) =>
-      filtered.filter((record) => record.status === targetStatus).length;
+    const reviewed = filtered.filter((record) => record.status === "REVIEWED").length;
+    const unreviewed = filtered.filter(
+      (record) => record.status === "UNREVIEWED",
+    ).length;
+    const totalAmount = filtered.reduce(
+      (sum, record) => sum + (record.salaryAmount ?? 0),
+      0,
+    );
+    const totalHours = filtered.reduce(
+      (sum, record) => sum + (record.totalEstimatedHours ?? 0),
+      0,
+    );
 
     return {
-      assigned: count("ASSIGNED"),
-      upcoming: count("UPCOMING"),
-      inProgress: count("IN_PROGRESS"),
-      completed: count("COMPLETED"),
+      reviewed,
+      unreviewed,
+      totalAmount,
+      totalHours,
     };
   }, [filtered]);
 
@@ -206,8 +218,8 @@ export default function StaffAttendanceReportPage() {
 
   return (
     <StaffPageShell
-      title="Attendance"
-      subtitle="Showing your real database-backed task assignments, project schedule windows, and completion state."
+      title="Payroll"
+      subtitle="Showing your saved payroll reviews from employee performance records."
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="relative h-[42px] w-[240px] rounded-full border border-gray-200 bg-white min-[921px]:w-[290px]">
@@ -219,7 +231,7 @@ export default function StaffAttendanceReportPage() {
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="Search project or task..."
+              placeholder="Search project or reviewer..."
             />
           </div>
 
@@ -255,7 +267,7 @@ export default function StaffAttendanceReportPage() {
           <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5">
             <div className="inline-flex items-center gap-2 text-xs font-medium text-gray-500">
               <Filter className="h-3.5 w-3.5" />
-              Status
+              Review status
             </div>
 
             <select
@@ -267,10 +279,8 @@ export default function StaffAttendanceReportPage() {
               }}
             >
               <option value="ALL">All</option>
-              <option value="ASSIGNED">Assigned</option>
-              <option value="UPCOMING">Upcoming</option>
-              <option value="IN_PROGRESS">In Progress</option>
-              <option value="COMPLETED">Completed</option>
+              <option value="REVIEWED">Reviewed</option>
+              <option value="UNREVIEWED">Unreviewed</option>
             </select>
           </div>
         </div>
@@ -281,48 +291,40 @@ export default function StaffAttendanceReportPage() {
         <div
           className={cn(
             "min-h-[88px] rounded-[14px] border bg-white p-3.5",
-            STATUS_META.ASSIGNED.card,
+            STATUS_META.REVIEWED.card,
           )}
         >
-          <div className="text-xs font-medium text-gray-900/70">Assigned</div>
+          <div className="text-xs font-medium text-gray-900/70">Reviewed</div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
-            {totals.assigned}
+            {totals.reviewed}
           </div>
         </div>
 
         <div
           className={cn(
             "min-h-[88px] rounded-[14px] border bg-white p-3.5",
-            STATUS_META.UPCOMING.card,
+            STATUS_META.UNREVIEWED.card,
           )}
         >
-          <div className="text-xs font-medium text-gray-900/70">Upcoming</div>
+          <div className="text-xs font-medium text-gray-900/70">Unreviewed</div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
-            {totals.upcoming}
+            {totals.unreviewed}
           </div>
         </div>
 
-        <div
-          className={cn(
-            "min-h-[88px] rounded-[14px] border bg-white p-3.5",
-            STATUS_META.IN_PROGRESS.card,
-          )}
-        >
-          <div className="text-xs font-medium text-gray-900/70">In Progress</div>
-          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
-            {totals.inProgress}
+        <div className="min-h-[88px] rounded-[14px] border border-gray-200 bg-white p-3.5">
+          <div className="text-xs font-medium text-gray-900/70">Total Payroll</div>
+          <div className="mt-2.5 text-2xl font-semibold text-gray-900">
+            {formatMoney(totals.totalAmount)}
           </div>
         </div>
 
-        <div
-          className={cn(
-            "min-h-[88px] rounded-[14px] border bg-white p-3.5",
-            STATUS_META.COMPLETED.card,
-          )}
-        >
-          <div className="text-xs font-medium text-gray-900/70">Completed</div>
+        <div className="min-h-[88px] rounded-[14px] border border-gray-200 bg-white p-3.5">
+          <div className="text-xs font-medium text-gray-900/70">
+            Estimated Hours
+          </div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
-            {totals.completed}
+            {formatHours(totals.totalHours)}
           </div>
         </div>
       </section>
@@ -330,7 +332,7 @@ export default function StaffAttendanceReportPage() {
       <section className="mt-4">
         <div className="flex flex-wrap items-center justify-between gap-[14px]">
           <div className="text-sm font-semibold text-gray-900">
-            Attendance Records
+            Payroll Records
           </div>
           <div className="text-xs font-normal text-gray-500">
             Showing <b>{pageRows.length}</b> of <b>{filtered.length}</b>
@@ -340,7 +342,7 @@ export default function StaffAttendanceReportPage() {
         <div className="mt-2.5 overflow-hidden rounded-[14px] border border-gray-200 bg-white">
           {loading ? (
             <div className="px-4 py-8 text-center text-sm text-gray-500">
-              Loading attendance records...
+              Loading payroll records...
             </div>
           ) : loadError ? (
             <div className="px-4 py-8 text-center">
@@ -354,14 +356,15 @@ export default function StaffAttendanceReportPage() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <div className="min-w-[1040px]">
-                  <div className="grid grid-cols-[1.25fr_1.35fr_0.85fr_1.1fr_0.9fr_0.65fr] items-center border-b border-gray-200 px-3 py-3 text-xs font-medium tracking-[0.02em] text-gray-500">
+                <div className="min-w-[1120px]">
+                  <div className="grid grid-cols-[1.35fr_1fr_0.8fr_1fr_0.65fr_0.7fr_0.85fr] items-center border-b border-gray-200 px-3 py-3 text-xs font-medium tracking-[0.02em] text-gray-500">
                     <div className="min-w-0">PROJECT</div>
-                    <div className="min-w-0">TASK</div>
+                    <div className="min-w-0">REVIEWER</div>
                     <div>STATUS</div>
-                    <div>SCHEDULE</div>
-                    <div>PROJECT</div>
+                    <div>REVIEW DATE</div>
                     <div className="text-right">HOURS</div>
+                    <div className="text-right">RATE</div>
+                    <div className="text-right">AMOUNT</div>
                   </div>
 
                   {pageRows.map((record) => {
@@ -370,7 +373,7 @@ export default function StaffAttendanceReportPage() {
                     return (
                       <div
                         key={record.id}
-                        className="grid grid-cols-[1.25fr_1.35fr_0.85fr_1.1fr_0.9fr_0.65fr] items-center border-b border-slate-100 px-3 py-3.5 text-sm font-normal last:border-b-0"
+                        className="grid grid-cols-[1.35fr_1fr_0.8fr_1fr_0.65fr_0.7fr_0.85fr] items-center border-b border-slate-100 px-3 py-3.5 text-sm font-normal last:border-b-0"
                       >
                         <div className="min-w-0">
                           <div className="truncate font-semibold text-gray-900">
@@ -378,16 +381,15 @@ export default function StaffAttendanceReportPage() {
                           </div>
                           <div className="mt-1 truncate text-xs font-normal text-gray-500">
                             {record.projectCode}
-                            {record.siteAddress ? ` / ${record.siteAddress}` : ""}
                           </div>
                         </div>
 
                         <div className="min-w-0">
                           <div className="truncate font-semibold text-gray-900">
-                            {record.mainTaskName}
+                            {record.reviewedByName || "Not assigned"}
                           </div>
                           <div className="mt-1 truncate text-xs font-normal text-gray-500">
-                            {record.subTaskName}
+                            {record.note?.trim() || "No review note"}
                           </div>
                         </div>
 
@@ -403,27 +405,22 @@ export default function StaffAttendanceReportPage() {
                         </div>
 
                         <div className="text-[13px] font-normal text-gray-700">
-                          <div>{formatDateTime(record.scheduledStartDatetime)}</div>
+                          <div>{formatDateTime(record.reviewedAt)}</div>
                           <div className="mt-1 text-xs text-gray-500">
-                            to {formatDateTime(record.scheduledEndDatetime)}
+                            updated {formatDateTime(record.updatedAt)}
                           </div>
                         </div>
 
-                        <div className="text-[13px] font-normal text-gray-700">
-                          <div className="truncate font-medium text-gray-900">
-                            {record.projectStatus
-                              ? record.projectStatus.replace(/_/g, " ")
-                              : "--"}
-                          </div>
-                          <div className="mt-1 text-xs text-gray-500">
-                            schedule {record.scheduleStatus
-                              ? record.scheduleStatus.replace(/_/g, " ")
-                              : "--"}
-                          </div>
+                        <div className="text-right text-[13px] font-normal text-gray-700">
+                          {formatHours(record.totalEstimatedHours)}
                         </div>
 
-                        <div className="truncate text-right text-[13px] font-normal text-gray-700">
-                          {formatHours(record.estimatedHours)}
+                        <div className="text-right text-[13px] font-normal text-gray-700">
+                          {formatMoney(record.hourlyWage)}
+                        </div>
+
+                        <div className="text-right text-[13px] font-semibold text-gray-900">
+                          {formatMoney(record.salaryAmount)}
                         </div>
                       </div>
                     );
@@ -434,10 +431,10 @@ export default function StaffAttendanceReportPage() {
               {filtered.length === 0 && (
                 <div className="px-3 py-6 text-center">
                   <div className="text-[15px] font-semibold text-gray-900">
-                    No attendance records yet
+                    No payroll records yet
                   </div>
                   <div className="mt-1.5 text-[13px] font-normal text-gray-500">
-                    Your assignment and project schedule records will appear here once work is planned.
+                    Saved employee performance reviews for your work will appear here.
                   </div>
                 </div>
               )}

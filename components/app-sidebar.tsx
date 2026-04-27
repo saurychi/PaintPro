@@ -113,8 +113,32 @@ const adminItems: Item[] = [
 ];
 
 const staffItems: Item[] = [
-  { key: "dashboard", title: "Dashboard", url: "/staff", icon: Home },
-  { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
+  {
+    key: "dashboard",
+    title: "Dashboard",
+    url: "/staff",
+    icon: Home,
+  },
+  {
+    key: "report",
+    title: "Report",
+    url: "/staff/report",
+    icon: BarChart3,
+    subItems: [
+      {
+        key: "staff-report-attendance",
+        title: "Attendance",
+        url: "/staff/report/attendance",
+        matchUrls: ["/staff/report/attendance"],
+      },
+      {
+        key: "staff-report-payroll",
+        title: "Payroll",
+        url: "/staff/report/payroll",
+        matchUrls: ["/staff/report/payroll"],
+      },
+    ],
+  },
   {
     key: "messages",
     title: "Messages",
@@ -250,7 +274,10 @@ export function AppSidebar({ role }: AppSidebarProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [openMenus, setOpenMenus] = React.useState<Record<string, boolean>>({
     dashboard:
-      pathname === "/admin" || pathname.startsWith("/admin/job-creation"),
+      pathname === "/admin" ||
+      pathname.startsWith("/admin/job-creation") ||
+      pathname === "/staff",
+    report: pathname.startsWith("/staff/report"),
     documents:
       pathname.startsWith("/admin/documents") ||
       pathname.startsWith("/client/documents"),
