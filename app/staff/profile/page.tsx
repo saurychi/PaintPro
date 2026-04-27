@@ -1,176 +1,187 @@
-"use client";
+"use client"
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react"
+import { supabase } from "@/lib/supabaseClient"
+import { useRouter } from "next/navigation"
 
-export default function StaffProfile() {
-  const [showReport, setShowReport] = useState(false);
-
-  // Mocked Logged-in User Profile
-  const profile = {
-    id: "21700254",
-    name: "Marco Dela Cruz",
-    email: "marcodelacruz@gmail.com",
-    phone: "09662749655",
-    photoUrl: "/paint_pro_logo.png",
-    metrics: [85, 60, 40, 55, 90, 35],
-  };
-
-  return (
-    <div className="flex min-h-screen bg-white">
-      <main className="flex-1 overflow-auto p-8">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-bold text-[#1a1a4b]">My Profile</h1>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            {/* Profile Card */}
-            <div className="px-6 py-4">
-              <div className="text-sm font-medium text-gray-700 mb-2">Profile Details</div>
-              <div className="border rounded-lg p-4 flex items-center gap-4 bg-white">
-                <img src={profile.photoUrl} alt={profile.name} className="w-16 h-16 rounded-md object-cover border" />
-                <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
-                  <span className="text-gray-500">ID#:</span>
-                  <span className="text-gray-800 font-medium">{profile.id}</span>
-                  <span className="text-gray-500">Name:</span>
-                  <span className="text-gray-800 font-medium">{profile.name}</span>
-                  <span className="text-gray-500">Email:</span>
-                  <span className="text-gray-800 font-medium">{profile.email}</span>
-                  <span className="text-gray-500">Phone No.:</span>
-                  <span className="text-gray-800 font-medium">{profile.phone}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Work Section */}
-            <div className="px-6 pb-6">
-              <div className="text-sm font-medium text-gray-700 mb-2">Performance & Work</div>
-              <div className="border rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-white rounded-lg p-4">
-                  <RadarChart values={profile.metrics} />
-                </div>
-
-                <div className="bg-white rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-semibold text-gray-700">Recent Work Timeline</span>
-                  </div>
-                  <div className="space-y-3">
-                    {[1,2,3,4].map((i) => (
-                      <div key={i} className="border rounded-lg p-3 flex items-center justify-between">
-                        <span className="text-sm text-gray-700">Dawn House</span>
-                        <button
-                            onClick={() => setShowReport(true)}
-                            className="text-xs px-3 py-1 rounded-full bg-[#dcfce7] text-[#166534] hover:bg-[#bbf7d0]"
-                        >
-                            see report
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {showReport && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm grid place-items-center z-50">
-                <div className="bg-white rounded-lg shadow-lg w-[90%] max-w-lg p-6">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-xl font-bold text-gray-800">Job Report: Dawn House</h3>
-                        <button onClick={() => setShowReport(false)} className="text-gray-400 hover:text-gray-600">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        </button>
-                    </div>
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase">Date</label>
-                                <p className="text-sm font-medium">June 15, 2025</p>
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase">Duration</label>
-                                <p className="text-sm font-medium">6 Hours</p>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Description</label>
-                            <p className="text-sm text-gray-600">
-                                Completed exterior wall preparation and first coat application.
-                                Encountered minor dampness on the north wall, treated with sealer.
-                            </p>
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Materials Used</label>
-                            <ul className="text-sm text-gray-600 list-disc pl-4 mt-1">
-                                <li>20L Weather Shield Paint (White)</li>
-                                <li>5L Primer/Sealer</li>
-                                <li>Sandpaper (Grade 120)</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div className="mt-6 flex justify-end">
-                        <button onClick={() => setShowReport(false)} className="bg-[#00c065] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#00a054]">
-                            Close Report
-                        </button>
-                    </div>
-                </div>
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
-  );
+type DbUser = {
+  id: string
+  username: string | null
+  email: string | null
+  phone: string | null
+  specialty: string | string[] | null
+  status: string | null
 }
 
-function RadarChart({ values }: { values: number[] }) {
-  const size = 220;
-  const center = size / 2;
-  const radius = 90;
-  const axes = ["Work Quality", "Time Efficiency", "Teamwork", "Work Ethic", "Tool Handling", "Compliance"];
+function parseSpecialties(value: string | string[] | null): string[] {
+  if (!value) return []
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
 
-  const points = values.map((v, i) => {
-    const angle = (Math.PI * 2 * i) / axes.length - Math.PI / 2; // start at top
-    const r = (v / 100) * radius;
-    const x = center + r * Math.cos(angle);
-    const y = center + r * Math.sin(angle);
-    return `${x},${y}`;
-  }).join(" ");
+const ACCENT = "#00c065"
 
-  const grid = Array.from({ length: 4 }, (_, idx) => (idx + 1) * (radius / 4));
+export default function StaffProfile() {
+  const router = useRouter()
+  const [profile, setProfile] = useState<DbUser | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      const { data, error: sessErr } = await supabase.auth.getSession()
+      if (sessErr) console.error(sessErr)
+
+      const session = data.session
+      if (!session) {
+        router.replace("/auth/signin")
+        return
+      }
+
+      try {
+        const { data: row, error: dbErr } = await supabase
+          .from("users")
+          .select("id, username, email, phone, specialty, status")
+          .eq("id", session.user.id)
+          .maybeSingle()
+
+        if (dbErr) throw dbErr
+        if (!row) {
+          router.replace("/auth/invite?reason=not_invited")
+          return
+        }
+
+        setProfile({ ...row, email: row.email ?? session.user.email ?? null })
+      } catch (e: any) {
+        setError(e?.message ?? "Failed to load profile.")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    load()
+  }, [router])
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white px-6">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div
+            className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200"
+            style={{ borderTopColor: ACCENT }}
+          />
+          <p className="text-sm text-gray-600">Loading profile…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !profile) {
+    return (
+      <div className="p-6">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+          {error ?? "Profile not found."}
+        </div>
+      </div>
+    )
+  }
+
+  const specialties = parseSpecialties(profile.specialty)
+  const displayName = profile.username ?? "Unnamed"
 
   return (
-    <svg width={size} height={size} className="mx-auto block">
-      {/* axes */}
-      {axes.map((_, i) => {
-        const angle = (Math.PI * 2 * i) / axes.length - Math.PI / 2;
-        const x = center + radius * Math.cos(angle);
-        const y = center + radius * Math.sin(angle);
-        return <line key={i} x1={center} y1={center} x2={x} y2={y} stroke="#e5e7eb" />;
-      })}
+    <div className="p-6">
+      <h1 className="text-2xl font-semibold text-gray-900">My Profile</h1>
 
-      {/* concentric polygons */}
-      {grid.map((r, gi) => {
-        const ringPoints = axes.map((_, i) => {
-          const angle = (Math.PI * 2 * i) / axes.length - Math.PI / 2;
-          const x = center + r * Math.cos(angle);
-          const y = center + r * Math.sin(angle);
-          return `${x},${y}`;
-        }).join(" ");
-        return <polygon key={gi} points={ringPoints} fill="none" stroke="#e5e7eb" />;
-      })}
+      <div className="mt-6 space-y-4">
+        {/* Profile card */}
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
+          <div className="p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ACCENT }} />
+              <span className="text-sm font-semibold text-gray-900">Profile</span>
+            </div>
 
-      {/* value polygon */}
-      <polygon points={points} fill="#93c5fd55" stroke="#60a5fa" />
+            <div className="rounded-lg border border-gray-200 bg-white">
+              <div className="px-4 py-4">
+                <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
+                  <span className="text-sm text-gray-500">Username</span>
+                  <span className="text-sm font-semibold text-gray-900">{displayName}</span>
+                </div>
+              </div>
 
-      {/* labels */}
-      {axes.map((label, i) => {
-        const angle = (Math.PI * 2 * i) / axes.length - Math.PI / 2;
-        const x = center + (radius + 18) * Math.cos(angle);
-        const y = center + (radius + 18) * Math.sin(angle);
-        return (
-          <text key={label} x={x} y={y} textAnchor="middle" className="fill-gray-500 text-[10px]">{label}</text>
-        );
-      })}
-    </svg>
-  );
+              <div className="h-px bg-gray-200" />
+
+              <div className="px-4 py-4">
+                <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
+                  <span className="text-sm text-gray-500">Email</span>
+                  <span className="text-sm font-semibold text-gray-900">{profile.email ?? "—"}</span>
+                </div>
+              </div>
+
+              <div className="h-px bg-gray-200" />
+
+              <div className="px-4 py-4">
+                <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
+                  <span className="text-sm text-gray-500">Phone</span>
+                  <span className="text-sm font-semibold text-gray-900">
+                    {profile.phone ?? (
+                      <span className="text-gray-400">
+                        Not set —{" "}
+                        <a href="/staff/settings" className="text-[#00c065] hover:underline underline-offset-2">
+                          add in Settings
+                        </a>
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {specialties.length > 0 && (
+                <>
+                  <div className="h-px bg-gray-200" />
+                  <div className="px-4 py-4">
+                    <div className="flex max-w-[560px] flex-wrap items-start gap-3">
+                      <span className="w-[160px] shrink-0 text-sm text-gray-500">Specialties</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {specialties.map((s) => (
+                          <span
+                            key={s}
+                            className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700"
+                          >
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Performance placeholder */}
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
+          <div className="p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ACCENT }} />
+              <span className="text-sm font-semibold text-gray-900">Performance & Work</span>
+            </div>
+
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-8 text-center">
+              <p className="text-sm text-gray-500">
+                Performance data and work history will appear here once reports are submitted.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }

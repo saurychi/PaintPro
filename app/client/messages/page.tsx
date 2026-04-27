@@ -1,317 +1,398 @@
-"use client";
+"use client"
 
-import { useMemo, useState } from "react";
-import styles from "./messages.module.css";
-import { cn } from "@/lib/utils";
+import React, { useMemo, useState, useEffect, useRef } from "react"
+import { 
+  fetchConversations, 
+  fetchMessages, 
+  postMessage,
+  fetchAvailableUsers,
+  createOrGetConversation,
+  markConversationAsRead,
+  type Message 
+} from "@/lib/messages"
+import { supabase } from '@/lib/supabaseClient'
+import { Search } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+const ACCENT = "#00c065"
 
-import {
-  Search,
-  MoreVertical,
-  Paperclip,
-  SendHorizonal,
-} from "lucide-react";
+export default function ClientMessages() {
+  // UI State
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [inputMessage, setInputMessage] = useState("")
+  const [isSending, setIsSending] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  
+  // Data State
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<any[]>([]) 
+  const [chatHistory, setChatHistory] = useState<Message[]>([])
 
-type Role = "Client" | "Project Manager";
+  // New Chat Modal State
+  const [isNewChatOpen, setIsNewChatOpen] = useState(false)
+  const [availableUsers, setAvailableUsers] = useState<any[]>([])
+  const [userSearchQuery, setUserSearchQuery] = useState("")
+  const [isCreatingChat, setIsCreatingChat] = useState(false)
 
-type Thread = {
-  id: string;
-  title: string; // display name
-  subtitle: string; // role label
-  preview: string;
-  lastSeen: string; // e.g. "5min ago"
-  unread: boolean;
-  unreadCount?: number;
-  avatarLetter: string;
-  avatarColor?: "pink" | "green" | "gray";
-};
+  // Auto-Scroll Ref
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
-type Message = {
-  id: string;
-  threadId: string;
-  sender: "me" | "them";
-  text: string;
-  time: string; // e.g. "5min ago"
-  dayLabel?: string; // e.g. "Today"
-};
+  // 1. Get current user
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) setCurrentUserId(user.id)
+    }
+    getUser()
+  }, [])
 
-export default function MessagesPage() {
-  // mock threads (replace with Firestore later)
-  const threads: Thread[] = useMemo(
-    () => [
-      {
-        id: "t1",
-        title: "Client",
-        subtitle: "Client",
-        preview: "Client: The amount of paint needed did not ex...",
-        lastSeen: "5min ago",
-        unread: true,
-        unreadCount: 1,
-        avatarLetter: "C",
-        avatarColor: "pink",
-      },
-      {
-        id: "t2",
-        title: "Marco Dela Cruz",
-        subtitle: "Client",
-        preview: "You: yes thats okay",
-        lastSeen: "5min ago",
-        unread: false,
-        avatarLetter: "M",
-        avatarColor: "gray",
-      },
-      {
-        id: "t3",
-        title: "Ramon Santos",
-        subtitle: "Client",
-        preview: "Ramon Santos: sir i have an urgency and i cur...",
-        lastSeen: "5min ago",
-        unread: false,
-        avatarLetter: "R",
-        avatarColor: "gray",
-      },
-    ],
-    []
-  );
+  // 2. Auto-Scroll to bottom function
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
 
-  // mock messages (replace with Firestore later)
-  const allMessages: Message[] = useMemo(
-    () => [
-      {
-        id: "m1",
-        threadId: "t1",
-        sender: "them",
-        text: "we changed the parts you mentioned",
-        time: "5min ago",
-        dayLabel: "Today",
-      },
-      { id: "m2", threadId: "t1", sender: "me", text: "thank you", time: "5min ago" },
-      { id: "m3", threadId: "t1", sender: "them", text: "welcome", time: "5min ago" },
-      {
-        id: "m4",
-        threadId: "t1",
-        sender: "me",
-        text: "is the amount of paint okay?",
-        time: "5min ago",
-      },
-      {
-        id: "m5",
-        threadId: "t1",
-        sender: "them",
-        text: "The amount of paint needed did not exceed, so its okay",
-        time: "5min ago",
-      },
-    ],
-    []
-  );
+  useEffect(() => {
+    scrollToBottom()
+  }, [chatHistory])
 
-  const [query, setQuery] = useState("");
-  const [activeThreadId, setActiveThreadId] = useState<string>(threads[0]?.id ?? "");
-  const [draft, setDraft] = useState("");
+  // 3. Helper function to load/refresh conversations
+  const loadConversations = async (userId: string, selectChatId?: string) => {
+    const data = await fetchConversations(userId)
+    const mappedConvos = data.map((cp: any) => {
+      const lastMsg = cp.latest_message
+      const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
+      const lastMsgTime = lastMsg ? new Date(lastMsg.created_at).getTime() : 0
+      const isUnread = lastMsgTime > lastReadAt
 
-  const filteredThreads = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return threads;
-    return threads.filter((t) => {
-      return (
-        t.title.toLowerCase().includes(q) ||
-        t.preview.toLowerCase().includes(q) ||
-        t.subtitle.toLowerCase().includes(q)
-      );
-    });
-  }, [threads, query]);
+      return {
+        id: cp.conversation_id,
+        name: cp.users?.username || "Unknown User",
+        role: cp.users?.role || "Staff",
+        profile_image_url: cp.users?.profile_image_url || null,
+        lastMessage: lastMsg ? lastMsg.content : "Say hello!", 
+        unread: isUnread,
+        lastActivity: lastMsgTime
+      }
+    })
 
-  const activeThread = useMemo(
-    () => threads.find((t) => t.id === activeThreadId) ?? threads[0],
-    [threads, activeThreadId]
-  );
+    mappedConvos.sort((a: any, b: any) => b.lastActivity - a.lastActivity)
 
-  const activeMessages = useMemo(
-    () => allMessages.filter((m) => m.threadId === activeThreadId),
-    [allMessages, activeThreadId]
-  );
+    setConversations(mappedConvos)
+    
+    if (selectChatId) {
+      setActiveChatId(selectChatId)
+    } else if (mappedConvos.length > 0 && !activeChatId) {
+      setActiveChatId(mappedConvos[0].id)
+    }
+    setIsLoading(false)
+  }
 
-  const onSelectThread = (threadId: string) => {
-    setActiveThreadId(threadId);
-  };
+  // 4. Initial Load
+  useEffect(() => {
+    if (currentUserId) loadConversations(currentUserId)
+  }, [currentUserId])
 
-  const onSendMessage = () => {
-    const text = draft.trim();
-    if (!text) return;
+  // 5. When user CLICKS a chat, Mark as Read in DB
+  useEffect(() => {
+    if (activeChatId && currentUserId) {
+      markConversationAsRead(activeChatId, currentUserId)
+      setConversations(prev => prev.map(c =>
+        c.id === activeChatId ? { ...c, unread: false } : c
+      ))
+    }
+  }, [activeChatId, currentUserId])
 
-    // frontend-only placeholder:
-    // later: push to Firestore + optimistic UI
-    console.log("send message", { threadId: activeThreadId, text });
-    setDraft("");
-  };
+  // 6. Fetch Chat History
+  useEffect(() => {
+    if (!activeChatId) return
 
-  const onKebabAction = (action: "archive" | "mute" | "delete", threadId: string) => {
-    // placeholder only
-    console.log("thread action", { action, threadId });
-  };
+    async function loadMessages() {
+      const msgs = await fetchMessages(activeChatId!)
+      setChatHistory(msgs)
+    }
+    loadMessages()
+  }, [activeChatId])
+
+  // 7. Global Realtime Listener
+  useEffect(() => {
+    if (!currentUserId) return
+
+    const channel = supabase
+      .channel(`global-chat-listener`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const newMessage = payload.new as Message
+
+          if (newMessage.conversation_id === activeChatId) {
+            if (newMessage.sender_id !== currentUserId) {
+              setChatHistory((prev) => [...prev, newMessage])
+              markConversationAsRead(activeChatId, currentUserId)
+            }
+          }
+
+          setConversations(prev => {
+            const updated = prev.map(c =>
+              c.id === newMessage.conversation_id
+                ? { 
+                    ...c, 
+                    unread: c.id !== activeChatId,
+                    lastMessage: newMessage.content,
+                    lastActivity: new Date(newMessage.created_at).getTime() 
+                  }
+                : c
+            )
+            return updated.sort((a: any, b: any) => b.lastActivity - a.lastActivity)
+          })
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [activeChatId, currentUserId])
+
+  // 8. Handle Sending a Message
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || !activeChatId || !currentUserId) return
+    setIsSending(true)
+    try {
+      const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
+      setChatHistory((prev) => [...prev, sentMsg])
+      
+      setConversations(prev => {
+        const updated = prev.map(c =>
+          c.id === activeChatId 
+            ? { ...c, lastMessage: inputMessage, unread: false, lastActivity: Date.now() } 
+            : c
+        )
+        return updated.sort((a: any, b: any) => b.lastActivity - a.lastActivity)
+      })
+
+      setInputMessage("")
+    } catch (error) {
+      console.error("Error sending message:", error)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleSendMessage()
+  }
+
+  // Modal Handlers
+  const handleOpenNewChat = async () => {
+    setIsNewChatOpen(true)
+    if (currentUserId) {
+      const users = await fetchAvailableUsers(currentUserId)
+      setAvailableUsers(users)
+    }
+  }
+
+  const handleStartConversation = async (targetUserId: string) => {
+    if (!currentUserId) return
+    setIsCreatingChat(true)
+    try {
+      const newChatId = await createOrGetConversation(currentUserId, targetUserId)
+      await loadConversations(currentUserId, newChatId)
+      setIsNewChatOpen(false)
+      setUserSearchQuery("")
+    } catch (error) {
+      console.error("Error starting conversation:", error)
+    } finally {
+      setIsCreatingChat(false)
+    }
+  }
+
+  const filteredUsers = availableUsers.filter((u) => 
+    u.username.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
+    u.role.toLowerCase().includes(userSearchQuery.toLowerCase())
+  )
+
+  const activeChat = useMemo(
+    () => conversations.find((c) => c.id === activeChatId) || null,
+    [activeChatId, conversations]
+  )
+
+  if (isLoading) {
+    return <div className="p-6 text-gray-500 font-medium">Loading messages...</div>
+  }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <h1 className={styles.title}>Messages</h1>
-      </div>
+    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+      <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
 
-      <div className={styles.shell}>
-        {/* LEFT: THREAD LIST */}
-        <section className={styles.leftCard}>
-          <div className={styles.leftTop}>
-            <div className={styles.searchWrap}>
-              <Search className={styles.searchIcon} />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search"
-                className={styles.searchInput}
-              />
+      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+        <div className="flex gap-6 h-full overflow-hidden">
+          
+          {/* Conversation Sidebar */}
+          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
+            <div className="flex items-center justify-between mb-3 shrink-0">
+              <p className="text-sm font-semibold text-gray-900">Conversations</p>
+              <button 
+                onClick={handleOpenNewChat}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold shadow-sm hover:bg-gray-50 transition-colors"
+              >
+                New
+              </button>
             </div>
-          </div>
 
-          <div className={styles.threadList}>
-            {filteredThreads.map((t) => {
-              const isActive = t.id === activeThreadId;
-
-              return (
+            <div className="space-y-2 overflow-y-auto pr-1 min-h-0 custom-scrollbar">
+              {conversations.map((chat) => (
                 <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onSelectThread(t.id)}
-                  className={cn(styles.threadItem, isActive && styles.threadItemActive)}
+                  key={chat.id}
+                  onClick={() => setActiveChatId(chat.id)}
+                  className={[
+                    "w-full text-left rounded-lg border bg-white p-3 shadow-sm transition-colors hover:bg-gray-50",
+                    activeChatId === chat.id ? "border-[#00c065]" : "border-gray-200",
+                  ].join(" ")}
                 >
-                  <div className={styles.threadTopRow}>
-                    <div className={styles.threadLeft}>
-                      <span
-                        className={cn(
-                          styles.unreadDot,
-                          t.unread ? styles.unreadDotOn : styles.unreadDotOff
-                        )}
-                        aria-label={t.unread ? "unread" : "read"}
-                      />
-                      <div className={styles.threadTitleWrap}>
-                        <div className={styles.threadTitle}>{t.title}</div>
-                        <div className={styles.threadPreview}>{t.preview}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {chat.unread ? <span className="h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" /> : null}
+                        <p className="text-sm font-semibold text-gray-900 truncate">{chat.name}</p>
                       </div>
+                      <p className={`mt-1 text-xs line-clamp-1 ${chat.unread ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
+                        {chat.lastMessage}
+                      </p>
                     </div>
-
-                    <div className={styles.threadRight}>
-                      <button
-                        type="button"
-                        className={styles.kebab}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onKebabAction("archive", t.id);
-                        }}
-                        aria-label="Thread actions"
-                      >
-                        <MoreVertical size={18} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className={styles.threadMetaRow}>
-                    <span className={styles.threadMetaText}>{t.lastSeen}</span>
-                    {t.unreadCount ? (
-                      <span className={styles.unreadPill}>{t.unreadCount}</span>
-                    ) : null}
                   </div>
                 </button>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* RIGHT: CHAT */}
-        <section className={styles.rightCard}>
-          {/* Chat header */}
-          <div className={styles.chatHeader}>
-            <div className={styles.chatHeaderLeft}>
-              <div
-                className={cn(
-                  styles.avatar,
-                  activeThread?.avatarColor === "pink" && styles.avatarPink,
-                  activeThread?.avatarColor === "green" && styles.avatarGreen,
-                  activeThread?.avatarColor === "gray" && styles.avatarGray
-                )}
-              >
-                <span className={styles.avatarLetter}>{activeThread?.avatarLetter ?? "?"}</span>
-                <span className={styles.statusDot} />
-              </div>
-
-              <div className={styles.chatHeaderText}>
-                <div className={styles.chatName}>{activeThread?.title ?? "Unknown"}</div>
-                <div className={styles.chatRole}>{activeThread?.subtitle ?? "Client"}</div>
-              </div>
+              ))}
+              {conversations.length === 0 && (
+                <div className="text-sm text-gray-400 mt-4 text-center">No active chats</div>
+              )}
             </div>
+          </aside>
 
-            <button type="button" className={styles.kebab} aria-label="Chat actions">
-              <MoreVertical size={18} />
-            </button>
-          </div>
-
-          {/* Chat body */}
-          <div className={styles.chatBody}>
-            {activeMessages.map((m, idx) => {
-              const showDay =
-                m.dayLabel &&
-                (idx === 0 || activeMessages[idx - 1]?.dayLabel !== m.dayLabel);
-
-              return (
-                <div key={m.id} className={styles.msgGroup}>
-                  {showDay ? (
-                    <div className={styles.dayDivider}>
-                      <div className={styles.dividerLine} />
-                      <span className={styles.dayText}>{m.dayLabel}</span>
-                      <div className={styles.dividerLine} />
-                    </div>
-                  ) : null}
-
-                  <div className={cn(styles.msgRow, m.sender === "me" ? styles.msgRowMe : styles.msgRowThem)}>
-                    <div className={cn(styles.bubble, m.sender === "me" ? styles.bubbleMe : styles.bubbleThem)}>
-                      {m.text}
-                    </div>
+          {/* Chat Area */}
+          {activeChat && (
+            <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
+              {/* Header */}
+              <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
+                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
+                    <span className="text-xs font-semibold text-gray-700">
+                      {activeChat.name.slice(0, 1).toUpperCase()}
+                    </span>
                   </div>
-                  <div className={cn(styles.timeRow, m.sender === "me" ? styles.timeRowMe : styles.timeRowThem)}>
-                    {m.time}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{activeChat.name}</p>
+                    <p className="text-xs text-gray-600 capitalize">{activeChat.role}</p>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              </div>
 
-          {/* Chat input */}
-          <div className={styles.chatComposer}>
-            <button type="button" className={styles.attachBtn} aria-label="Attach file">
-              <Paperclip size={18} />
-            </button>
+              {/* Messages List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
+                {chatHistory.length === 0 && (
+                  <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
+                )}
+                {chatHistory.map((msg) => {
+                  const isMe = msg.sender_id === currentUserId
+                  const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
-            <Input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Enter your message"
-              className={styles.composerInput}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onSendMessage();
-              }}
-            />
+                  return (
+                    <div key={msg.id}>
+                      <div className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}>
+                        <div
+                          className={[
+                            "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
+                            isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
+                          ].join(" ")}
+                          style={isMe ? { backgroundColor: ACCENT } : undefined}
+                        >
+                          {msg.content}
+                        </div>
+                        <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+                {/* Auto-scroll target */}
+                <div ref={messagesEndRef} />
+              </div>
 
-            <Button
-              type="button"
-              onClick={onSendMessage}
-              className={styles.sendBtn}
-              aria-label="Send message"
-            >
-              <SendHorizonal size={18} />
-            </Button>
-          </div>
-        </section>
+              {/* Input Area */}
+              <div className="p-4 border-t border-gray-200 shrink-0">
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                  <input
+                    type="text"
+                    placeholder="Enter your message..."
+                    className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={isSending}
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={isSending || !inputMessage.trim()}
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
+                    style={{ backgroundColor: ACCENT }}
+                  >
+                    {isSending ? "..." : "Send"}
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
+
+      {/* --- NEW CHAT MODAL --- */}
+      <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
+        <DialogContent className="max-w-md bg-white border-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] p-0">
+          <DialogHeader className="p-6 pb-4 border-b border-gray-100">
+            <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
+            
+            <div className="relative mt-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by name or role..."
+                value={userSearchQuery}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-gray-50 border-0 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00c065]/20"
+              />
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+            {filteredUsers.length === 0 ? (
+              <p className="text-center text-gray-400 text-sm py-8">No users found.</p>
+            ) : (
+              <div className="space-y-1">
+                {filteredUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    onClick={() => handleStartConversation(user.id)}
+                    disabled={isCreatingChat}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
+                  >
+                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200">
+                      {user.profile_image_url ? (
+                        <img src={user.profile_image_url} alt={user.username} className="h-full w-full rounded-full object-cover" />
+                      ) : (
+                        <span className="text-sm font-semibold text-gray-600">
+                          {user.username.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{user.username}</p>
+                      <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
+  )
 }

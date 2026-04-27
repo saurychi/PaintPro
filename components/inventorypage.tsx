@@ -143,8 +143,9 @@ export function InventoryPage() {
             />
             <InventoryTable
               data={filteredData}
+              type="materials"
+              isLoading={false}
               onRowClick={handleRowClick}
-              onSelectionChange={setSelectedRows}
             />
           </TabsContent>
 
