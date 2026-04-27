@@ -1,5 +1,3 @@
-import { fakeDelay } from "./_shared"
-
 export type ReportView = "weekly" | "monthly" | "yearly"
 
 export type ReportSummary = {
@@ -16,24 +14,112 @@ export type QuickLink = {
   href: string
 }
 
-export async function getReportSummary(_params: {
+export type ProjectPriority = "low" | "medium" | "high"
+
+export type ReportProjectRow = {
+  projectId: string
+  projectCode: string
+  title: string
+  description: string
+  clientId: string | null
+  clientName: string
+  clientEmail: string | null
+  clientPhone: string | null
+  clientAddress: string | null
+  siteAddress: string
+  status: string
+  priority: ProjectPriority
+  startDatetime: string | null
+  endDatetime: string | null
+  estimatedBudget: number
+  estimatedCost: number
+  estimatedProfit: number
+  markupRate: number
+  notes: string
+  dimensions: unknown
+  createdAt: string | null
+  updatedAt: string | null
+  createdBy: string | null
+}
+
+export type GetReportProjectsParams = {
+  rangeStartISO?: string
+  rangeEndISO?: string
+  status?: string
+  sort?: string
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? "Request failed")
+  }
+
+  return data as T
+}
+
+export async function getReportProjects(
+  params: GetReportProjectsParams = {}
+): Promise<ReportProjectRow[]> {
+  const searchParams = new URLSearchParams()
+
+  if (params.rangeStartISO) {
+    searchParams.set("rangeStartISO", params.rangeStartISO)
+  }
+
+  if (params.rangeEndISO) {
+    searchParams.set("rangeEndISO", params.rangeEndISO)
+  }
+
+  if (params.status && params.status !== "all") {
+    searchParams.set("status", params.status)
+  }
+
+  if (params.sort) {
+    searchParams.set("sort", params.sort)
+  }
+
+  const queryString = searchParams.toString()
+  const response = await fetch(`/api/reports/projects${queryString ? `?${queryString}` : ""}`, {
+    method: "GET",
+    cache: "no-store",
+  })
+
+  const data = await parseResponse<{ projects: ReportProjectRow[] }>(response)
+
+  return data.projects ?? []
+}
+
+export async function getReportSummary(params: {
   view: ReportView
   rangeStartISO: string
   rangeEndISO: string
 }): Promise<ReportSummary> {
-  await fakeDelay(250)
+  const projects = await getReportProjects({
+    rangeStartISO: params.rangeStartISO,
+    rangeEndISO: params.rangeEndISO,
+  })
 
-  // Dummy values (later: swap to Supabase query results)
-  return {
-    totalJobs: 128,
-    totalRevenue: 245_300,
-    totalCost: 176_400,
-    netProfit: 68_900,
-  }
+  return projects.reduce(
+    (summary, project) => {
+      summary.totalJobs += 1
+      summary.totalRevenue += project.estimatedBudget
+      summary.totalCost += project.estimatedCost
+      summary.netProfit += project.estimatedProfit
+
+      return summary
+    },
+    {
+      totalJobs: 0,
+      totalRevenue: 0,
+      totalCost: 0,
+      netProfit: 0,
+    }
+  )
 }
 
 export async function getReportQuickLinks(): Promise<QuickLink[]> {
-  await fakeDelay(150)
   return [
     {
       id: "r1",
@@ -43,8 +129,8 @@ export async function getReportQuickLinks(): Promise<QuickLink[]> {
     },
     {
       id: "r2",
-      title: "Report List",
-      desc: "View generated reports and history",
+      title: "Project Report List",
+      desc: "View project records and financial estimates",
       href: "/admin/report/report-list",
     },
   ]
