@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useMemo, useState, useEffect, useRef } from "react"
-import { Search, MessageSquare } from "lucide-react"
+import { Search, MessageSquare, Loader2 } from "lucide-react"
 import { useClientProject } from "../ClientShellClient"
 import { supabase } from "@/lib/supabaseClient"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -202,7 +202,24 @@ export default function ClientMessages() {
   )
 
   if (isLoading) {
-    return <div className="p-6 text-gray-500 font-medium">Loading messages...</div>
+    return (
+      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+        <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
+        <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+          <div className="flex gap-6 h-full overflow-hidden">
+            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
+              <p className="text-sm font-semibold text-gray-900 mb-3 shrink-0">Conversations</p>
+              <div className="flex-1 flex items-center justify-center">
+                <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
+              </div>
+            </aside>
+            <div className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm flex items-center justify-center min-w-0">
+              <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (!projectId) {
