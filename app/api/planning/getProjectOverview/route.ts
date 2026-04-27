@@ -37,6 +37,7 @@ type ProjectSubTaskRow = {
   sort_order: number | null;
   scheduled_start_datetime: string | null;
   scheduled_end_datetime: string | null;
+  updated_at: string | null;
 };
 
 type SubTaskRow = {
@@ -74,19 +75,91 @@ type UserRow = {
   specialty: string | null;
 };
 
+type ParsedEquipment = {
+  name: string;
+  notes: string | null;
+};
+
+type AssignedStaffOverviewRow = {
+  project_sub_task_staff_id: string;
+  user_id: string;
+  role: string | null;
+  assignment_status: string | null;
+  user: {
+    id: string;
+    username: string | null;
+    email: string | null;
+    specialty: string | null;
+  } | null;
+};
+
+type MaterialOverviewRow = {
+  project_task_material_id: string;
+  material_id: string;
+  name: string;
+  unit: string | null;
+  unit_cost: number | null;
+  estimated_quantity: number | null;
+  estimated_cost: number | null;
+};
+
+type ProjectSubTaskOverviewRow = {
+  project_sub_task_id: string;
+  sub_task_id: string;
+  description: string;
+  estimated_hours: number | null;
+  scheduled_start_datetime: string | null;
+  scheduled_end_datetime: string | null;
+  updated_at: string | null;
+  status: string | null;
+  sort_order: number | null;
+  equipments_used: ParsedEquipment[];
+  assigned_staff: AssignedStaffOverviewRow[];
+};
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function parseEquipment(value: unknown): { name: string; notes: string | null }[] {
+function parseEquipment(value: unknown): ParsedEquipment[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((item: any) => ({
-      name: typeof item?.name === "string" ? item.name : "",
-      notes: typeof item?.notes === "string" ? item.notes : null,
-    }))
+    .map((item) => {
+      const record =
+        item && typeof item === "object"
+          ? (item as Record<string, unknown>)
+          : null;
+
+      return {
+        name: typeof record?.name === "string" ? record.name : "",
+        notes: typeof record?.notes === "string" ? record.notes : null,
+      };
+    })
     .filter((item) => item.name);
+}
+
+function normalizeStatus(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isFinishedSubTaskStatus(status: string | null | undefined) {
+  const normalized = normalizeStatus(status);
+  return (
+    normalized === "completed" ||
+    normalized === "done" ||
+    normalized === "finished" ||
+    normalized === "cancelled"
+  );
+}
+
+function canMoveProjectToReview(status: string | null | undefined) {
+  const normalized = normalizeStatus(status);
+  return (
+    normalized === "in_progress" ||
+    normalized === "ongoing" ||
+    normalized === "active"
+  );
 }
 
 export async function GET(request: Request) {
@@ -184,7 +257,8 @@ export async function GET(request: Request) {
         status,
         sort_order,
         scheduled_start_datetime,
-        scheduled_end_datetime
+        scheduled_end_datetime,
+        updated_at
       `,
       )
       .in("project_task_id", projectTaskIds)
@@ -198,6 +272,34 @@ export async function GET(request: Request) {
         },
         { status: 500 },
       );
+    }
+
+    let nextProjectStatus = project.status;
+
+    if (
+      canMoveProjectToReview(project.status) &&
+      (projectSubTasks ?? []).length > 0 &&
+      !(projectSubTasks ?? []).some((row) => !isFinishedSubTaskStatus(row.status))
+    ) {
+      nextProjectStatus = "review_pending";
+
+      const { error: reviewStatusError } = await supabaseAdmin
+        .from("projects")
+        .update({
+          status: nextProjectStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("project_id", project.project_id);
+
+      if (reviewStatusError) {
+        return NextResponse.json(
+          {
+            error: "Failed to move project to review.",
+            details: reviewStatusError.message,
+          },
+          { status: 500 },
+        );
+      }
     }
 
     const subTaskIds = uniqueStrings(
@@ -331,7 +433,7 @@ export async function GET(request: Request) {
     const materialMap = new Map((materials ?? []).map((row) => [row.material_id, row]));
     const userMap = new Map((users ?? []).map((row) => [row.id, row]));
 
-    const projectSubTaskStaffMap = new Map<string, any[]>();
+    const projectSubTaskStaffMap = new Map<string, AssignedStaffOverviewRow[]>();
     for (const row of projectSubTaskStaff ?? []) {
       const current = projectSubTaskStaffMap.get(row.project_sub_task_id) ?? [];
       const user = userMap.get(row.user_id);
@@ -354,7 +456,7 @@ export async function GET(request: Request) {
       projectSubTaskStaffMap.set(row.project_sub_task_id, current);
     }
 
-    const materialsByProjectTaskId = new Map<string, any[]>();
+    const materialsByProjectTaskId = new Map<string, MaterialOverviewRow[]>();
     for (const row of projectTaskMaterials ?? []) {
       const current = materialsByProjectTaskId.get(row.project_task_id) ?? [];
       const material = materialMap.get(row.material_id);
@@ -372,7 +474,7 @@ export async function GET(request: Request) {
       materialsByProjectTaskId.set(row.project_task_id, current);
     }
 
-    const subtasksByProjectTaskId = new Map<string, any[]>();
+    const subtasksByProjectTaskId = new Map<string, ProjectSubTaskOverviewRow[]>();
     for (const row of projectSubTasks ?? []) {
       const current = subtasksByProjectTaskId.get(row.project_task_id) ?? [];
       const subTask = subTaskMap.get(row.sub_task_id);
@@ -384,6 +486,7 @@ export async function GET(request: Request) {
         estimated_hours: row.estimated_hours,
         scheduled_start_datetime: row.scheduled_start_datetime,
         scheduled_end_datetime: row.scheduled_end_datetime,
+        updated_at: row.updated_at,
         status: row.status,
         sort_order: row.sort_order,
         equipments_used: parseEquipment(row.equipments_used),
@@ -411,14 +514,19 @@ export async function GET(request: Request) {
       .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
 
     return NextResponse.json({
-      project,
+      project: {
+        ...project,
+        status: nextProjectStatus,
+      },
       mainTasks: overviewMainTasks,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+
     return NextResponse.json(
       {
         error: "Unexpected server error.",
-        details: error?.message ?? "Unknown error",
+        details: message,
       },
       { status: 500 },
     );

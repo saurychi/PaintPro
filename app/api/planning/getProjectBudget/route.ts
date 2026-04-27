@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("projects")
-    .select("estimated_budget, estimated_cost")
+    .select("estimated_budget, estimated_cost, downpayment")
     .eq("project_id", projectId)
     .single();
 
@@ -29,5 +29,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     estimatedBudget: data.estimated_budget ?? 0,
     estimatedCost: data.estimated_cost ?? 0,
+    downpayment: data.downpayment ?? 0,
   });
 }
