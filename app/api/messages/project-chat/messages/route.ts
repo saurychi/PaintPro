@@ -83,3 +83,49 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json(message)
 }
+
+// PATCH /api/messages/project-chat/messages — edit a client message
+export async function PATCH(request: NextRequest) {
+  const projectId = await getProjectId()
+  if (!projectId) return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
+
+  const clientId = await getClientId(projectId)
+  if (!clientId) return NextResponse.json({ error: "Client not found." }, { status: 404 })
+
+  const body = await request.json()
+  const messageId = String(body?.messageId ?? "").trim()
+  const content = String(body?.content ?? "").trim()
+  if (!messageId || !content) return NextResponse.json({ error: "Missing messageId or content." }, { status: 400 })
+
+  const { data: message, error } = await supabaseAdmin
+    .from("messages")
+    .update({ content })
+    .eq("id", messageId)
+    .eq("client_id", clientId)
+    .select()
+    .single()
+
+  if (error || !message) return NextResponse.json({ error: "Failed to update message.", details: error?.message }, { status: 500 })
+  return NextResponse.json(message)
+}
+
+// DELETE /api/messages/project-chat/messages — delete a client message
+export async function DELETE(request: NextRequest) {
+  const projectId = await getProjectId()
+  if (!projectId) return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
+
+  const clientId = await getClientId(projectId)
+  if (!clientId) return NextResponse.json({ error: "Client not found." }, { status: 404 })
+
+  const messageId = new URL(request.url).searchParams.get("messageId") ?? ""
+  if (!messageId) return NextResponse.json({ error: "Missing messageId." }, { status: 400 })
+
+  const { error } = await supabaseAdmin
+    .from("messages")
+    .delete()
+    .eq("id", messageId)
+    .eq("client_id", clientId)
+
+  if (error) return NextResponse.json({ error: "Failed to delete message.", details: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}

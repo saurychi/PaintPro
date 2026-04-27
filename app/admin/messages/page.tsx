@@ -7,10 +7,12 @@ import {
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
+  updateMessage,
+  deleteMessage,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare, Loader2 } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
@@ -33,9 +35,24 @@ export default function AdminMessages() {
   const [userSearchQuery, setUserSearchQuery] = useState("")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
+  // Message actions state
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editText, setEditText] = useState("")
+  const [visibleDotsId, setVisibleDotsId] = useState<string | null>(null)
+
   // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showDots = (msgId: string) => {
+    if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
+    setVisibleDotsId(msgId)
+  }
+  const startHideDots = () => {
+    dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
+  }
 
   // 1. Get current user
   useEffect(() => {
@@ -194,6 +211,36 @@ export default function AdminMessages() {
     if (e.key === 'Enter') handleSendMessage()
   }
 
+  const handleDelete = async (messageId: string) => {
+    setOpenMenuId(null)
+    startHideDots()
+    try {
+      const res = await fetch(`/api/messages/manage?messageId=${messageId}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Failed to delete")
+      setChatHistory((prev) => prev.filter((m) => m.id !== messageId))
+    } catch (error) {
+      console.error("Error deleting message:", error)
+    }
+  }
+
+  const handleSaveEdit = async (messageId: string) => {
+    if (!editText.trim()) return
+    try {
+      const res = await fetch("/api/messages/manage", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, content: editText.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || "Failed to update")
+      setChatHistory((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
+      setEditingId(null)
+      startHideDots()
+    } catch (error) {
+      console.error("Error updating message:", error)
+    }
+  }
+
   // Modal Handlers
   const handleOpenNewChat = async () => {
     setIsNewChatOpen(true)
@@ -327,24 +374,80 @@ export default function AdminMessages() {
                 {chatHistory.length === 0 && (
                   <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
                 )}
+                {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
                 {chatHistory.map((msg) => {
                   const isMe = msg.sender_id === currentUserId
                   const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  const isEditing = editingId === msg.id
+                  const menuOpen = openMenuId === msg.id
+                  const dotsVisible = visibleDotsId === msg.id || menuOpen
 
                   return (
-                    <div key={msg.id}>
-                      <div className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}>
-                        <div
-                          className={[
-                            "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
-                            isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
-                          ].join(" ")}
-                          style={isMe ? { backgroundColor: ACCENT } : undefined}
-                        >
-                          {msg.content}
-                        </div>
-                        <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
+                    <div
+                      key={msg.id}
+                      className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}
+                      onMouseEnter={() => isMe && showDots(msg.id)}
+                      onMouseLeave={() => isMe && startHideDots()}
+                    >
+                      <div className="flex items-end gap-1">
+                        {isMe && (
+                          <div className="relative shrink-0 mb-0.5">
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
+                              className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </button>
+                            {menuOpen && (
+                              <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
+                                <button
+                                  onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(msg.id)}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {isEditing ? (
+                          <div className="max-w-[72%] flex flex-col gap-1">
+                            <input
+                              autoFocus
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEdit(msg.id)
+                                if (e.key === 'Escape') setEditingId(null)
+                              }}
+                              className="px-3 py-2 text-sm rounded-lg border-2 outline-none"
+                              style={{ borderColor: ACCENT }}
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveEdit(msg.id)} className="text-xs font-semibold" style={{ color: ACCENT }}>Save</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className={[
+                              "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
+                              isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
+                            ].join(" ")}
+                            style={isMe ? { backgroundColor: ACCENT } : undefined}
+                          >
+                            {msg.content}
+                          </div>
+                        )}
                       </div>
+                      <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
                     </div>
                   )
                 })}

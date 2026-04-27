@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Check,
   ChevronDown,
@@ -14,6 +13,7 @@ import { PieChart, Pie, Cell } from "recharts";
 import JobProgressCard, {
   type ProcessItem,
 } from "@/components/dashboard/jobProgressCard";
+import { useTheme } from "next-themes";
 
 const ACCENT = "#00c065";
 const GREEN = "#7ED957";
@@ -230,9 +230,10 @@ function getCurrentWorkflowIndex(status: string) {
   );
   if (index >= 0) return index;
 
-  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length;
-  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 1;
-  if (normalized === "completed") return WORKFLOW_STEPS.length + 2;
+  if (normalized === "downpayment_pending") return WORKFLOW_STEPS.length;
+  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length + 1;
+  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 2;
+  if (normalized === "completed") return WORKFLOW_STEPS.length + 3;
   if (normalized === "cancelled") return -2;
 
   return 0;
@@ -905,7 +906,7 @@ function TimelineMarker({
       {showLine ? (
         <div
           className={`absolute left-1/2 -translate-x-1/2 border-l border-dashed border-gray-400 ${
-            isChild ? "top-4 bottom-[-10px]" : "top-5 bottom-[-14px]"
+            isChild ? "top-4 -bottom-2.5" : "top-5 -bottom-3.5"
           }`}
           aria-hidden="true"
         />
@@ -950,19 +951,8 @@ function ProcessFlowSkeleton() {
   );
 }
 
-function ProjectMetaCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-      <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500">
-        {label}
-      </div>
-      <div className="mt-2 text-sm font-medium text-gray-900">{value}</div>
-    </div>
-  );
-}
-
 export default function AdminProjectsPage() {
-  const router = useRouter();
+  const { resolvedTheme } = useTheme();
 
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -980,6 +970,7 @@ export default function AdminProjectsPage() {
   > | null>(null);
   const [mainTasks, setMainTasks] = useState<Record<string, unknown>[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
   const [navigating, setNavigating] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [overlapSlideIndex, setOverlapSlideIndex] = useState(0);
@@ -1104,7 +1095,7 @@ export default function AdminProjectsPage() {
     }
 
     loadProjectOverview();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, detailsRefreshKey]);
 
   useEffect(() => {
     setOverlapSlideIndex((prev) =>
@@ -1272,13 +1263,6 @@ export default function AdminProjectsPage() {
     });
   }
 
-  function handleStartMainTasks() {
-    if (!selectedProjectId) return;
-    router.push(
-      `/admin/job-creation/main-task-assignment?projectId=${selectedProjectId}`,
-    );
-  }
-
   async function handleCopyProjectCode() {
     if (!projectCodeValue || projectCodeValue === "No Code") return;
 
@@ -1296,7 +1280,11 @@ export default function AdminProjectsPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f8fafc]">
+    <div
+      className={`h-screen overflow-hidden ${
+        resolvedTheme === "dark" ? "bg-black" : "bg-[#f8fafc]"
+      }`}
+    >
       <div className="flex h-full flex-col p-6">
         <h1 className="text-2xl font-semibold text-gray-900">Projects</h1>
 
@@ -1311,12 +1299,12 @@ export default function AdminProjectsPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
-              handleStartMainTasks={handleStartMainTasks}
+              onRefresh={() => setDetailsRefreshKey((k) => k + 1)}
             />
           </div>
 
           <aside className="lg:col-span-3 grid min-h-0 grid-cols-1 grid-rows-[minmax(0,2.75fr)_minmax(0,2.25fr)] gap-4">
-            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <section className={`flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 ${resolvedTheme === "dark" ? "bg-zinc-900" : "bg-white"} shadow-sm`}>
               <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
 
               {!selectedProject ? (
@@ -1410,7 +1398,7 @@ export default function AdminProjectsPage() {
               )}
             </section>
 
-            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <section className={`flex min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 ${resolvedTheme === "dark" ? "bg-zinc-900" : "bg-white"} shadow-sm`}>
               <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
 
               <div className="border-b border-gray-200 px-5 py-4">
@@ -1454,7 +1442,7 @@ export default function AdminProjectsPage() {
                           ? "border-emerald-300 bg-emerald-50 shadow-sm"
                           : "border-gray-200 bg-white hover:bg-gray-50"
                       }`}>
-                      <div className="text-[9px] font-medium uppercase tracking-[0.1em] text-gray-500">
+                      <div className="text-[9px] font-medium uppercase tracking-widest text-gray-500">
                         {activeOverlapProject.projectCode ||
                           activeOverlapProject.project_code ||
                           "No Code"}
