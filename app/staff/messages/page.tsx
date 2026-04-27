@@ -1,21 +1,51 @@
 "use client"
 
-import React, { useMemo, useState, useEffect, useRef } from "react"
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import {
   fetchConversations,
   fetchMessages,
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
-  updateMessage,
-  deleteMessage,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
 import { Search, MessageSquare, Loader2, MoreHorizontal } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import StaffPageShell from "@/components/staff/StaffPageShell"
 
 const ACCENT = "#00c065"
+
+type ConversationSummary = {
+  id: string
+  name: string
+  role: string
+  profile_image_url: string | null
+  lastMessage: string
+  unread: boolean
+  lastActivity: number
+}
+
+type AvailableUser = {
+  id: string
+  username: string
+  role: string
+  profile_image_url: string | null
+}
+
+type ConversationPayload = {
+  conversation_id: string
+  users?: {
+    username?: string | null
+    role?: string | null
+    profile_image_url?: string | null
+  } | null
+  latest_message?: {
+    content?: string | null
+    created_at: string
+  } | null
+  last_read_at?: string | null
+}
 
 export default function AdminMessages() {
   // UI State
@@ -26,12 +56,12 @@ export default function AdminMessages() {
 
   // Data State
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [conversations, setConversations] = useState<any[]>([])
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [chatHistory, setChatHistory] = useState<Message[]>([])
 
   // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
-  const [availableUsers, setAvailableUsers] = useState<any[]>([])
+  const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
@@ -73,9 +103,9 @@ export default function AdminMessages() {
   }, [chatHistory])
 
   // 3. Helper function to load/refresh conversations
-  const loadConversations = async (userId: string, selectChatId?: string) => {
-    const data = await fetchConversations(userId)
-    const mappedConvos = data.map((cp: any) => {
+  const loadConversations = useCallback(async (userId: string, selectChatId?: string) => {
+    const data = await fetchConversations(userId) as ConversationPayload[]
+    const mappedConvos = data.map((cp) => {
       // Calculate unread status by comparing timestamps
       const lastMsg = cp.latest_message
       const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
@@ -100,16 +130,16 @@ export default function AdminMessages() {
 
     if (selectChatId) {
       setActiveChatId(selectChatId)
-    } else if (mappedConvos.length > 0 && !activeChatId) {
-      setActiveChatId(mappedConvos[0].id)
+    } else if (mappedConvos.length > 0) {
+      setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
     }
     setIsLoading(false)
-  }
+  }, [])
 
   // 4. Initial Load
   useEffect(() => {
     if (currentUserId) loadConversations(currentUserId)
-  }, [currentUserId])
+  }, [currentUserId, loadConversations])
 
   // 5. When user CLICKS a chat, Mark as Read in DB
   useEffect(() => {
@@ -244,7 +274,7 @@ export default function AdminMessages() {
   const handleOpenNewChat = async () => {
     setIsNewChatOpen(true)
     if (currentUserId) {
-      const users = await fetchAvailableUsers(currentUserId)
+      const users = await fetchAvailableUsers(currentUserId) as AvailableUser[]
       setAvailableUsers(users)
     }
   }
@@ -282,31 +312,33 @@ export default function AdminMessages() {
 
   if (isLoading) {
     return (
-      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-        <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
-        <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-          <div className="flex gap-6 h-full overflow-hidden">
-            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
-              <p className="text-sm font-semibold text-gray-900 mb-3 shrink-0">Conversations</p>
-              <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
-              </div>
-            </aside>
-            <div className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm flex items-center justify-center min-w-0">
-              <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
+      <StaffPageShell
+        title="Messages"
+        subtitle="Stay connected with teammates and clients using the same polished staff workspace framing."
+        bodyClassName="overflow-hidden"
+      >
+        <div className="flex h-full gap-6 overflow-hidden">
+          <aside className="flex min-w-[260px] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:w-1/4 xl:w-1/5">
+            <p className="mb-3 shrink-0 text-sm font-semibold text-gray-900">Conversations</p>
+            <div className="flex flex-1 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
             </div>
+          </aside>
+          <div className="flex min-w-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm">
+            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           </div>
         </div>
-      </div>
+      </StaffPageShell>
     )
   }
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-      <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
-
-      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-        <div className="flex gap-6 h-full overflow-hidden">
+    <StaffPageShell
+      title="Messages"
+      subtitle="Stay connected with teammates and clients using the same polished staff workspace framing."
+      bodyClassName="overflow-hidden"
+    >
+      <div className="flex h-full gap-6 overflow-hidden">
 
           {/* Conversation Sidebar */}
           <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
@@ -486,7 +518,6 @@ export default function AdminMessages() {
             </div>
           )}
         </div>
-      </div>
 
       {/* --- NEW CHAT MODAL --- */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
@@ -538,6 +569,6 @@ export default function AdminMessages() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </StaffPageShell>
   )
 }
