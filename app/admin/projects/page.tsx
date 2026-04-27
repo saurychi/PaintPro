@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Check,
   ChevronDown,
@@ -14,6 +13,8 @@ import { PieChart, Pie, Cell } from "recharts";
 import JobProgressCard, {
   type ProcessItem,
 } from "@/components/dashboard/jobProgressCard";
+import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
+import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
 
 const ACCENT = "#00c065";
 const GREEN = "#7ED957";
@@ -118,10 +119,71 @@ const WORKFLOW_STEPS: WorkflowStep[] = [
   },
 ];
 
+const END_OF_WORK_STATUS_ORDER = [
+  "review_pending",
+  "invoice_pending",
+  "payment_pending",
+  "employee_management_pending",
+  "conclude_job_pending",
+] as const;
+
+const END_OF_WORK_STEP_CONFIG = [
+  {
+    id: "review-and-final-checks",
+    title: "Review and Final Checks",
+    pendingStatus: "review_pending",
+  },
+  {
+    id: "invoice-generation",
+    title: "Invoice Generation",
+    pendingStatus: "invoice_pending",
+  },
+  {
+    id: "receive-payment",
+    title: "Receive Payment",
+    pendingStatus: "payment_pending",
+  },
+  {
+    id: "employee-management",
+    title: "Employee Management",
+    pendingStatus: "employee_management_pending",
+  },
+  {
+    id: "conclude-job",
+    title: "Conclude Job",
+    pendingStatus: "conclude_job_pending",
+  },
+] as const;
+
 function normalizeStatus(value?: string | null) {
   return String(value || "")
     .trim()
     .toLowerCase();
+}
+
+function isEndOfWorkStatus(status: string) {
+  return END_OF_WORK_STATUS_ORDER.includes(
+    status as (typeof END_OF_WORK_STATUS_ORDER)[number],
+  );
+}
+
+function getEndOfWorkChildStatus(
+  projectStatus: string,
+  stepIndex: number,
+): StepVisualStatus {
+  const normalized = normalizeStatus(projectStatus);
+
+  if (normalized === "completed" || normalized === "cancelled") return "done";
+  if (normalized === "in_progress") return stepIndex === 0 ? "active" : "pending";
+
+  const activeIndex = END_OF_WORK_STATUS_ORDER.indexOf(
+    normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
+  );
+
+  if (activeIndex === -1) return "pending";
+  if (stepIndex < activeIndex) return "done";
+  if (stepIndex === activeIndex) return "active";
+  return "pending";
 }
 
 function asArray<T = unknown>(value: unknown): T[] {
@@ -230,9 +292,17 @@ function getCurrentWorkflowIndex(status: string) {
   );
   if (index >= 0) return index;
 
-  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length;
-  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 1;
-  if (normalized === "completed") return WORKFLOW_STEPS.length + 2;
+  if (normalized === "downpayment_pending") return WORKFLOW_STEPS.length;
+  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length + 1;
+  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 2;
+  if (isEndOfWorkStatus(normalized)) {
+    return WORKFLOW_STEPS.length + 3 + END_OF_WORK_STATUS_ORDER.indexOf(
+      normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
+    );
+  }
+  if (normalized === "completed") {
+    return WORKFLOW_STEPS.length + 3 + END_OF_WORK_STATUS_ORDER.length;
+  }
   if (normalized === "cancelled") return -2;
 
   return 0;
@@ -257,7 +327,8 @@ function getOverallProgress(projectStatus: string) {
   if (
     normalized === "completed" ||
     normalized === "in_progress" ||
-    normalized === "ready_to_start"
+    normalized === "ready_to_start" ||
+    isEndOfWorkStatus(normalized)
   ) {
     return 100;
   }
@@ -343,6 +414,36 @@ function getStatusBadge(projectStatus: string) {
       border: "#93c5fd",
       color: "#1d4ed8",
     },
+    review_pending: {
+      label: "Review Pending",
+      bg: "#ecfeff",
+      border: "#a5f3fc",
+      color: "#0f766e",
+    },
+    invoice_pending: {
+      label: "Invoice Pending",
+      bg: "#eef2ff",
+      border: "#c7d2fe",
+      color: "#4338ca",
+    },
+    payment_pending: {
+      label: "Payment Pending",
+      bg: "#fff7ed",
+      border: "#fed7aa",
+      color: "#c2410c",
+    },
+    employee_management_pending: {
+      label: "Employee Management Pending",
+      bg: "#fdf2f8",
+      border: "#fbcfe8",
+      color: "#be185d",
+    },
+    conclude_job_pending: {
+      label: "Conclude Job Pending",
+      bg: "#fef3c7",
+      border: "#fcd34d",
+      color: "#92400e",
+    },
     completed: {
       label: "Completed",
       bg: "#ecfdf5",
@@ -382,6 +483,29 @@ function collectSubTasks(mainTasks: Record<string, unknown>[]) {
   }
 
   return subTasks;
+}
+
+function getAutoOpenMainTaskId(mainTasks: Record<string, unknown>[]) {
+  const activeMainTask =
+    mainTasks.find((mainTask) => {
+      const subTasks = [
+        ...asArray<Record<string, unknown>>(mainTask.subTasks),
+        ...asArray<Record<string, unknown>>(mainTask.subtasks),
+        ...asArray<Record<string, unknown>>(mainTask.projectSubTasks),
+        ...asArray<Record<string, unknown>>(mainTask.project_sub_tasks),
+      ];
+
+      return subTasks.some(
+        (subTask) =>
+          getTaskStatus(
+            readString(subTask.status, subTask.rawStatus, subTask.project_status),
+          ) !== "done",
+      );
+    }) ?? mainTasks[0];
+
+  if (!activeMainTask) return "";
+
+  return readString(activeMainTask.project_task_id, activeMainTask.id);
 }
 
 function collectEmployeesFromSubTask(
@@ -545,6 +669,40 @@ function getTaskStatus(rawStatus: string): StepVisualStatus {
   return "pending";
 }
 
+const JUST_IN_TIME_TOLERANCE_MINUTES = 8;
+
+function getCompletionTimingLabel(args: {
+  rawStatus: string;
+  scheduledStart: string;
+  estimatedHours: number;
+  completedAt: string;
+}) {
+  if (getTaskStatus(args.rawStatus) !== "done") return null;
+  if (!args.scheduledStart || !args.completedAt || args.estimatedHours <= 0) {
+    return "Completed";
+  }
+
+  const startDate = new Date(args.scheduledStart);
+  const completedDate = new Date(args.completedAt);
+
+  if (
+    Number.isNaN(startDate.getTime()) ||
+    Number.isNaN(completedDate.getTime())
+  ) {
+    return "Completed";
+  }
+
+  const plannedEndMs =
+    startDate.getTime() + args.estimatedHours * 60 * 60 * 1000;
+  const diffMinutes = (completedDate.getTime() - plannedEndMs) / (1000 * 60);
+
+  if (Math.abs(diffMinutes) <= JUST_IN_TIME_TOLERANCE_MINUTES) {
+    return "on time";
+  }
+
+  return diffMinutes < 0 ? "early" : "late";
+}
+
 function processStatusLabel(status: StepVisualStatus) {
   if (status === "done") return "Completed";
   if (status === "active") return "Working on it...";
@@ -600,7 +758,10 @@ function buildProcessItems(args: {
   const startOfWorkStatus: StepVisualStatus =
     normalized === "ready_to_start"
       ? "active"
-      : normalized === "in_progress" || normalized === "completed"
+      : normalized === "in_progress" ||
+          normalized === "completed" ||
+          normalized === "cancelled" ||
+          isEndOfWorkStatus(normalized)
         ? "done"
         : "pending";
 
@@ -641,10 +802,20 @@ function buildProcessItems(args: {
     ];
 
     const childItems: ProcessItem[] = subTasks.map((subTask, subIndex) => {
-      const status = getTaskStatus(
-        readString(subTask.status, subTask.rawStatus, subTask.project_status),
+      const rawStatus = readString(
+        subTask.status,
+        subTask.rawStatus,
+        subTask.project_status,
       );
+      const status = getTaskStatus(rawStatus);
       const employeeLabels = collectEmployeeLabelsFromSubTask(subTask);
+      const scheduledStart = readString(
+        subTask.scheduled_start_datetime,
+        subTask.scheduledStartDatetime,
+        subTask.start_datetime,
+        subTask.startDatetime,
+      );
+      const completedAt = readString(subTask.updated_at, subTask.updatedAt);
       const estimatedHours = readNumber(
         subTask.estimatedHours,
         subTask.estimated_hours,
@@ -664,30 +835,38 @@ function buildProcessItems(args: {
             subTask.sub_task_name,
           ) || `Sub Task ${subIndex + 1}`,
         status,
+        statusLabelOverride:
+          status === "done"
+            ? getCompletionTimingLabel({
+                rawStatus,
+                scheduledStart,
+                estimatedHours,
+                completedAt,
+              }) || undefined
+            : undefined,
         startLabel: formatDateTime(
-          readString(
-            subTask.scheduled_start_datetime,
-            subTask.scheduledStartDatetime,
-            subTask.start_datetime,
-            subTask.startDatetime,
-          ) || null,
+          scheduledStart || null,
         ),
         endLabel:
           status === "done"
             ? formatDateTime(
-                readString(
-                  subTask.scheduled_end_datetime,
-                  subTask.scheduledEndDatetime,
-                  subTask.end_datetime,
-                  subTask.endDatetime,
-                ) || null,
+                completedAt ||
+                  readString(
+                    subTask.scheduled_end_datetime,
+                    subTask.scheduledEndDatetime,
+                    subTask.end_datetime,
+                    subTask.endDatetime,
+                  ) ||
+                  null,
               )
             : status === "active"
               ? "-"
               : "-",
         detail: {
           employees: employeeLabels,
+          employeeIds: [],
           estimatedHours: formatHours(estimatedHours),
+          completedAt: completedAt || null,
         },
       };
     });
@@ -751,12 +930,36 @@ function buildProcessItems(args: {
     });
   }
 
-  const manageEndStatus: StepVisualStatus =
-    normalized === "completed"
-      ? "done"
-      : normalized === "in_progress"
-        ? "active"
-        : "pending";
+  const manageEndChildren: ProcessItem[] = END_OF_WORK_STEP_CONFIG.map(
+    (step, stepIndex) => {
+      const status = getEndOfWorkChildStatus(normalized, stepIndex);
+
+      return {
+        id: step.id,
+        title: step.title,
+        status,
+        startLabel: formatDateTime(projectEnd),
+        endLabel:
+          status === "done"
+            ? normalized === "cancelled" && step.id === "conclude-job"
+              ? "Cancelled"
+              : normalized === "completed" && step.id === "conclude-job"
+                ? "Completed"
+                : formatDateTime(projectEnd)
+            : status === "active"
+              ? "Working on it..."
+              : "-",
+      };
+    },
+  );
+
+  const manageEndStatus: StepVisualStatus = manageEndChildren.every(
+    (child) => child.status === "done",
+  )
+    ? "done"
+    : manageEndChildren.some((child) => child.status !== "pending")
+      ? "active"
+      : "pending";
 
   items.push({
     id: "manage-end-of-work",
@@ -764,58 +967,14 @@ function buildProcessItems(args: {
     status: manageEndStatus,
     startLabel: formatDateTime(projectEnd),
     endLabel:
-      manageEndStatus === "done"
-        ? formatDateTime(projectEnd)
-        : manageEndStatus === "active"
-          ? "Working on it..."
-          : "-",
-    children: [
-      {
-        id: "review-and-final-checks",
-        title: "Review and Final Checks",
-        status: manageEndStatus,
-        startLabel: formatDateTime(projectEnd),
-        endLabel:
-          manageEndStatus === "done"
-            ? formatDateTime(projectEnd)
-            : manageEndStatus === "active"
-              ? "Working on it..."
-              : "-",
-      },
-    ],
-  });
-
-  const concludeStatus: StepVisualStatus =
-    normalized === "completed" || normalized === "cancelled"
-      ? "done"
-      : "pending";
-
-  items.push({
-    id: "conclude-job",
-    title: "Conclude Job",
-    status: concludeStatus,
-    startLabel: formatDateTime(projectEnd),
-    endLabel:
       normalized === "completed"
-        ? "Completed"
+        ? formatDateTime(projectEnd)
         : normalized === "cancelled"
           ? "Cancelled"
-          : "Working on it...",
-    children: [
-      {
-        id: "project-closure",
-        title:
-          normalized === "cancelled" ? "Project Cancelled" : "Project Closure",
-        status: concludeStatus,
-        startLabel: formatDateTime(projectEnd),
-        endLabel:
-          normalized === "completed"
-            ? "Completed"
-            : normalized === "cancelled"
-              ? "Cancelled"
-              : "Working on it...",
-      },
-    ],
+          : manageEndStatus === "active"
+            ? "Working on it..."
+            : "-",
+    children: manageEndChildren,
   });
 
   return items;
@@ -904,7 +1063,7 @@ function TimelineMarker({
       {showLine ? (
         <div
           className={`absolute left-1/2 -translate-x-1/2 border-l border-dashed border-gray-400 ${
-            isChild ? "top-4 bottom-[-10px]" : "top-5 bottom-[-14px]"
+            isChild ? "top-4 -bottom-2.5" : "top-5 -bottom-3.5"
           }`}
           aria-hidden="true"
         />
@@ -949,19 +1108,7 @@ function ProcessFlowSkeleton() {
   );
 }
 
-function ProjectMetaCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-      <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500">
-        {label}
-      </div>
-      <div className="mt-2 text-sm font-medium text-gray-900">{value}</div>
-    </div>
-  );
-}
-
 export default function AdminProjectsPage() {
-  const router = useRouter();
 
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -979,6 +1126,7 @@ export default function AdminProjectsPage() {
   > | null>(null);
   const [mainTasks, setMainTasks] = useState<Record<string, unknown>[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
   const [navigating, setNavigating] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [overlapSlideIndex, setOverlapSlideIndex] = useState(0);
@@ -1077,16 +1225,30 @@ export default function AdminProjectsPage() {
         }
 
         const nextMainTasks = asArray<Record<string, unknown>>(data.mainTasks);
+        const nextProject = asRecord(data.project);
 
-        setOverviewProject(asRecord(data.project));
+        setOverviewProject(nextProject);
         setMainTasks(nextMainTasks);
 
-        const defaultOpen = new Set<string>(["job-creation"]);
-        if (nextMainTasks.length > 0) {
-          const firstMainTaskId =
-            readString(nextMainTasks[0].project_task_id, nextMainTasks[0].id) ||
-            "0";
-          defaultOpen.add(`task-${firstMainTaskId}`);
+        if (nextProject?.status) {
+          const freshStatus = String(nextProject.status);
+          setSelectedProject((prev) =>
+            prev ? { ...prev, status: freshStatus, rawStatus: freshStatus } : prev,
+          );
+        }
+
+        const defaultOpen = new Set<string>();
+        const normalizedProjectStatus = String(nextProject?.status || "")
+          .trim()
+          .toLowerCase();
+        const autoOpenMainTaskId = getAutoOpenMainTaskId(nextMainTasks);
+
+        if (autoOpenMainTaskId) {
+          defaultOpen.add(`task-${autoOpenMainTaskId}`);
+        } else if (
+          WORKFLOW_STEPS.some((step) => step.rawStatus === normalizedProjectStatus)
+        ) {
+          defaultOpen.add("job-creation");
         }
 
         setOpenProcessIds(defaultOpen);
@@ -1103,7 +1265,7 @@ export default function AdminProjectsPage() {
     }
 
     loadProjectOverview();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, detailsRefreshKey]);
 
   useEffect(() => {
     setOverlapSlideIndex((prev) =>
@@ -1151,6 +1313,19 @@ export default function AdminProjectsPage() {
     projectMeta.startDatetime,
     projectMeta.endDatetime,
   ]);
+
+  const reviewSummary = useMemo(() => {
+    return buildProjectReviewSummary({
+      project:
+        overviewProject ||
+        (selectedProject as unknown as Record<string, unknown> | null),
+      mainTasks,
+    });
+  }, [overviewProject, selectedProject, mainTasks]);
+
+  const employeeReviewItems = useMemo(() => {
+    return buildEmployeeReviewItems(mainTasks);
+  }, [mainTasks]);
 
   const projectCodeValue =
     selectedProject?.projectCode || selectedProject?.project_code || "No Code";
@@ -1271,13 +1446,6 @@ export default function AdminProjectsPage() {
     });
   }
 
-  function handleStartMainTasks() {
-    if (!selectedProjectId) return;
-    router.push(
-      `/admin/job-creation/main-task-assignment?projectId=${selectedProjectId}`,
-    );
-  }
-
   async function handleCopyProjectCode() {
     if (!projectCodeValue || projectCodeValue === "No Code") return;
 
@@ -1295,7 +1463,7 @@ export default function AdminProjectsPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f8fafc]">
+    <div className="h-screen overflow-hidden bg-gray-50">
       <div className="flex h-full flex-col p-6">
         <h1 className="text-2xl font-semibold text-gray-900">Projects</h1>
 
@@ -1310,7 +1478,9 @@ export default function AdminProjectsPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
-              handleStartMainTasks={handleStartMainTasks}
+              employeeReviewItems={employeeReviewItems}
+              onRefresh={() => setDetailsRefreshKey((k) => k + 1)}
+              reviewSummary={reviewSummary}
             />
           </div>
 
@@ -1453,7 +1623,7 @@ export default function AdminProjectsPage() {
                           ? "border-emerald-300 bg-emerald-50 shadow-sm"
                           : "border-gray-200 bg-white hover:bg-gray-50"
                       }`}>
-                      <div className="text-[9px] font-medium uppercase tracking-[0.1em] text-gray-500">
+                      <div className="text-[9px] font-medium uppercase tracking-widest text-gray-500">
                         {activeOverlapProject.projectCode ||
                           activeOverlapProject.project_code ||
                           "No Code"}
