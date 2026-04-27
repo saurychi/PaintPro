@@ -1,15 +1,15 @@
 "use client";
 
+import type { ElementType } from "react";
 import Link from "next/link";
-import styles from "./report.module.css";
-import { cn } from "@/lib/utils";
 import { ChevronRight, ClipboardList, Wallet } from "lucide-react";
+import StaffPageShell from "@/components/staff/StaffPageShell";
 
 type Tile = {
   title: string;
   subtitle: string;
   href: string;
-  icon: React.ElementType;
+  icon: ElementType;
 };
 
 const TILES: Tile[] = [
@@ -20,49 +20,57 @@ const TILES: Tile[] = [
     icon: ClipboardList,
   },
   {
-    title: "Payment",
+    title: "Payroll",
     subtitle: "View payroll summaries, payslips, and payment status",
-    href: "/staff/report/payment",
+    href: "/staff/report/payroll",
     icon: Wallet,
   },
 ];
 
 export default function StaffReportPage() {
   return (
-    <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.titleWrap}>
-          <h1 className={styles.title}>Report</h1>
-          <div className={styles.subtitle}>Staff report • Backend-ready UI</div>
-        </div>
-      </div>
-
-      <div className={styles.grid}>
-        {TILES.map((t) => {
-          const Icon = t.icon;
+    <StaffPageShell
+      title="Report"
+      subtitle="Jump into attendance and payroll views from one shared staff reporting hub."
+      bodyClassName="overflow-y-auto pr-1"
+    >
+      <div className="grid grid-cols-1 gap-3 pb-1 min-[901px]:grid-cols-2">
+        {TILES.map((tile) => {
+          const Icon = tile.icon;
 
           return (
-            <Link key={t.href} href={t.href} className={styles.tile}>
-              <div className={styles.tileLeft}>
-                <div className={cn(styles.iconBox)}>
-                  <Icon className={styles.icon} />
+            <Link
+              key={tile.href}
+              href={tile.href}
+              className="flex items-center justify-between gap-3.5 rounded-2xl border border-gray-200 bg-white p-3.5 text-inherit transition duration-150 hover:-translate-y-px hover:border-gray-300 hover:shadow-[0_10px_24px_rgba(0,0,0,0.06)]"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-emerald-500/20 bg-emerald-500/10">
+                  <Icon className="h-5 w-5 text-emerald-600" />
                 </div>
 
-                <div className={styles.tileText}>
-                  <div className={styles.tileTitle}>{t.title}</div>
-                  <div className={styles.tileSubtitle}>{t.subtitle}</div>
+                <div className="min-w-0">
+                  <div className="text-base font-semibold text-gray-900">
+                    {tile.title}
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-xs font-normal leading-[1.35] text-gray-900/65">
+                    {tile.subtitle}
+                  </div>
                 </div>
               </div>
 
-              <div className={styles.tileRight}>
-                <div className={styles.goBtn} aria-hidden="true">
-                  <ChevronRight className={styles.goIcon} />
+              <div className="flex shrink-0 items-center justify-end">
+                <div
+                  className="grid h-[34px] w-[34px] place-items-center rounded-[10px] border border-emerald-500/20 bg-emerald-500/10"
+                  aria-hidden="true"
+                >
+                  <ChevronRight className="h-[18px] w-[18px] text-emerald-600" />
                 </div>
               </div>
             </Link>
           );
         })}
       </div>
-    </div>
+    </StaffPageShell>
   );
 }

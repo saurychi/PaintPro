@@ -3,23 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  Plus,
   ChevronRight,
-  ChevronDown,
-  X,
   RefreshCw,
   Settings2,
-  Check,
   Loader2,
+  X,
+  Send,
+  MessageSquare,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import CreateClientModal from "@/components/project-creation/CreateClientModal";
-import {
-  SURFACE_SCALE_PRESETS,
-  type ScaleBandKey,
-  type WeekdayKey,
-} from "@/lib/planning/aiContext";
+import MeasurementModal, { type MeasurementRow } from "@/components/project-creation/MeasurementModal";
+import type {
+  ScaleBandKey,
+  ScalePresetKey,
+  SurfaceScalePresets,
+} from "@/lib/planning/surfacePresets";
+import { type WeekdayKey } from "@/lib/planning/aiContext";
 import {
   type ProjectDimensions,
   type ProjectScaledField,
@@ -76,16 +77,6 @@ type GeneratedSubTask = {
   assignmentReasons: string[];
   scheduledStartDatetime: string | null;
   scheduledEndDatetime: string | null;
-};
-
-type ScalePresetKey = keyof typeof SURFACE_SCALE_PRESETS;
-
-type MeasurementRow = {
-  id: string;
-  presetKey: ScalePresetKey;
-  sizeBand: ScaleBandKey;
-  estimatedValue: number;
-  isManualOverride: boolean;
 };
 
 type ClientOption = {
@@ -192,9 +183,42 @@ type CreateClientApiResponse =
     }
   | { error: string; details?: string };
 
-type CountryCallingCodeOption = {
-  country: string;
-  calling_code: string;
+type GetSurfaceScalePresetsApiResponse =
+  | {
+      surfaceScalePresets: SurfaceScalePresets;
+    }
+  | { error: string; details?: string };
+
+type PreviewMainTask = {
+  name: string;
+  priority: number;
+  confidence: number;
+  sub_tasks: Array<{ title: string; priority: number }>;
+};
+
+// Maps each known main task name to the surface preset keys it requires.
+// Derived from materialEstimator.ts task logic.
+const TASK_TO_SURFACES: Record<string, string[]> = {
+  "Interior Painting": ["interior_wall_area_m2"],
+  "Ceiling Painting": ["ceiling_area_m2"],
+  "Feature Wall Painting": ["feature_wall_area_m2"],
+  "Exterior Painting": ["exterior_wall_area_m2"],
+  "Roof Tile Painting": ["roof_area_m2"],
+  "Colourbond Roof Painting": ["roof_area_m2"],
+  "Gutters, Fascia & Eaves Painting": ["gutters_length_m", "fascia_length_m", "eaves_length_m"],
+  "Trim, Doors & Frames Painting": ["trim_length_m", "doors_count"],
+  "Stain Blocking / Primer Work": ["interior_wall_area_m2"],
+  "Plaster & Patching": ["interior_wall_area_m2"],
+  "Surface Preparation (Sanding, Scraping, Filling)": ["interior_wall_area_m2"],
+  "Mould Treatment": ["interior_wall_area_m2"],
+  "High-Pressure Cleaning": ["pressure_wash_area_m2"],
+  "Decking Staining & Coating": ["deck_area_m2"],
+  "Fence & Gate Painting": ["fence_length_m", "gate_count"],
+  "Epoxy Floor Coatings": ["epoxy_floor_area_m2"],
+  "Wallpaper Installation": ["wallpaper_area_m2"],
+  "Wallpaper Removal": ["wallpaper_area_m2"],
+  "Protective / Industrial Coatings": ["exterior_wall_area_m2"],
+  "Anti-Corrosion Coatings": ["exterior_wall_area_m2"],
 };
 
 function generateProjectCode() {
@@ -222,21 +246,17 @@ function unitLabel(unit: string) {
   return "count";
 }
 
-function getBandIndex(band: ScaleBandKey) {
-  return ["small", "medium", "large"].indexOf(band);
-}
-
-function getBandFromIndex(index: number): ScaleBandKey {
-  return (["small", "medium", "large"][Math.max(0, Math.min(2, index))] ??
-    "medium") as ScaleBandKey;
-}
-
 function makeRowFromPreset(
+  presets: SurfaceScalePresets,
   presetKey: ScalePresetKey,
   band: ScaleBandKey = "medium",
   overrides?: Partial<MeasurementRow>,
 ): MeasurementRow {
-  const preset = SURFACE_SCALE_PRESETS[presetKey];
+  const preset = presets[presetKey];
+
+  if (!preset) {
+    throw new Error(`Surface preset not found: ${presetKey}`);
+  }
 
   return {
     id:
@@ -251,17 +271,8 @@ function makeRowFromPreset(
   };
 }
 
-function buildInitialRows(): MeasurementRow[] {
-  return [
-    makeRowFromPreset("interior_wall_area_m2", "medium"),
-    makeRowFromPreset("ceiling_area_m2", "medium"),
-    makeRowFromPreset("trim_length_m", "medium"),
-    makeRowFromPreset("doors_count", "medium"),
-  ];
-}
-
 function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
-  const scaled: Partial<Record<ScalePresetKey, ProjectScaledField>> = {};
+  const scaled: Record<string, ProjectScaledField> = {};
 
   for (const row of rows) {
     const currentValue = Number.isFinite(row.estimatedValue)
@@ -275,8 +286,8 @@ function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
         : 0;
 
     scaled[row.presetKey] = {
-      presetKey: row.presetKey,
-      sizeBand: row.sizeBand,
+      presetKey: row.presetKey as ProjectScaledField["presetKey"],
+      sizeBand: row.sizeBand as ProjectScaledField["sizeBand"],
       estimatedValue: existingValue + currentValue,
       isManualOverride:
         Boolean(existing?.isManualOverride) || row.isManualOverride,
@@ -284,299 +295,9 @@ function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
   }
 
   return {
-    scaled,
+    scaled: scaled as ProjectDimensions["scaled"],
     notes: "",
   };
-}
-
-function MeasurementModal(props: {
-  open: boolean;
-  rows: MeasurementRow[];
-  onClose: () => void;
-  onAdd: (presetKey: ScalePresetKey) => void;
-  onRemove: (id: string) => void;
-  onPresetChange: (id: string, presetKey: ScalePresetKey) => void;
-  onBandChange: (id: string, band: ScaleBandKey) => void;
-  onManualValueChange: (id: string, value: string) => void;
-}) {
-    const {
-      open,
-      rows,
-      onClose,
-      onAdd,
-      onRemove,
-      onPresetChange,
-      onBandChange,
-      onManualValueChange,
-    } = props;
-
-    const allPresetKeys = Object.keys(
-      SURFACE_SCALE_PRESETS,
-    ) as ScalePresetKey[];
-
-    const [isAddSurfaceModalOpen, setIsAddSurfaceModalOpen] = useState(false);
-    const [newSurfacePresetKey, setNewSurfacePresetKey] = useState<ScalePresetKey>(
-      allPresetKeys[0] ?? "interior_wall_area_m2",
-    );
-
-    function openAddSurfaceModal() {
-      setNewSurfacePresetKey(allPresetKeys[0] ?? "interior_wall_area_m2");
-      setIsAddSurfaceModalOpen(true);
-    }
-
-    function closeAddSurfaceModal() {
-      setIsAddSurfaceModalOpen(false);
-    }
-
-    function confirmAddSurface() {
-      onAdd(newSurfacePresetKey);
-      setIsAddSurfaceModalOpen(false);
-    }
-
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
-      <div className="max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Edit Measurements
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Use the slider for a quick scale, then refine the exact value if
-              needed.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-9 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="max-h-[calc(88vh-140px)] overflow-y-auto px-5 py-4">
-          <div className="mb-4 flex items-center justify-end">
-            <button
-              type="button"
-              onClick={openAddSurfaceModal}
-              className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"
-              style={{ backgroundColor: ACCENT }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = ACCENT;
-              }}>
-              <Plus className="h-4 w-4" />
-              Add Measurement
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {rows.map((row) => {
-              const preset = SURFACE_SCALE_PRESETS[row.presetKey];
-              const bandMeta = preset.bands[row.sizeBand];
-
-              return (
-                <div
-                  key={row.id}
-                  className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr_auto]">
-                    <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                        Surface Type
-                      </label>
-                      <select
-                        value={row.presetKey}
-                        onChange={(e) =>
-                          onPresetChange(
-                            row.id,
-                            e.target.value as ScalePresetKey,
-                          )
-                        }
-                        className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2"
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}>
-                        {(
-                          Object.keys(SURFACE_SCALE_PRESETS) as ScalePresetKey[]
-                        ).map((key) => (
-                          <option key={key} value={key}>
-                            {SURFACE_SCALE_PRESETS[key].label}
-                          </option>
-                        ))}
-                      </select>
-
-                      <div className="mt-4">
-                        <div className="flex items-center justify-between gap-2">
-                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                            Size Scale
-                          </label>
-                          <span className="text-[11px] font-semibold text-gray-700">
-                            {bandMeta.label}
-                          </span>
-                        </div>
-
-                        <input
-                          type="range"
-                          min={0}
-                          max={2}
-                          step={1}
-                          value={getBandIndex(row.sizeBand)}
-                          onChange={(e) =>
-                            onBandChange(
-                              row.id,
-                              getBandFromIndex(Number(e.target.value)),
-                            )
-                          }
-                          className="mt-2 h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200"
-                          style={{ accentColor: ACCENT }}
-                        />
-
-                        <div className="mt-2 grid grid-cols-3 text-[11px] font-medium text-gray-500">
-                          <span>Small</span>
-                          <span className="text-center">Medium</span>
-                          <span className="text-right">Large</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                        Exact Measurement
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.1"
-                        value={row.estimatedValue}
-                        onChange={(e) =>
-                          onManualValueChange(row.id, e.target.value)
-                        }
-                        className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2"
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}
-                      />
-                      <div className="mt-2 text-xs text-gray-500">
-                        Unit: {unitLabel(preset.unit)}
-                      </div>
-
-                      {row.isManualOverride ? (
-                        <div className="mt-3 inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                          Manual override
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex items-start justify-end">
-                      <button
-                        type="button"
-                        onClick={() => onRemove(row.id)}
-                        className="inline-flex h-9 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-red-50 hover:text-red-600">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-                <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-5 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className={`inline-flex items-center gap-2 rounded-lg ${BORDER} bg-white px-4 py-2 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50`}>
-            Close
-          </button>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"
-            style={{ backgroundColor: ACCENT }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = ACCENT;
-            }}>
-            <Check className="h-4 w-4" />
-            Done
-          </button>
-        </div>
-
-        {isAddSurfaceModalOpen ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 px-4">
-            <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl">
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-                <div>
-                  <h3 className="text-base font-semibold text-gray-900">
-                    Add Measurement
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Choose the surface type. The new row will start at medium scale.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeAddSurfaceModal}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="px-5 py-4">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                  Surface Type
-                </label>
-
-                <select
-                  value={newSurfacePresetKey}
-                  onChange={(e) =>
-                    setNewSurfacePresetKey(e.target.value as ScalePresetKey)
-                  }
-                  className="mt-2 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2"
-                  style={{ ["--tw-ring-color" as any]: ACCENT }}>
-                  {allPresetKeys.map((key) => (
-                    <option key={key} value={key}>
-                      {SURFACE_SCALE_PRESETS[key].label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-5 py-4">
-                <button
-                  type="button"
-                  onClick={closeAddSurfaceModal}
-                  className={`inline-flex items-center gap-2 rounded-lg ${BORDER} bg-white px-4 py-2 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50`}>
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={confirmAddSurface}
-                  className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"
-                  style={{ backgroundColor: ACCENT }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = ACCENT;
-                  }}>
-                  <Plus className="h-4 w-4" />
-                  Add
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
 }
 
 function uniqueByName<T extends { name: string }>(items: readonly T[]) {
@@ -620,7 +341,12 @@ async function postJson<TResponse>(
     throw new Error(shortMessage);
   }
 
-  if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+  if (
+    data &&
+    typeof data === "object" &&
+    "error" in data &&
+    typeof data.error === "string"
+  ) {
     console.error(`API returned error: ${url}`, data);
     throw new Error(data.error);
   }
@@ -638,9 +364,7 @@ export default function BasicDetails() {
   const [scheduledStart, setScheduledStart] = useState("");
   const [scheduledEnd, setScheduledEnd] = useState("");
   const [isScheduleCalendarOpen, setIsScheduleCalendarOpen] = useState(false);
-  const [address, setAddress] = useState(
-    "42 Wellington Street East Perth WA 6004 Australia",
-  );
+  const [address, setAddress] = useState("");
 
   const [clientName, setClientName] = useState("");
   const [clientEmail, setClientEmail] = useState("");
@@ -664,7 +388,7 @@ export default function BasicDetails() {
 
   const [saving, setSaving] = useState(false);
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(
-    projectIdFromUrl || null
+    projectIdFromUrl || null,
   );
 
   const [assignmentDay, setAssignmentDay] = useState<WeekdayKey>("monday");
@@ -674,9 +398,174 @@ export default function BasicDetails() {
   const [generatedTasks, setGeneratedTasks] = useState<GeneratedMainTask[]>([]);
   const [isGeneratingProjectName, setIsGeneratingProjectName] = useState(false);
 
-  const [measurementRows, setMeasurementRows] =
-    useState<MeasurementRow[]>(buildInitialRows());
+  const [measurementRows, setMeasurementRows] = useState<MeasurementRow[]>([]);
   const [measurementModalOpen, setMeasurementModalOpen] = useState(false);
+  const [previewTasks, setPreviewTasks] = useState<PreviewMainTask[]>([]);
+  const [isGeneratingTasks, setIsGeneratingTasks] = useState(false);
+
+  type SurfaceEmployee = { id: string; name: string; email: string; role: string };
+  const [surfaceMsgOpen, setSurfaceMsgOpen] = useState(false);
+  const [surfaceMsgStep, setSurfaceMsgStep] = useState<"confirm" | "compose">("confirm");
+  const [surfaceMsgEmployees, setSurfaceMsgEmployees] = useState<SurfaceEmployee[]>([]);
+  const [surfaceMsgLoadingEmployees, setSurfaceMsgLoadingEmployees] = useState(false);
+  const [surfaceMsgEmployeeId, setSurfaceMsgEmployeeId] = useState("");
+  const [surfaceMsgText, setSurfaceMsgText] = useState("");
+  const [surfaceMsgSending, setSurfaceMsgSending] = useState(false);
+
+  const [surfacePresets, setSurfacePresets] = useState<SurfaceScalePresets>({});
+  const [surfacePresetsLoading, setSurfacePresetsLoading] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+
+  // Restore draft from localStorage on mount — must run before loadSurfacePresets
+  // so the measurementRows guard (prev.length > 0) prevents overwriting draft rows.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SESSION_DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft.projectCode) setProjectCode(draft.projectCode);
+      if (draft.projectName) setProjectName(draft.projectName);
+      if (draft.scheduledStart) setScheduledStart(draft.scheduledStart);
+      if (draft.scheduledEnd) setScheduledEnd(draft.scheduledEnd);
+      if (draft.address) setAddress(draft.address);
+      if (draft.clientName) setClientName(draft.clientName);
+      if (draft.clientEmail) setClientEmail(draft.clientEmail);
+      if (draft.clientPhone) setClientPhone(draft.clientPhone);
+      if (draft.selectedPhoneCountry) setSelectedPhoneCountry(draft.selectedPhoneCountry);
+      if (draft.description) setDescription(draft.description);
+      if (draft.selectedClientId) setSelectedClientId(draft.selectedClientId);
+      if (draft.assignmentDay) setAssignmentDay(draft.assignmentDay);
+      if (Array.isArray(draft.measurementRows) && draft.measurementRows.length > 0) {
+        setMeasurementRows(draft.measurementRows);
+      }
+      if (Array.isArray(draft.previewTasks) && draft.previewTasks.length > 0) {
+        setPreviewTasks(draft.previewTasks);
+      }
+      const hasMeaningfulContent = Boolean(
+        draft.projectName || draft.description || draft.address ||
+        draft.clientName || draft.clientEmail ||
+        (Array.isArray(draft.measurementRows) && draft.measurementRows.length > 0) ||
+        (Array.isArray(draft.previewTasks) && draft.previewTasks.length > 0)
+      );
+      if (hasMeaningfulContent) {
+        toast.info("Draft restored", { description: "Your previous progress has been loaded." });
+      }
+    } catch {
+      // corrupt draft — ignore
+    } finally {
+      setDraftLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSurfacePresets() {
+      try {
+        setSurfacePresetsLoading(true);
+
+        const response = await fetch("/api/planning/getSurfaceScalePresets", {
+          cache: "no-store",
+        });
+
+        const data =
+          (await response.json()) as GetSurfaceScalePresetsApiResponse;
+
+        if (!response.ok || "error" in data) {
+          throw new Error(
+            "error" in data
+              ? data.details || data.error
+              : "Failed to fetch surface presets.",
+          );
+        }
+
+        if (cancelled) return;
+
+        const nextPresets = data.surfaceScalePresets ?? {};
+
+        setSurfacePresets(nextPresets);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch surface presets.";
+
+        console.error(error);
+
+        toast.error("Could not load surface presets", {
+          description: message,
+        });
+      } finally {
+        if (!cancelled) {
+          setSurfacePresetsLoading(false);
+        }
+      }
+    }
+
+    loadSurfacePresets();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist form progress to localStorage so navigating away and back restores state.
+  // Only save when the user has entered meaningful content — an auto-populated
+  // measurement row alone (no other fields filled) should not create a draft.
+  useEffect(() => {
+    if (!draftLoaded) return;
+
+    const hasUserContent = Boolean(
+      projectName || scheduledStart || address || clientName ||
+      clientEmail || description || selectedClientId ||
+      (clientPhone !== "+63") || previewTasks.length > 0
+    );
+
+    if (!hasUserContent) {
+      localStorage.removeItem(SESSION_DRAFT_KEY);
+      return;
+    }
+
+    try {
+      localStorage.setItem(
+        SESSION_DRAFT_KEY,
+        JSON.stringify({
+          projectCode,
+          projectName,
+          scheduledStart,
+          scheduledEnd,
+          address,
+          clientName,
+          clientEmail,
+          clientPhone,
+          selectedPhoneCountry,
+          description,
+          selectedClientId,
+          assignmentDay,
+          measurementRows,
+          previewTasks,
+        }),
+      );
+    } catch {
+      // storage full or unavailable — ignore
+    }
+  }, [
+    draftLoaded,
+    projectCode,
+    projectName,
+    scheduledStart,
+    scheduledEnd,
+    address,
+    clientName,
+    clientEmail,
+    clientPhone,
+    selectedPhoneCountry,
+    description,
+    selectedClientId,
+    assignmentDay,
+    measurementRows,
+    previewTasks,
+  ]);
 
   const normalizedDimensions = useMemo(
     () => rowsToProjectDimensions(measurementRows),
@@ -684,23 +573,37 @@ export default function BasicDetails() {
   );
 
   const summaryChips = useMemo(() => {
-    return measurementRows.slice(0, 4).map((row) => {
-      const preset = SURFACE_SCALE_PRESETS[row.presetKey];
-      return {
-        id: row.id,
-        label: preset.label,
-        value: `${row.estimatedValue} ${unitLabel(preset.unit)}`,
-      };
-    });
-  }, [measurementRows]);
+    return measurementRows
+      .slice(0, 4)
+      .map((row) => {
+        const preset = surfacePresets[row.presetKey];
+
+        if (!preset) return null;
+
+        return {
+          id: row.id,
+          label: preset.label,
+          value: `${row.estimatedValue} ${unitLabel(preset.unit)}`,
+        };
+      })
+      .filter(
+        (
+          chip,
+        ): chip is {
+          id: string;
+          label: string;
+          value: string;
+        } => Boolean(chip),
+      );
+  }, [measurementRows, surfacePresets]);
 
   const phoneCountryOptions = useMemo(() => {
-    return (countryCallingCodes as { country: string; calling_code: number }[]).map(
-      (item) => ({
-        country: item.country,
-        calling_code: `+${item.calling_code}`,
-      }),
-    );
+    return (
+      countryCallingCodes as { country: string; calling_code: number }[]
+    ).map((item) => ({
+      country: item.country,
+      calling_code: `+${item.calling_code}`,
+    }));
   }, []);
 
   const hasProjectNameInputs = Boolean(
@@ -766,7 +669,9 @@ export default function BasicDetails() {
         `${shortDescription || "Project"} - ${clientName.trim() || "Client"}, ${shortAddress || "Address"}`,
       );
 
-      toast.error("AI project name generation failed. Used fallback format instead.");
+      toast.error(
+        "AI project name generation failed. Used fallback format instead.",
+      );
     } finally {
       setIsGeneratingProjectName(false);
     }
@@ -783,7 +688,10 @@ export default function BasicDetails() {
 
   function handleBandChange(id: string, nextBand: ScaleBandKey) {
     updateRow(id, (row) => {
-      const preset = SURFACE_SCALE_PRESETS[row.presetKey];
+      const preset = surfacePresets[row.presetKey];
+
+      if (!preset) return row;
+
       return {
         ...row,
         sizeBand: nextBand,
@@ -795,7 +703,10 @@ export default function BasicDetails() {
   }
 
   function handlePresetChange(id: string, nextPresetKey: ScalePresetKey) {
-    const preset = SURFACE_SCALE_PRESETS[nextPresetKey];
+    const preset = surfacePresets[nextPresetKey];
+
+    if (!preset) return;
+
     updateRow(id, () => ({
       id,
       presetKey: nextPresetKey,
@@ -815,16 +726,16 @@ export default function BasicDetails() {
   }
 
   function addMeasurement(presetKey: ScalePresetKey) {
+    if (!surfacePresets[presetKey]) return;
+
     setMeasurementRows((prev) => [
-      makeRowFromPreset(presetKey, "medium"),
+      makeRowFromPreset(surfacePresets, presetKey, "medium"),
       ...prev,
     ]);
   }
 
   function removeMeasurement(id: string) {
-    setMeasurementRows((prev) =>
-      prev.length <= 1 ? prev : prev.filter((row) => row.id !== id),
-    );
+    setMeasurementRows((prev) => prev.filter((row) => row.id !== id));
   }
 
   function handlePhoneCountryChange(callingCode: string) {
@@ -959,15 +870,17 @@ export default function BasicDetails() {
       const data = (await response.json()) as CreateClientApiResponse;
 
       if (!response.ok || "error" in data) {
-        throw new Error("error" in data ? data.error : "Failed to create client.");
+        throw new Error(
+          "error" in data ? data.error : "Failed to create client.",
+        );
       }
 
       const createdClient = data.client;
 
       setClients((prev) =>
         [...prev, createdClient].sort((a, b) =>
-          String(a.full_name || "").localeCompare(String(b.full_name || ""))
-        )
+          String(a.full_name || "").localeCompare(String(b.full_name || "")),
+        ),
       );
 
       setSelectedClientId(createdClient.client_id);
@@ -985,35 +898,81 @@ export default function BasicDetails() {
     }
   }
 
-  async function generateProjectDraft() {
+  async function handleGenerateTasks() {
+    if (isGeneratingTasks) return;
+
+    if (!description.trim()) {
+      toast.error("Please enter a project description first.");
+      return;
+    }
+
+    try {
+      setIsGeneratingTasks(true);
+
+      const tasksData = await postJson<GetTasksApiResponse>(
+        "/api/planning/getTasks",
+        { description: description.trim() },
+      );
+
+      if ("error" in tasksData) throw new Error(tasksData.error);
+
+      const tasks: PreviewMainTask[] = (tasksData.main_tasks ?? []).map((task) => ({
+        name: String(task.name || "").trim(),
+        priority: Number.isFinite(Number(task.priority)) ? Number(task.priority) : 0,
+        confidence: clamp01(Number(task.confidence || 0)),
+        sub_tasks: Array.isArray(task.sub_tasks)
+          ? task.sub_tasks.map((st) => ({
+              title: String(st.title || "").trim(),
+              priority: Number.isFinite(Number(st.priority)) ? Number(st.priority) : 0,
+            }))
+          : [],
+      }));
+
+      setPreviewTasks(tasks);
+
+      // Collect unique surface keys needed by the generated tasks
+      const surfaceKeys: string[] = [];
+      const seen = new Set<string>();
+      for (const task of tasks) {
+        for (const key of TASK_TO_SURFACES[task.name] ?? []) {
+          if (!seen.has(key) && surfacePresets[key]) {
+            seen.add(key);
+            surfaceKeys.push(key);
+          }
+        }
+      }
+
+      if (surfaceKeys.length > 0) {
+        setMeasurementRows(
+          surfaceKeys.map((key) => makeRowFromPreset(surfacePresets, key, "medium")),
+        );
+      }
+
+      toast.success(`Generated ${tasks.length} main task${tasks.length !== 1 ? "s" : ""}`);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to generate tasks.");
+    } finally {
+      setIsGeneratingTasks(false);
+    }
+  }
+
+  async function generateProjectDraft(inputTasks: PreviewMainTask[]) {
     setGenerationError("");
     setGeneratedTasks([]);
 
     setLoading(true);
 
     try {
-      setGenerationStage("Generating main tasks and sub tasks");
+      setGenerationStage("Building main tasks and sub tasks");
 
-      const tasksData = await postJson<GetTasksApiResponse>(
-        "/api/planning/getTasks",
-        {
-          description: description.trim(),
-          dimensions: normalizedDimensions,
-        },
-      );
-
-      if ("error" in tasksData) {
-        throw new Error(tasksData.error);
-      }
-
-      let nextTasks: GeneratedMainTask[] = (tasksData.main_tasks ?? []).map(
+      let nextTasks: GeneratedMainTask[] = inputTasks.map(
         (task) => ({
           name: String(task.name || "").trim(),
           priority: Number.isFinite(Number(task.priority))
             ? Number(task.priority)
             : 0,
           confidence: clamp01(Number(task.confidence || 0)),
-          reasons: Array.isArray(task.reasons) ? task.reasons.map(String) : [],
+          reasons: [],
           sub_tasks: Array.isArray(task.sub_tasks)
             ? task.sub_tasks.map((subTask) => ({
                 title: String(subTask.title || "").trim(),
@@ -1233,8 +1192,10 @@ export default function BasicDetails() {
               duration: subTask.duration
                 ? {
                     baseLaborHours: subTask.duration.baseLaborHours,
-                    requiredEmployeeCount: subTask.duration.requiredEmployeeCount,
-                    adjustedDurationHours: subTask.duration.adjustedDurationHours,
+                    requiredEmployeeCount:
+                      subTask.duration.requiredEmployeeCount,
+                    adjustedDurationHours:
+                      subTask.duration.adjustedDurationHours,
                     roundedHours: subTask.duration.roundedHours,
                     formula: subTask.duration.formula,
                     driver: subTask.duration.driver,
@@ -1345,6 +1306,10 @@ export default function BasicDetails() {
       toast.error("Please enter a project description.");
       return;
     }
+    if (!previewTasks.length) {
+      toast.error("Please generate tasks first by clicking Generate Tasks.");
+      return;
+    }
     if (!measurementRows.length) {
       toast.error("Please add at least one measurement.");
       return;
@@ -1354,7 +1319,7 @@ export default function BasicDetails() {
       setSaving(true);
       setProjectCode(finalProjectCode);
 
-      const nextTasks = await generateProjectDraft();
+      const nextTasks = await generateProjectDraft(previewTasks);
 
       setLoading(true);
       setGenerationStage("Saving project draft");
@@ -1369,7 +1334,7 @@ export default function BasicDetails() {
 
       console.log(
         "createProject payload first subtask",
-        nextTasks?.[0]?.sub_tasks?.[0]
+        nextTasks?.[0]?.sub_tasks?.[0],
       );
 
       console.log(
@@ -1384,8 +1349,8 @@ export default function BasicDetails() {
             })),
           })),
           null,
-          2
-        )
+          2,
+        ),
       );
 
       const createProjectResponse = await fetch("/api/planning/createProject", {
@@ -1484,6 +1449,7 @@ export default function BasicDetails() {
         }),
       );
 
+      localStorage.removeItem(SESSION_DRAFT_KEY);
       router.push(
         `/admin/job-creation/main-task-assignment?projectId=${projectRow.project_id}`,
       );
@@ -1523,7 +1489,7 @@ export default function BasicDetails() {
     loadClients();
   }, []);
 
-    useEffect(() => {
+  useEffect(() => {
     async function loadUnavailableScheduleDates() {
       try {
         const response = await fetch("/api/schedule/getUnavailableDates", {
@@ -1534,7 +1500,7 @@ export default function BasicDetails() {
 
         if (!response.ok) {
           throw new Error(
-            data?.error || "Failed to load unavailable schedule dates."
+            data?.error || "Failed to load unavailable schedule dates.",
           );
         }
 
@@ -1580,6 +1546,119 @@ export default function BasicDetails() {
 
   const isBusy = saving || loading;
 
+  const hasChanges = Boolean(
+    projectName || scheduledStart || address || clientName ||
+    clientEmail || description || selectedClientId ||
+    (clientPhone !== "+63") ||
+    measurementRows.length > 0 || previewTasks.length > 0
+  );
+
+  function handleRemoveDraft() {
+    localStorage.removeItem(SESSION_DRAFT_KEY);
+    setProjectCode(generateProjectCode());
+    setProjectName("");
+    setScheduledStart("");
+    setScheduledEnd("");
+    setAddress("");
+    setClientName("");
+    setClientEmail("");
+    setClientPhone("+63");
+    setSelectedPhoneCountry("+63");
+    setDescription("");
+    setSelectedClientId("");
+    setAssignmentDay("monday");
+    setMeasurementRows([]);
+    setPreviewTasks([]);
+    toast.success("Draft cleared");
+  }
+
+  function formatSurfaceMessage(): string {
+    const lines = measurementRows
+      .map((row) => {
+        const preset = surfacePresets[row.presetKey];
+        if (!preset) return null;
+        return `  • ${preset.label}: ${row.estimatedValue} ${unitLabel(preset.unit)}`;
+      })
+      .filter(Boolean) as string[];
+
+    return [
+      "Hi,",
+      "",
+      "Please review the surface measurements required for the upcoming project:",
+      "",
+      ...lines,
+      "",
+      "Could you confirm these requirements are suitable and let me know if anything needs to be adjusted?",
+      "",
+      "Thank you.",
+    ].join("\n");
+  }
+
+  function handleOpenSurfaceMsg() {
+    setSurfaceMsgStep("confirm");
+    setSurfaceMsgEmployeeId("");
+    setSurfaceMsgText("");
+    setSurfaceMsgOpen(true);
+  }
+
+  async function handleSurfaceMsgProceed() {
+    setSurfaceMsgLoadingEmployees(true);
+    try {
+      const res = await fetch("/api/planning/getStaffUsers");
+      if (!res.ok) throw new Error("Failed to load employees.");
+      const json = await res.json();
+
+      setSurfaceMsgEmployees(
+        (json.staffUsers ?? []).map((u: any) => ({
+          id: String(u.id),
+          name: String(u.username || u.email || "Unknown"),
+          email: String(u.email || ""),
+          role: "staff",
+        })),
+      );
+      setSurfaceMsgText(formatSurfaceMessage());
+      setSurfaceMsgStep("compose");
+    } catch {
+      toast.error("Failed to load employees.");
+    } finally {
+      setSurfaceMsgLoadingEmployees(false);
+    }
+  }
+
+  async function handleSendSurfaceMsg() {
+    if (!surfaceMsgEmployeeId || !surfaceMsgText.trim()) return;
+    setSurfaceMsgSending(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const senderId = authData?.user?.id;
+      if (!senderId) throw new Error("Not authenticated.");
+
+      const convRes = await fetch("/api/messages/conversation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: surfaceMsgEmployeeId, initiatorId: senderId }),
+      });
+      if (!convRes.ok) throw new Error("Failed to create conversation.");
+      const convData = await convRes.json();
+      const conversationId = convData?.conversationId ?? convData?.id ?? convData?.conversation?.id;
+      if (!conversationId) throw new Error("No conversation ID returned.");
+
+      const { error: msgError } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        sender_id: senderId,
+        content: surfaceMsgText.trim(),
+      });
+      if (msgError) throw msgError;
+
+      toast.success("Surface requirements sent successfully.");
+      setSurfaceMsgOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to send message.");
+    } finally {
+      setSurfaceMsgSending(false);
+    }
+  }
+
   return (
     <>
       <div className="flex h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 w-full flex-col px-4 py-3">
@@ -1593,7 +1672,10 @@ export default function BasicDetails() {
 
         <div className="min-h-0 flex-1">
           <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
+            <div
+              className="h-1 w-full shrink-0"
+              style={{ backgroundColor: ACCENT }}
+            />
 
             <div className="shrink-0 border-b border-gray-200 px-5 py-3">
               <div className="flex items-start justify-between gap-3">
@@ -1659,21 +1741,23 @@ export default function BasicDetails() {
                           style={{ backgroundColor: ACCENT }}
                           onMouseEnter={(e) => {
                             if (!isGeneratingProjectName) {
-                              e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                              e.currentTarget.style.backgroundColor =
+                                ACCENT_HOVER;
                             }
                           }}
                           onMouseLeave={(e) => {
                             if (!isGeneratingProjectName) {
                               e.currentTarget.style.backgroundColor = ACCENT;
                             }
-                          }}
-                        >
+                          }}>
                           {isGeneratingProjectName ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <RefreshCw className="h-4 w-4" />
                           )}
-                          {isGeneratingProjectName ? "Generating..." : "Generate"}
+                          {isGeneratingProjectName
+                            ? "Generating..."
+                            : "Generate"}
                         </button>
                       </div>
 
@@ -1694,8 +1778,7 @@ export default function BasicDetails() {
                       <button
                         type="button"
                         onClick={() => setIsScheduleCalendarOpen(true)}
-                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50`}
-                      >
+                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50`}>
                         {scheduledStart || "Select start date"}
                       </button>
 
@@ -1744,13 +1827,16 @@ export default function BasicDetails() {
                         onChange={(e) => handleClientSelect(e.target.value)}
                         className={`mt-1.5 h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
                         style={{ ["--tw-ring-color" as any]: ACCENT }}
-                        disabled={clientsLoading}
-                      >
+                        disabled={clientsLoading}>
                         <option value="">
-                          {clientsLoading ? "Loading clients..." : "Choose a client"}
+                          {clientsLoading
+                            ? "Loading clients..."
+                            : "Choose a client"}
                         </option>
                         {clients.map((client) => (
-                          <option key={client.client_id} value={client.client_id}>
+                          <option
+                            key={client.client_id}
+                            value={client.client_id}>
                             {client.full_name || "Unnamed Client"}
                           </option>
                         ))}
@@ -1771,8 +1857,7 @@ export default function BasicDetails() {
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = ACCENT;
-                        }}
-                      >
+                        }}>
                         Create New Client
                       </button>
                     </div>
@@ -1793,8 +1878,7 @@ export default function BasicDetails() {
 
                         <div
                           className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm focus-within:ring-2`}
-                          style={{ ["--tw-ring-color" as any]: ACCENT }}
-                        >
+                          style={{ ["--tw-ring-color" as any]: ACCENT }}>
                           <span className="shrink-0 px-3 text-sm text-gray-500">
                             {selectedPhoneCountry}
                           </span>
@@ -1822,72 +1906,106 @@ export default function BasicDetails() {
                 </div>
 
                 <div className="col-span-7 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col">
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ backgroundColor: ACCENT }}
-                          aria-hidden="true"
-                        />
-                        <p className="text-sm font-semibold text-gray-900">
-                          Measurements & Description
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setMeasurementModalOpen(true)}
-                      className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-white shadow-sm transition-all duration-200"
+                  <div className="mb-2 flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
                       style={{ backgroundColor: ACCENT }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = ACCENT;
-                      }}
-                    >
-                      <Settings2 className="h-3.5 w-3.5" />
-                      Edit
-                    </button>
+                      aria-hidden="true"
+                    />
+                    <p className="text-sm font-semibold text-gray-900">
+                      Description
+                    </p>
                   </div>
 
-                  <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-2.5">
-                    <div className={`rounded-2xl border ${BORDER} bg-gray-50 p-2`}>
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                        Configured Surfaces
-                      </div>
-
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {summaryChips.slice(0, 6).map((chip) => (
-                          <span
-                            key={chip.id}
-                            className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700"
-                          >
-                            {chip.label}: {chip.value}
-                          </span>
-                        ))}
-
-                        {measurementRows.length > 6 ? (
-                          <span className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
-                            +{measurementRows.length - 6} more
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="min-h-0 flex flex-col">
+                  <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+                    {/* Description + Recommend Surfaces */}
+                    <div className="flex flex-1 min-h-0 flex-col gap-1.5">
                       <label className="text-[11px] font-medium text-gray-600">
-                        Description
+                        Project Description
                       </label>
                       <textarea
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
-                        placeholder="Write a summary of the dimensions or project scope"
-                        className={`mt-1 flex-1 min-h-[96px] w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
+                        placeholder="Write a summary of the project scope (e.g. interior repaint of 3-bedroom house)"
+                        className={`flex-1 min-h-0 w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
                         style={{ ["--tw-ring-color" as any]: ACCENT }}
                       />
+                      <button
+                        type="button"
+                        onClick={handleGenerateTasks}
+                        disabled={!description.trim() || isGeneratingTasks || isBusy}
+                        className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ backgroundColor: ACCENT }}
+                        onMouseEnter={(e) => {
+                          if (description.trim() && !isGeneratingTasks && !isBusy)
+                            e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = ACCENT;
+                        }}>
+                        {isGeneratingTasks ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {isGeneratingTasks ? "Recommending surfaces..." : "Recommend Surfaces"}
+                      </button>
+                    </div>
+
+                    {/* Configured surfaces */}
+                    <div className={`rounded-xl border ${BORDER} bg-gray-50 p-2`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                          Configured Surfaces
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {measurementRows.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={handleOpenSurfaceMsg}
+                              className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100">
+                              <MessageSquare className="h-3 w-3" />
+                              Message Employee
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => setMeasurementModalOpen(true)}
+                            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-semibold text-white shadow-sm transition-all duration-200"
+                            style={{ backgroundColor: ACCENT }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = ACCENT;
+                            }}>
+                            <Settings2 className="h-3 w-3" />
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {summaryChips.length === 0 ? (
+                          <span className="text-[11px] text-gray-400">
+                            Enter a description and click Recommend Surfaces, or edit manually.
+                          </span>
+                        ) : (
+                          <>
+                            {summaryChips.slice(0, 6).map((chip) => (
+                              <span
+                                key={chip.id}
+                                className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                                {chip.label}: {chip.value}
+                              </span>
+                            ))}
+                            {measurementRows.length > 6 ? (
+                              <span className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                                +{measurementRows.length - 6} more
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1895,35 +2013,43 @@ export default function BasicDetails() {
             </div>
 
             <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-2.5">
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  className="w-[140px] rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-300"
-                  onClick={() => router.back()}
-                  disabled={isBusy}
-                >
-                  Go Back
-                </button>
-
-                <button
-                  type="button"
-                  className="w-[140px] rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: ACCENT }}
-                  onClick={handleSaveAndContinue}
-                  disabled={isBusy}
-                  onMouseEnter={(e) => {
-                    if (!isBusy) {
-                      e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isBusy) {
-                      e.currentTarget.style.backgroundColor = ACCENT;
-                    }
-                  }}
-                >
-                  {isBusy ? "Processing..." : "Next"}
-                </button>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={handleRemoveDraft}
+                    disabled={isBusy || !hasChanges}>
+                    Remove Changes
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="w-[140px] rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-300"
+                    onClick={() => router.back()}
+                    disabled={isBusy}>
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    className="w-[140px] rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+                    style={{ backgroundColor: ACCENT }}
+                    onClick={handleSaveAndContinue}
+                    disabled={isBusy}
+                    onMouseEnter={(e) => {
+                      if (!isBusy) {
+                        e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isBusy) {
+                        e.currentTarget.style.backgroundColor = ACCENT;
+                      }
+                    }}>
+                    {isBusy ? "Processing..." : "Next"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1952,63 +2078,165 @@ export default function BasicDetails() {
         <MeasurementModal
           open={measurementModalOpen}
           rows={measurementRows}
+          surfacePresets={surfacePresets}
+          loadingPresets={surfacePresetsLoading}
           onClose={() => setMeasurementModalOpen(false)}
-          onAdd={(presetKey) =>
-            setMeasurementRows((prev) => [
-              makeRowFromPreset(presetKey, "medium"),
-              ...prev,
-            ])
-          }
-          onRemove={(id) =>
-            setMeasurementRows((prev) => prev.filter((row) => row.id !== id))
-          }
-          onPresetChange={(id, presetKey) => {
-            const preset = SURFACE_SCALE_PRESETS[presetKey];
-            setMeasurementRows((prev) =>
-              prev.map((row) =>
-                row.id === id
-                  ? {
-                      ...row,
-                      presetKey,
-                      sizeBand: "medium",
-                      estimatedValue: preset.bands.medium.suggested,
-                      isManualOverride: false,
-                    }
-                  : row,
-              ),
-            );
-          }}
-          onBandChange={(id, band) => {
-            setMeasurementRows((prev) =>
-              prev.map((row) => {
-                if (row.id !== id) return row;
-                const preset = SURFACE_SCALE_PRESETS[row.presetKey];
-                return {
-                  ...row,
-                  sizeBand: band,
-                  estimatedValue: row.isManualOverride
-                    ? row.estimatedValue
-                    : preset.bands[band].suggested,
-                };
-              }),
-            );
-          }}
-          onManualValueChange={(id, rawValue) => {
-            const nextValue = Number(rawValue);
-            setMeasurementRows((prev) =>
-              prev.map((row) =>
-                row.id === id
-                  ? {
-                      ...row,
-                      estimatedValue: Number.isFinite(nextValue) ? nextValue : 0,
-                      isManualOverride: true,
-                    }
-                  : row,
-              ),
-            );
-          }}
+          onAdd={addMeasurement}
+          onRemove={removeMeasurement}
+          onPresetChange={handlePresetChange}
+          onBandChange={handleBandChange}
+          onManualValueChange={handleManualValueChange}
         />
       </div>
+
+      {/* Surface message modal */}
+      {surfaceMsgOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">
+                  {surfaceMsgStep === "confirm"
+                    ? "Send Surface Requirements"
+                    : "Compose Message"}
+                </h3>
+                <p className="mt-0.5 text-sm text-gray-500">
+                  {surfaceMsgStep === "confirm"
+                    ? "Pass the configured surface measurements to an employee."
+                    : "Select an employee and review the message before sending."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSurfaceMsgOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            {surfaceMsgStep === "confirm" ? (
+              <div className="px-5 py-4">
+                <p className="text-sm text-gray-700">
+                  The following surfaces will be included in the message:
+                </p>
+                <ul className="mt-3 space-y-1.5">
+                  {measurementRows.map((row) => {
+                    const preset = surfacePresets[row.presetKey];
+                    if (!preset) return null;
+                    return (
+                      <li
+                        key={row.id}
+                        className="flex items-center gap-2 text-sm text-gray-800">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: ACCENT }}
+                        />
+                        <span className="font-medium">{preset.label}:</span>
+                        <span className="text-gray-600">
+                          {row.estimatedValue} {unitLabel(preset.unit)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSurfaceMsgOpen(false)}
+                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSurfaceMsgProceed}
+                    disabled={surfaceMsgLoadingEmployees}
+                    className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:opacity-60"
+                    style={{ backgroundColor: ACCENT }}
+                    onMouseEnter={(e) => {
+                      if (!surfaceMsgLoadingEmployees)
+                        e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = ACCENT;
+                    }}>
+                    {surfaceMsgLoadingEmployees ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    Yes, Pick Employee
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="px-5 py-4 space-y-3">
+                {/* Employee picker */}
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-600">
+                    Employee
+                  </label>
+                  <select
+                    value={surfaceMsgEmployeeId}
+                    onChange={(e) => setSurfaceMsgEmployeeId(e.target.value)}
+                    className={`mt-1.5 h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
+                    style={{ ["--tw-ring-color" as any]: ACCENT }}>
+                    <option value="">Choose an employee...</option>
+                    {surfaceMsgEmployees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name}
+                        {emp.role ? ` (${emp.role})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Message */}
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-600">
+                    Message
+                  </label>
+                  <textarea
+                    value={surfaceMsgText}
+                    onChange={(e) => setSurfaceMsgText(e.target.value)}
+                    rows={10}
+                    className={`mt-1.5 w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 font-mono text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
+                    style={{ ["--tw-ring-color" as any]: ACCENT }}
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setSurfaceMsgOpen(false)}
+                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendSurfaceMsg}
+                    disabled={!surfaceMsgEmployeeId || !surfaceMsgText.trim() || surfaceMsgSending}
+                    className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+                    style={{ backgroundColor: ACCENT }}
+                    onMouseEnter={(e) => {
+                      if (surfaceMsgEmployeeId && !surfaceMsgSending)
+                        e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = ACCENT;
+                    }}>
+                    {surfaceMsgSending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                    {surfaceMsgSending ? "Sending..." : "Send Message"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="fixed inset-0 z-80 flex items-center justify-center bg-white/80 backdrop-blur-sm">
@@ -2023,7 +2251,8 @@ export default function BasicDetails() {
               </h2>
 
               <p className="mt-2 text-sm text-gray-600">
-                PaintPro is generating the project setup and preparing it for saving.
+                PaintPro is generating the project setup and preparing it for
+                saving.
               </p>
 
               {generationStage ? (
@@ -2049,5 +2278,5 @@ export default function BasicDetails() {
         }}
       />
     </>
-  )
+  );
 }

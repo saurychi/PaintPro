@@ -114,6 +114,90 @@
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
+/* ── PaintPro shared app palette ─────────────────────────────────────────── */
+/* Used by admin and staff pages. Client pages use --cp-* vars below.         */
+
+:root {
+  --app-bg:           #f9fafb;
+  --app-surface:      #ffffff;
+  --app-surface-2:    #f3f4f6;
+  --app-border:       #e5e7eb;
+  --app-border-2:     #d1d5db;
+  --app-text:         #111827;
+  --app-text-2:       #374151;
+  --app-text-muted:   #6b7280;
+  --app-text-faint:   #9ca3af;
+  --app-brand:        #00c065;
+  --app-brand-hover:  #00a054;
+  --app-brand-light:  #f0fdf7;
+  --app-danger:       #dc2626;
+  --app-danger-light: #fef2f2;
+  --app-danger-text:  #991b1b;
+  --app-success:      #16a34a;
+}
+
+.dark {
+  --app-bg:           #111827;
+  --app-surface:      #1f2937;
+  --app-surface-2:    #374151;
+  --app-border:       #374151;
+  --app-border-2:     #4b5563;
+  --app-text:         #f9fafb;
+  --app-text-2:       #e5e7eb;
+  --app-text-muted:   #9ca3af;
+  --app-text-faint:   #6b7280;
+  --app-brand:        #00c065;
+  --app-brand-hover:  #00d872;
+  --app-brand-light:  #052e16;
+  --app-danger:       #f87171;
+  --app-danger-light: #450a0a;
+  --app-danger-text:  #fca5a5;
+  --app-success:      #4ade80;
+}
+
+/* ── PaintPro client-page palette ──────────────────────────────────────────── */
+/* Derived from brand green #00c065. Applied wherever .dark wraps client pages. */
+
+:root {
+  --cp-bg:            #f0fdf7;
+  --cp-surface:       #ffffff;
+  --cp-surface-2:     #f7fdfb;
+  --cp-border:        #d1fae5;
+  --cp-border-2:      #a7f3d0;
+  --cp-text:          #0a2e1c;
+  --cp-text-2:        #166534;
+  --cp-text-muted:    #4b7a65;
+  --cp-text-faint:    #9db8ab;
+  --cp-brand:         #00c065;
+  --cp-brand-hover:   #00a054;
+  --cp-brand-light:   #edfff6;
+  --cp-brand-light-2: #d3ffed;
+  --cp-danger:        #dc2626;
+  --cp-danger-light:  #fef2f2;
+  --cp-danger-text:   #991b1b;
+  --cp-success:       #16a34a;
+}
+
+.dark {
+  --cp-bg:            #071a0f;
+  --cp-surface:       #0d2d1c;
+  --cp-surface-2:     #0f3220;
+  --cp-border:        #1a4a2e;
+  --cp-border-2:      #256a42;
+  --cp-text:          #ecfdf5;
+  --cp-text-2:        #a7f3d0;
+  --cp-text-muted:    #6ee7b7;
+  --cp-text-faint:    #34d399;
+  --cp-brand:         #00c065;
+  --cp-brand-hover:   #00d872;
+  --cp-brand-light:   #0a2416;
+  --cp-brand-light-2: #0f3220;
+  --cp-danger:        #f87171;
+  --cp-danger-light:  #450a0a;
+  --cp-danger-text:   #fca5a5;
+  --cp-success:       #4ade80;
+}
+
 @layer base {
   :root {
     --sidebar: oklch(0.985 0 0);
@@ -137,3 +221,52 @@
     --sidebar-ring: oklch(0.439 0 0);
   }
 }
+
+/* ── Global dark-mode overrides ─────────────────────────────────────────── */
+/* Override common Tailwind utility classes when dark mode is active.        */
+/* Placed outside @layer so they outrank Tailwind's generated utilities.     */
+
+html.dark {
+  background-color: var(--app-bg);
+  color: var(--app-text);
+}
+
+/* Backgrounds */
+html.dark .bg-white { background-color: var(--app-surface); }
+html.dark .bg-gray-50 { background-color: var(--app-surface-2); }
+html.dark .bg-gray-100 { background-color: var(--app-surface-2); }
+html.dark .bg-gray-200 { background-color: var(--app-border); }
+
+/* Hover backgrounds */
+html.dark .hover\:bg-gray-50:hover { background-color: var(--app-surface-2); }
+html.dark .hover\:bg-gray-100:hover { background-color: var(--app-border); }
+html.dark .hover\:bg-white:hover { background-color: var(--app-surface); }
+
+/* Text colors */
+html.dark .text-gray-950,
+html.dark .text-gray-900 { color: var(--app-text); }
+html.dark .text-gray-800,
+html.dark .text-gray-700 { color: var(--app-text-2); }
+html.dark .text-gray-600,
+html.dark .text-gray-500 { color: var(--app-text-muted); }
+html.dark .text-gray-400,
+html.dark .text-gray-300 { color: var(--app-text-faint); }
+
+/* Border colors */
+html.dark .border-gray-100,
+html.dark .border-gray-200 { border-color: var(--app-border); }
+html.dark .border-gray-300 { border-color: var(--app-border-2); }
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--app-border); }
+
+/* Danger */
+html.dark .text-red-600,
+html.dark .text-red-700 { color: var(--app-danger); }
+html.dark .bg-red-50 { background-color: var(--app-danger-light); }
+html.dark .border-red-200 { border-color: var(--app-danger); }
+html.dark .hover\:bg-red-50:hover { background-color: var(--app-danger-light); }
+
+/* Success */
+html.dark .text-emerald-700,
+html.dark .text-emerald-600 { color: var(--app-success); }
+html.dark .bg-emerald-50 { background-color: var(--app-brand-light); }

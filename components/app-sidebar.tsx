@@ -89,6 +89,14 @@ const adminItems: Item[] = [
     title: "Documents",
     url: "/admin/documents",
     icon: FileText,
+    subItems: [
+      {
+        key: "pending-documents",
+        title: "Pending",
+        url: "/admin/documents/pending",
+        matchUrls: ["/admin/documents/pending"],
+      },
+    ],
   },
   {
     key: "messages",
@@ -105,8 +113,38 @@ const adminItems: Item[] = [
 ];
 
 const staffItems: Item[] = [
-  { key: "dashboard", title: "Dashboard", url: "/staff", icon: Home },
-  { key: "report", title: "Report", url: "/staff/report", icon: BarChart3 },
+  {
+    key: "dashboard",
+    title: "Dashboard",
+    url: "/staff",
+    icon: Home,
+  },
+  {
+    key: "report",
+    title: "Report",
+    url: "/staff/report",
+    icon: BarChart3,
+    subItems: [
+      {
+        key: "staff-report-attendance",
+        title: "Attendance",
+        url: "/staff/report/attendance",
+        matchUrls: ["/staff/report/attendance"],
+      },
+      {
+        key: "staff-report-payroll",
+        title: "Payroll",
+        url: "/staff/report/payroll",
+        matchUrls: ["/staff/report/payroll"],
+      },
+    ],
+  },
+  {
+    key: "messages",
+    title: "Messages",
+    url: "/staff/messages",
+    icon: MessageSquare,
+  },
   { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
   {
     key: "settings",
@@ -129,6 +167,14 @@ const clientItems: Item[] = [
     title: "Documents",
     url: "/client/documents",
     icon: FileText,
+    subItems: [
+      {
+        key: "pending-documents",
+        title: "Pending",
+        url: "/client/documents/pending",
+        matchUrls: ["/client/documents/pending"],
+      },
+    ],
   },
   {
     key: "schedule",
@@ -228,7 +274,13 @@ export function AppSidebar({ role }: AppSidebarProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [openMenus, setOpenMenus] = React.useState<Record<string, boolean>>({
     dashboard:
-      pathname === "/admin" || pathname.startsWith("/admin/job-creation"),
+      pathname === "/admin" ||
+      pathname.startsWith("/admin/job-creation") ||
+      pathname === "/staff",
+    report: pathname.startsWith("/staff/report"),
+    documents:
+      pathname.startsWith("/admin/documents") ||
+      pathname.startsWith("/client/documents"),
   });
 
   React.useEffect(() => {
