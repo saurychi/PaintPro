@@ -482,15 +482,8 @@ export default function BasicDetails() {
         if (cancelled) return;
 
         const nextPresets = data.surfaceScalePresets ?? {};
-        const firstPresetKey = Object.keys(nextPresets)[0];
 
         setSurfacePresets(nextPresets);
-
-        setMeasurementRows((prev) => {
-          if (prev.length > 0 || !firstPresetKey) return prev;
-
-          return [makeRowFromPreset(nextPresets, firstPresetKey, "medium")];
-        });
       } catch (error) {
         const message =
           error instanceof Error
@@ -517,8 +510,22 @@ export default function BasicDetails() {
   }, []);
 
   // Persist form progress to localStorage so navigating away and back restores state.
+  // Only save when the user has entered meaningful content — an auto-populated
+  // measurement row alone (no other fields filled) should not create a draft.
   useEffect(() => {
     if (!draftLoaded) return;
+
+    const hasUserContent = Boolean(
+      projectName || scheduledStart || address || clientName ||
+      clientEmail || description || selectedClientId ||
+      (clientPhone !== "+63") || previewTasks.length > 0
+    );
+
+    if (!hasUserContent) {
+      localStorage.removeItem(SESSION_DRAFT_KEY);
+      return;
+    }
+
     try {
       localStorage.setItem(
         SESSION_DRAFT_KEY,

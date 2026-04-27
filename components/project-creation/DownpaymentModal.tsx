@@ -41,6 +41,9 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
         if (!response.ok) throw new Error(data?.error || "Failed to fetch budget.");
         setEstimatedBudget(Number(data.estimatedBudget) || 0);
         setEstimatedCost(Number(data.estimatedCost) || 0);
+        if (data.downpayment) {
+          setPaidAmount(String(data.downpayment));
+        }
       } catch {
         setEstimatedBudget(0);
       } finally {
@@ -63,10 +66,10 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
     try {
       setConfirming(true);
 
-      const response = await fetch("/api/planning/updateProjectStatus", {
+      const response = await fetch("/api/planning/manageDownpayment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, status: "ready_to_start" }),
+        body: JSON.stringify({ projectId, downpayment: paid }),
       });
 
       if (!response.ok) {

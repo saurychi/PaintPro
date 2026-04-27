@@ -15,7 +15,18 @@ function normalizeStatus(status: string | null) {
 
   if (value === "completed" || value === "done") return "done"
   if (value === "behind" || value === "delayed" || value === "overdue") return "behind"
-  if (value === "in_progress" || value === "ongoing" || value === "active") return "current"
+  if (
+    value === "in_progress" ||
+    value === "ongoing" ||
+    value === "active" ||
+    value === "review_pending" ||
+    value === "invoice_pending" ||
+    value === "payment_pending" ||
+    value === "employee_management_pending" ||
+    value === "conclude_job_pending"
+  ) {
+    return "current"
+  }
 
   if (
     value === "main_task_pending" ||

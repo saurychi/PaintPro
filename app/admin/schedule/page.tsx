@@ -4,7 +4,11 @@ import React, { useEffect, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
+import type {
+  EventClickArg,
+  EventContentArg,
+  EventInput,
+} from "@fullcalendar/core";
 import { Loader2, CalendarDays, BriefcaseBusiness } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -65,7 +69,7 @@ function toFCEvent(project: ScheduleProject): FCEvent | null {
   const colors = STATUS_COLORS[status];
   const startDateStr = project.scheduledStartDatetime.slice(0, 10);
 
-  const event: any = {
+  const event: EventInput = {
     id: project.id,
     title: project.title,
     start: startDateStr,
@@ -207,6 +211,11 @@ export default function AdminSchedule() {
     if (
       status === "ready_to_start" ||
       status === "in_progress" ||
+      status === "review_pending" ||
+      status === "invoice_pending" ||
+      status === "payment_pending" ||
+      status === "employee_management_pending" ||
+      status === "conclude_job_pending" ||
       status === "ongoing" ||
       status === "active"
     ) {
