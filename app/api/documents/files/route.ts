@@ -30,10 +30,15 @@ export async function GET(request: Request) {
       requestQuery = requestQuery.in("document_type", types)
     }
 
-    if (sort === "name_asc") requestQuery = requestQuery.order("title", { ascending: true })
-    else if (sort === "name_desc") requestQuery = requestQuery.order("title", { ascending: false })
-    else if (sort === "date_asc") requestQuery = requestQuery.order("created_at", { ascending: true })
-    else requestQuery = requestQuery.order("created_at", { ascending: false })
+    if (sort === "name_asc") {
+      requestQuery = requestQuery.order("title", { ascending: true })
+    } else if (sort === "name_desc") {
+      requestQuery = requestQuery.order("title", { ascending: false })
+    } else if (sort === "date_asc") {
+      requestQuery = requestQuery.order("created_at", { ascending: true })
+    } else {
+      requestQuery = requestQuery.order("created_at", { ascending: false })
+    }
 
     const { data, error } = await requestQuery
 
@@ -109,6 +114,24 @@ export async function PATCH(request: Request) {
 
     if (!documentId) {
       return NextResponse.json({ error: "Document id is required" }, { status: 400 })
+    }
+
+    if (action === "move") {
+      const folderId = body.folderId ? String(body.folderId) : null
+
+      const { error } = await supabaseAdmin
+        .from("documents")
+        .update({
+          folder_id: folderId,
+          updated_at: now,
+        })
+        .eq("document_id", documentId)
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+
+      return NextResponse.json({ ok: true })
     }
 
     if (action === "rename") {
