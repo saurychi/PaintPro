@@ -9,6 +9,10 @@ type SurfaceOption = {
   unit: string;
 };
 
+function isObj(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function extractJsonObject(raw: string) {
   const trimmed = String(raw || "").trim();
   if (!trimmed) {
@@ -59,11 +63,15 @@ export async function POST(request: Request) {
     const messageText = String(body?.messageText || "").trim();
     const surfaces = Array.isArray(body?.surfaces)
       ? body.surfaces
-          .map((surface) => ({
-            presetKey: String(surface?.presetKey || "").trim(),
-            label: String(surface?.label || "").trim(),
-            unit: String(surface?.unit || "").trim(),
-          }))
+          .map((surface: unknown) => {
+            const candidate = isObj(surface) ? surface : {};
+
+            return {
+              presetKey: String(candidate.presetKey || "").trim(),
+              label: String(candidate.label || "").trim(),
+              unit: String(candidate.unit || "").trim(),
+            };
+          })
           .filter(
             (surface): surface is SurfaceOption =>
               Boolean(surface.presetKey && surface.label && surface.unit),
@@ -138,27 +146,34 @@ ${messageText}
     const parsed = extractJsonObject(rawResult);
     const allowedPresetKeys = new Set(surfaces.map((surface) => surface.presetKey));
 
-    const measurements = Array.isArray(parsed?.measurements)
-      ? parsed.measurements
-          .map((measurement) => ({
-            presetKey: String(measurement?.presetKey || "").trim(),
-            estimatedValue: Number(measurement?.estimatedValue),
-          }))
+    const parsedMeasurements =
+      isObj(parsed) && Array.isArray(parsed.measurements)
+        ? parsed.measurements
+        : [];
+
+    const measurements = parsedMeasurements
+          .map((measurement: unknown) => {
+            const candidate = isObj(measurement) ? measurement : {};
+
+            return {
+              presetKey: String(candidate.presetKey || "").trim(),
+              estimatedValue: Number(candidate.estimatedValue),
+            };
+          })
           .filter(
             (measurement) =>
               Boolean(measurement.presetKey) &&
               allowedPresetKeys.has(measurement.presetKey) &&
               Number.isFinite(measurement.estimatedValue) &&
               measurement.estimatedValue >= 0,
-          )
-      : [];
+          );
 
     return NextResponse.json({ measurements });
-  } catch (error: any) {
+  } catch (error) {
     return NextResponse.json(
       {
         error: "Failed to extract surface measurements.",
-        details: error?.message || "Unknown error",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     );
