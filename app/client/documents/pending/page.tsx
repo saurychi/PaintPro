@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import SignatureCanvas from "react-signature-canvas";
 import {
-  CheckCircle2,
   Download,
   FileText,
   Loader2,
@@ -29,7 +28,7 @@ type ProjectOverviewResponse = {
   details?: string;
 };
 
-type DocumentMode = "quotation" | "invoice" | "none";
+type DocumentType = "quotation" | "invoice" | "none";
 
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
@@ -45,9 +44,15 @@ function readError(data: ProjectOverviewResponse | null, fallback: string) {
   return [data?.error, data?.details].filter(Boolean).join(": ") || fallback;
 }
 
-function getDocumentMode(status: string): DocumentMode {
-  if (status === "quotation_pending") return "quotation";
-  if (status === "invoice_agreement_pending") return "invoice";
+function getDocumentType(status: string): DocumentType {
+  if (status === "quotation_pending" || status === "ready_to_start") {
+    return "quotation";
+  }
+
+  if (status === "invoice_agreement_pending" || status === "payment_pending") {
+    return "invoice";
+  }
+
   return "none";
 }
 
@@ -69,24 +74,46 @@ export default function ClientPendingDocumentsPage() {
   const [signatureErr, setSignatureErr] = useState<string | null>(null);
 
   const projectStatus = String(project?.status || "").trim();
-  const documentMode = getDocumentMode(projectStatus);
+  const documentType = getDocumentType(projectStatus);
 
-  const isPendingQuotation = documentMode === "quotation";
-  const isPendingInvoiceAgreement = documentMode === "invoice";
+  const isPendingQuotation = projectStatus === "quotation_pending";
+  const isPendingInvoiceAgreement = projectStatus === "invoice_agreement_pending";
   const isQuotationApproved = projectStatus === "ready_to_start";
   const isInvoiceAccepted = projectStatus === "payment_pending";
 
-  const documentLabel = documentMode === "invoice" ? "Invoice" : "Quotation";
+  const documentLabel =
+    documentType === "invoice"
+      ? "Invoice"
+      : documentType === "quotation"
+        ? "Quotation"
+        : "Document";
+
+  const pageTitle =
+    isPendingQuotation || isPendingInvoiceAgreement
+      ? `Pending ${documentLabel}`
+      : documentType === "none"
+        ? "Project Document"
+        : `${documentLabel} Document`;
+
+  const pageSubtitle = isPendingInvoiceAgreement
+    ? "Review and sign your project invoice agreement."
+    : isPendingQuotation
+      ? "Review and sign your project quotation."
+      : isInvoiceAccepted
+        ? "Your signed invoice agreement has been recorded."
+        : isQuotationApproved
+          ? "Your signed quotation has been recorded."
+          : "Review your project document.";
 
   const previewSrc = useMemo(() => {
-    if (!projectId) return "";
+    if (!projectId || documentType === "none") return "";
 
-    if (documentMode === "invoice") {
+    if (documentType === "invoice") {
       return `/api/invoice/html?projectId=${encodeURIComponent(projectId)}`;
     }
 
     return `/api/quotation/html?projectId=${encodeURIComponent(projectId)}`;
-  }, [projectId, documentMode]);
+  }, [projectId, documentType]);
 
   useEffect(() => {
     if (!projectId) {
@@ -129,20 +156,32 @@ export default function ClientPendingDocumentsPage() {
     loadProject();
   }, [projectId]);
 
-  async function approveQuotation() {
+  async function signQuotation() {
     if (!projectId || approving) return;
+
+    setSignatureErr(null);
+
+    if (!signatureRef.current || signatureRef.current.isEmpty()) {
+      setSignatureErr("Please draw your signature.");
+      return;
+    }
 
     try {
       setApproving(true);
 
-      const response = await fetch("/api/planning/updateProjectStatus", {
+      const signatureDataUrl = signatureRef.current
+        .getTrimmedCanvas()
+        .toDataURL("image/png");
+
+      const response = await fetch("/api/client/documents/quotation-signature", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           projectId,
-          status: "ready_to_start",
+          projectCode: project?.project_code,
+          signatureDataUrl,
         }),
       });
 
@@ -151,7 +190,7 @@ export default function ClientPendingDocumentsPage() {
       if (!response.ok) {
         throw new Error(
           [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to approve quotation.",
+            "Failed to sign quotation.",
         );
       }
 
@@ -164,15 +203,17 @@ export default function ClientPendingDocumentsPage() {
           : prev,
       );
 
-      toast.success("Quotation approved.", {
+      signatureRef.current.clear();
+
+      toast.success("Quotation signed.", {
         description: "The project is now ready to start.",
       });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to approve quotation.";
+        error instanceof Error ? error.message : "Failed to sign quotation.";
 
       console.error(error);
-      toast.error("Approval failed", {
+      toast.error("Signature failed", {
         description: message,
       });
     } finally {
@@ -246,13 +287,13 @@ export default function ClientPendingDocumentsPage() {
   }
 
   async function downloadDocumentPdf() {
-    if (!projectId || downloading) return;
+    if (!projectId || downloading || documentType === "none") return;
 
     try {
       setDownloading(true);
 
       const endpoint =
-        documentMode === "invoice" ? "/api/invoice/pdf" : "/api/quotation/pdf";
+        documentType === "invoice" ? "/api/invoice/pdf" : "/api/quotation/pdf";
 
       const response = await fetch(
         `${endpoint}?projectId=${encodeURIComponent(projectId)}&download=1`,
@@ -309,12 +350,10 @@ export default function ClientPendingDocumentsPage() {
 
                 <div className="min-w-0">
                   <h1 className="truncate text-base font-semibold text-gray-900">
-                    Pending {documentLabel}
+                    {pageTitle}
                   </h1>
                   <p className="mt-0.5 truncate text-xs text-gray-500">
-                    {documentMode === "invoice"
-                      ? "Review and sign your project invoice agreement."
-                      : "Review and approve your project quotation."}
+                    {pageSubtitle}
                   </p>
                 </div>
               </div>
@@ -323,11 +362,11 @@ export default function ClientPendingDocumentsPage() {
             <div className="flex flex-wrap items-center gap-2">
               {isPendingQuotation || isPendingInvoiceAgreement ? (
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
-                  Needs {documentMode === "invoice" ? "signature" : "approval"}
+                  Needs signature
                 </span>
               ) : isQuotationApproved || isInvoiceAccepted ? (
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
-                  {documentMode === "invoice" ? "Accepted" : "Approved"}
+                  {documentType === "invoice" ? "Accepted" : "Signed"}
                 </span>
               ) : (
                 <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600">
@@ -338,7 +377,12 @@ export default function ClientPendingDocumentsPage() {
               <button
                 type="button"
                 onClick={downloadDocumentPdf}
-                disabled={!projectId || downloading || loading}
+                disabled={
+                  !projectId ||
+                  downloading ||
+                  loading ||
+                  documentType === "none"
+                }
                 className="inline-flex h-9 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
                 {downloading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -348,10 +392,10 @@ export default function ClientPendingDocumentsPage() {
                 Download PDF
               </button>
 
-              {documentMode === "quotation" ? (
+              {documentType === "quotation" ? (
                 <button
                   type="button"
-                  onClick={approveQuotation}
+                  onClick={signQuotation}
                   disabled={
                     !projectId || loading || approving || !isPendingQuotation
                   }
@@ -359,15 +403,13 @@ export default function ClientPendingDocumentsPage() {
                   {approving ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <PenLine className="h-3.5 w-3.5" />
                   )}
-                  {isQuotationApproved
-                    ? "Already Approved"
-                    : "Approve Quotation"}
+                  {isQuotationApproved ? "Already Signed" : "Sign Quotation"}
                 </button>
               ) : null}
 
-              {documentMode === "invoice" ? (
+              {documentType === "invoice" ? (
                 <button
                   type="button"
                   onClick={acceptInvoiceAgreement}
@@ -383,7 +425,7 @@ export default function ClientPendingDocumentsPage() {
                   ) : (
                     <PenLine className="h-3.5 w-3.5" />
                   )}
-                  Sign
+                  {isInvoiceAccepted ? "Already Signed" : "Sign Invoice"}
                 </button>
               ) : null}
             </div>
@@ -417,8 +459,13 @@ export default function ClientPendingDocumentsPage() {
                   <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500">
                     Missing project ID.
                   </div>
+                ) : !previewSrc ? (
+                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500">
+                    No document is available for this project right now.
+                  </div>
                 ) : (
                   <iframe
+                    key={`${documentType}-${projectStatus}-${projectId}`}
                     src={previewSrc}
                     title={`${documentLabel} Preview`}
                     className="h-full w-full rounded-lg border border-gray-200 bg-white"
@@ -480,43 +527,43 @@ export default function ClientPendingDocumentsPage() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
                       <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
                         <p className="text-[11px] font-medium text-gray-500">
-                          Estimated Budget
+                          {documentType === "quotation"
+                            ? "Estimated Payment"
+                            : "Estimated Budget"}
                         </p>
                         <p className="mt-1 text-sm font-semibold text-gray-900">
                           {formatCurrency(project?.estimated_budget)}
                         </p>
                       </div>
 
-                      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                        <p className="text-[11px] font-medium text-gray-500">
-                          Estimated Cost
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-gray-900">
-                          {formatCurrency(project?.estimated_cost)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                        <p className="text-[11px] font-medium text-gray-500">
-                          Estimated Profit
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-gray-900">
-                          {formatCurrency(project?.estimated_profit)}
-                        </p>
-                      </div>
+                      {documentType === "invoice" ? (
+                        <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                          <p className="text-[11px] font-medium text-gray-500">
+                            Estimated Cost
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900">
+                            {formatCurrency(project?.estimated_cost)}
+                          </p>
+                        </div>
+                      ) : null}
                     </div>
 
-                    {isPendingInvoiceAgreement ? (
+                    {isPendingQuotation || isPendingInvoiceAgreement ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
                         <p className="text-xs font-semibold text-emerald-800">
                           Client signature required
                         </p>
 
                         <p className="mt-1 text-xs leading-5 text-emerald-700">
-                          Please draw your signature, then click Sign to confirm the invoice agreement.
+                          Please review the {documentLabel.toLowerCase()} preview,
+                          draw your signature, then click{" "}
+                          {documentType === "invoice"
+                            ? "Sign Invoice"
+                            : "Sign Quotation"}
+                          .
                         </p>
 
                         <div className="mt-3">
@@ -551,25 +598,24 @@ export default function ClientPendingDocumentsPage() {
                           </p>
                         ) : null}
                       </div>
-                    ) : null}
-
-                    {isPendingQuotation ? (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
-                        <p className="text-xs font-semibold text-amber-800">
-                          Approval required
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-amber-700">
-                          Please review the quotation preview before approving.
-                          Approval sets this project to ready to start.
-                        </p>
-                      </div>
                     ) : isQuotationApproved ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
                         <p className="text-xs font-semibold text-emerald-800">
-                          Quotation approved
+                          Quotation signed
                         </p>
                         <p className="mt-1 text-xs leading-5 text-emerald-700">
-                          This project is now ready to start.
+                          This signed quotation is complete, and the project is
+                          now ready to start.
+                        </p>
+                      </div>
+                    ) : isInvoiceAccepted ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-emerald-800">
+                          Invoice signed
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-emerald-700">
+                          Your signed invoice agreement has been recorded and is
+                          now pending payment.
                         </p>
                       </div>
                     ) : null}

@@ -3,27 +3,20 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+async function getAuthUser() {
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { get: (name) => cookieStore.get(name)?.value, set: () => {}, remove: () => {} } },
+  );
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name) {
-            return cookieStore.get(name)?.value;
-          },
-          set() {},
-          remove() {},
-        },
-      },
-    );
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getAuthUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -105,5 +98,49 @@ export async function POST(request: NextRequest) {
       { error: "Unexpected error.", details: error?.message },
       { status: 500 },
     );
+  }
+}
+
+// DELETE /api/messages/conversation?conversationId=xxx
+export async function DELETE(request: NextRequest) {
+  try {
+    const user = await getAuthUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+
+    const conversationId = new URL(request.url).searchParams.get("conversationId") ?? "";
+    if (!conversationId) return NextResponse.json({ error: "Missing conversationId." }, { status: 400 });
+
+    // Verify caller is a participant
+    const { data: membership } = await supabaseAdmin
+      .from("conversation_participants")
+      .select("conversation_id")
+      .eq("conversation_id", conversationId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!membership) return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
+
+    // Delete all messages, then participants, then the conversation
+    const { error: msgErr } = await supabaseAdmin
+      .from("messages")
+      .delete()
+      .eq("conversation_id", conversationId);
+    if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 });
+
+    const { error: partErr } = await supabaseAdmin
+      .from("conversation_participants")
+      .delete()
+      .eq("conversation_id", conversationId);
+    if (partErr) return NextResponse.json({ error: partErr.message }, { status: 500 });
+
+    const { error: convErr } = await supabaseAdmin
+      .from("conversations")
+      .delete()
+      .eq("id", conversationId);
+    if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 });
+
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: "Unexpected error.", details: error?.message }, { status: 500 });
   }
 }
