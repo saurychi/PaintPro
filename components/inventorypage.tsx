@@ -103,8 +103,12 @@ export function InventoryPage() {
     return result;
   }, [searchQuery, filters]);
 
-  const handleRowClick = (id: string) => {
-    console.log('Row clicked:', id);
+  const handleRowClick = (item: {
+    id?: string;
+    material_id?: string;
+    equipment_id?: string;
+  }) => {
+    console.log('Row clicked:', item.id || item.material_id || item.equipment_id);
   };
 
   const handleCreate = () => {
@@ -143,6 +147,8 @@ export function InventoryPage() {
             />
             <InventoryTable
               data={filteredData}
+              type="materials"
+              isLoading={false}
               onRowClick={handleRowClick}
               onSelectionChange={setSelectedRows}
             />
