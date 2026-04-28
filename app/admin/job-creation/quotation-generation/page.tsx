@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Download, Loader2 } from "lucide-react";
+import { ChevronRight, Download, Loader2, Send } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -23,6 +23,7 @@ type ProjectOverviewResponse = {
 
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
+
   return new Intl.NumberFormat("en-PH", {
     style: "currency",
     currency: "PHP",
@@ -38,16 +39,17 @@ export default function JobQuotation() {
   const [status, setStatus] = useState<StatusType>("Not yet Approved");
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [savingDocument, setSavingDocument] = useState(false);
+  const [notifyingClient, setNotifyingClient] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
-  const [project, setProject] = useState<
-    ProjectOverviewResponse["project"] | null
-  >(null);
+  const [project, setProject] = useState<ProjectOverviewResponse["project"] | null>(null);
 
   const statusStyles = useMemo(() => {
     if (status === "Approved") {
       return { bg: "#E6F9DD", border: "#BDE7AF", text: "#4FAE2A" };
     }
+
     return { bg: "#FAD6D6", border: "#F3A7A7", text: "#D33A3A" };
   }, [status]);
 
@@ -84,8 +86,9 @@ export default function JobQuotation() {
         setLoading(true);
 
         const response = await fetch(
-          `/api/planning/getProjectOverview?projectId=${projectId}`,
+          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(projectId)}`,
         );
+
         const data = (await response.json()) as ProjectOverviewResponse & {
           error?: string;
           details?: string;
@@ -105,8 +108,9 @@ export default function JobQuotation() {
             ? "Approved"
             : "Not yet Approved",
         );
-      } catch (error) {
+      } catch (error: any) {
         console.error(error);
+        toast.error(error?.message || "Failed to load quotation project data.");
       } finally {
         setLoading(false);
       }
@@ -126,7 +130,9 @@ export default function JobQuotation() {
 
     try {
       setUpdatingStatus(true);
+
       await updateProjectStatus(nextProjectStatus);
+
       setStatus(nextUiStatus);
       setProject((prev) =>
         prev
@@ -136,11 +142,51 @@ export default function JobQuotation() {
             }
           : prev,
       );
+
       toast.success("Quotation status updated.");
     } catch (error: any) {
       toast.error(error?.message || "Failed to update quotation status.");
     } finally {
       setUpdatingStatus(false);
+    }
+  }
+
+  async function handleSaveQuotationDocument() {
+    if (!projectId || !project || savingDocument) return;
+
+    try {
+      setSavingDocument(true);
+
+      const response = await fetch("/api/quotation/save-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId,
+          projectCode: project.project_code,
+          projectTitle: project.title,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to save quotation document.",
+        );
+      }
+
+      toast.success(
+        data?.mode === "updated"
+          ? "Quotation document updated in Documents."
+          : "Quotation document saved to Documents.",
+      );
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to save quotation document.");
+    } finally {
+      setSavingDocument(false);
     }
   }
 
@@ -156,6 +202,7 @@ export default function JobQuotation() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+
         throw new Error(
           [data?.error, data?.details].filter(Boolean).join(": ") ||
             "Failed to download quotation PDF.",
@@ -165,17 +212,57 @@ export default function JobQuotation() {
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const anchor = document.createElement("a");
+
       anchor.href = url;
       anchor.download = `quotation-${projectId}.pdf`;
+
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
+
       window.URL.revokeObjectURL(url);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Failed to download quotation PDF.");
+      toast.error(error?.message || "Failed to download quotation PDF.");
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function handleNotifyClient() {
+    if (!projectId || notifyingClient || project?.status !== "quotation_pending") {
+      return;
+    }
+
+    try {
+      setNotifyingClient(true);
+
+      const response = await fetch("/api/planning/notifyQuotationClient", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ projectId }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to notify client about the quotation.",
+        );
+      }
+
+      toast.success("Client notified.", {
+        description: "A quotation reminder was sent in the project messages.",
+      });
+    } catch (error: any) {
+      toast.error(
+        error?.message || "Failed to notify client about the quotation.",
+      );
+    } finally {
+      setNotifyingClient(false);
     }
   }
 
@@ -184,13 +271,13 @@ export default function JobQuotation() {
     : "";
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
+    <div className="h-screen w-full overflow-hidden bg-white">
+      <div className="flex h-full flex-col gap-4 overflow-hidden px-6 pb-5 pt-5">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+          <div className="flex items-center gap-2 whitespace-nowrap text-[18px] font-semibold text-gray-900">
             <span>Project</span>
             <ChevronRight
-              className="h-5 w-5 text-gray-300 shrink-0"
+              className="h-5 w-5 shrink-0 text-gray-300"
               aria-hidden
             />
             <span>Quotation</span>
@@ -206,26 +293,27 @@ export default function JobQuotation() {
               borderColor: statusStyles.border,
               color: statusStyles.text,
             }}
-            aria-label="Toggle approval status">
+            aria-label="Toggle approval status"
+          >
             {updatingStatus ? "Updating..." : status}
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 grid grid-cols-12 gap-5">
-          <div className="col-span-12 lg:col-span-8 min-h-0">
-            <div className="h-full min-h-0 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-12 gap-5">
+          <div className="col-span-12 min-h-0 lg:col-span-8">
+            <div className="h-full min-h-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
               <div className="h-full min-h-0 p-4">
                 {loading ? (
-                  <div className="h-full rounded-lg border border-gray-200 bg-[#F7F7F7] flex items-center justify-center">
+                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-[#F7F7F7]">
                     <div className="text-center">
-                      <Loader2 className="h-5 w-5 animate-spin text-gray-500 mx-auto" />
+                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-gray-500" />
                       <div className="mt-2 text-[12px] text-gray-500">
                         Loading quotation preview...
                       </div>
                     </div>
                   </div>
                 ) : !projectId ? (
-                  <div className="h-full rounded-lg border border-gray-200 bg-[#F7F7F7] flex items-center justify-center text-[12px] text-gray-500">
+                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-[#F7F7F7] text-[12px] text-gray-500">
                     Missing project ID.
                   </div>
                 ) : (
@@ -239,8 +327,8 @@ export default function JobQuotation() {
             </div>
           </div>
 
-          <div className="col-span-12 lg:col-span-4 min-h-0 flex flex-col gap-5">
-            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5">
+          <div className="col-span-12 flex min-h-0 flex-col gap-5 lg:col-span-4">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="text-[13px] font-semibold text-gray-900">
                 Quotation Details
               </div>
@@ -261,7 +349,7 @@ export default function JobQuotation() {
                 </div>
 
                 <div>
-                  <div className="text-gray-500">Budget</div>
+                  <div className="text-gray-500">Estimated Payment</div>
                   <div className="mt-1 font-semibold text-gray-900">
                     {formatCurrency(project?.estimated_budget)}
                   </div>
@@ -286,13 +374,35 @@ export default function JobQuotation() {
                   </>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={handleNotifyClient}
+                disabled={
+                  notifyingClient ||
+                  !projectId ||
+                  project?.status !== "quotation_pending"
+                }
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60">
+                {notifyingClient ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Notifying...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Notify Client
+                  </>
+                )}
+              </button>
             </div>
 
-            <div className="hidden lg:block flex-1" />
+            <div className="hidden flex-1 lg:block" />
           </div>
         </div>
 
-        <div className="shrink-0 flex items-center justify-end">
+        <div className="flex shrink-0 items-center justify-end">
           <button
             type="button"
             onClick={async () => {
@@ -300,7 +410,9 @@ export default function JobQuotation() {
 
               try {
                 setIsGoingBack(true);
+
                 await updateProjectStatus("overview_pending");
+
                 router.push(
                   `/admin/job-creation/overview?projectId=${projectId}`,
                 );
@@ -310,7 +422,8 @@ export default function JobQuotation() {
               }
             }}
             disabled={isGoingBack}
-            className="inline-flex h-10 min-w-[220px] items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-5 text-[13px] font-semibold text-[#4FAE2A] transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70">
+            className="inline-flex h-10 min-w-[220px] items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-5 text-[13px] font-semibold text-[#4FAE2A] transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+          >
             {isGoingBack ? "Going Back..." : "Go Back"}
           </button>
         </div>
