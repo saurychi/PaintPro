@@ -240,7 +240,7 @@ export default function AdminPendingDocumentsPage() {
                   Pending Quotations
                 </h1>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Review quotation documents waiting for client approval.
+                  Review quotation documents waiting for client signature.
                 </p>
               </div>
             </div>
@@ -469,11 +469,11 @@ export default function AdminPendingDocumentsPage() {
 
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
                         <p className="text-xs font-semibold text-amber-800">
-                          Waiting for client approval
+                          Waiting for client signature
                         </p>
                         <p className="mt-1 text-xs leading-5 text-amber-700">
                           This quotation is still pending. Once the client
-                          approves it, the project status should become ready to
+                          signs it, the project status should become ready to
                           start.
                         </p>
                       </div>
@@ -481,31 +481,11 @@ export default function AdminPendingDocumentsPage() {
                       <div className="grid grid-cols-1 gap-3">
                         <div className="rounded-lg border border-gray-100 bg-white px-3 py-3">
                           <p className="text-[11px] font-medium text-gray-500">
-                            Estimated Budget
+                            Estimated Payment
                           </p>
                           <p className="mt-1 text-sm font-semibold text-gray-900">
                             {formatCurrency(
                               selectedProject.estimated_budget,
-                            )}
-                          </p>
-                        </div>
-
-                        <div className="rounded-lg border border-gray-100 bg-white px-3 py-3">
-                          <p className="text-[11px] font-medium text-gray-500">
-                            Estimated Cost
-                          </p>
-                          <p className="mt-1 text-sm font-semibold text-gray-900">
-                            {formatCurrency(selectedProject.estimated_cost)}
-                          </p>
-                        </div>
-
-                        <div className="rounded-lg border border-gray-100 bg-white px-3 py-3">
-                          <p className="text-[11px] font-medium text-gray-500">
-                            Estimated Profit
-                          </p>
-                          <p className="mt-1 text-sm font-semibold text-gray-900">
-                            {formatCurrency(
-                              selectedProject.estimated_profit,
                             )}
                           </p>
                         </div>

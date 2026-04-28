@@ -1,20 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronRight,
   RefreshCw,
   Settings2,
   Loader2,
-  X,
-  Send,
   MessageSquare,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import CreateClientModal from "@/components/project-creation/CreateClientModal";
-import MeasurementModal, { type MeasurementRow } from "@/components/project-creation/MeasurementModal";
+import MeasurementModal, {
+  type MeasurementRow,
+} from "@/components/project-creation/MeasurementModal";
+import StaffMessageModal from "@/components/project-creation/StaffMessageModal";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type {
   ScaleBandKey,
   ScalePresetKey,
@@ -86,6 +93,26 @@ type ClientOption = {
   email: string | null;
   address: string | null;
   notes: string | null;
+};
+
+type StaffUsersResponse = {
+  staffUsers?: Array<{
+    id: string | number | null;
+    username?: string | null;
+      email?: string | null;
+      specialties?: unknown;
+  }>;
+};
+
+type ExtractedSurfaceMeasurement = {
+  presetKey: string;
+  estimatedValue: number;
+};
+
+type ExtractSurfaceMeasurementsApiResponse = {
+  measurements?: ExtractedSurfaceMeasurement[];
+  error?: string;
+  details?: string;
 };
 
 type GeneratedMainTask = {
@@ -205,7 +232,11 @@ const TASK_TO_SURFACES: Record<string, string[]> = {
   "Exterior Painting": ["exterior_wall_area_m2"],
   "Roof Tile Painting": ["roof_area_m2"],
   "Colourbond Roof Painting": ["roof_area_m2"],
-  "Gutters, Fascia & Eaves Painting": ["gutters_length_m", "fascia_length_m", "eaves_length_m"],
+  "Gutters, Fascia & Eaves Painting": [
+    "gutters_length_m",
+    "fascia_length_m",
+    "eaves_length_m",
+  ],
   "Trim, Doors & Frames Painting": ["trim_length_m", "doors_count"],
   "Stain Blocking / Primer Work": ["interior_wall_area_m2"],
   "Plaster & Patching": ["interior_wall_area_m2"],
@@ -403,14 +434,36 @@ export default function BasicDetails() {
   const [previewTasks, setPreviewTasks] = useState<PreviewMainTask[]>([]);
   const [isGeneratingTasks, setIsGeneratingTasks] = useState(false);
 
-  type SurfaceEmployee = { id: string; name: string; email: string; role: string };
+  type SurfaceEmployee = {
+    id: string;
+    name: string;
+    email: string;
+    specialties: string[];
+  };
+  type StaffConvMessage = { id: string; senderId: string; senderType: "admin" | "employee"; text: string; createdAt: string; };
+  type StaffConvData = { id: string; employeeId: string; employeeName: string; employeeEmail?: string; employeeRole?: string; employeeAvatarUrl?: string | null; lastMessage?: string; messages: StaffConvMessage[]; };
+
   const [surfaceMsgOpen, setSurfaceMsgOpen] = useState(false);
-  const [surfaceMsgStep, setSurfaceMsgStep] = useState<"confirm" | "compose">("confirm");
-  const [surfaceMsgEmployees, setSurfaceMsgEmployees] = useState<SurfaceEmployee[]>([]);
-  const [surfaceMsgLoadingEmployees, setSurfaceMsgLoadingEmployees] = useState(false);
+  const [surfaceMsgEmployees, setSurfaceMsgEmployees] = useState<
+    SurfaceEmployee[]
+  >([]);
+  const [surfaceMsgLoadingEmployees, setSurfaceMsgLoadingEmployees] =
+    useState(false);
+  const [surfaceMsgLoadError, setSurfaceMsgLoadError] = useState<string | null>(
+    null,
+  );
   const [surfaceMsgEmployeeId, setSurfaceMsgEmployeeId] = useState("");
   const [surfaceMsgText, setSurfaceMsgText] = useState("");
   const [surfaceMsgSending, setSurfaceMsgSending] = useState(false);
+  const [surfaceMsgApplyingMeasurementId, setSurfaceMsgApplyingMeasurementId] =
+    useState<string | null>(null);
+  const [recipientPickerOpen, setRecipientPickerOpen] = useState(false);
+  const [surfaceMsgConversations, setSurfaceMsgConversations] = useState<StaffConvData[]>([]);
+  const [surfaceMsgConversationsLoading, setSurfaceMsgConversationsLoading] = useState(false);
+  const [surfaceMsgConversationError, setSurfaceMsgConversationError] = useState<string | null>(null);
+  const [surfaceMsgSpecsEmployeeIds, setSurfaceMsgSpecsEmployeeIds] = useState<string[]>([]);
+  const surfaceMsgEmployeesLoadedRef = useRef(false);
+  const surfaceMsgConversationsLoadedRef = useRef(false);
 
   const [surfacePresets, setSurfacePresets] = useState<SurfaceScalePresets>({});
   const [surfacePresetsLoading, setSurfacePresetsLoading] = useState(false);
@@ -431,24 +484,34 @@ export default function BasicDetails() {
       if (draft.clientName) setClientName(draft.clientName);
       if (draft.clientEmail) setClientEmail(draft.clientEmail);
       if (draft.clientPhone) setClientPhone(draft.clientPhone);
-      if (draft.selectedPhoneCountry) setSelectedPhoneCountry(draft.selectedPhoneCountry);
+      if (draft.selectedPhoneCountry)
+        setSelectedPhoneCountry(draft.selectedPhoneCountry);
       if (draft.description) setDescription(draft.description);
       if (draft.selectedClientId) setSelectedClientId(draft.selectedClientId);
       if (draft.assignmentDay) setAssignmentDay(draft.assignmentDay);
-      if (Array.isArray(draft.measurementRows) && draft.measurementRows.length > 0) {
+      if (
+        Array.isArray(draft.measurementRows) &&
+        draft.measurementRows.length > 0
+      ) {
         setMeasurementRows(draft.measurementRows);
       }
       if (Array.isArray(draft.previewTasks) && draft.previewTasks.length > 0) {
         setPreviewTasks(draft.previewTasks);
       }
       const hasMeaningfulContent = Boolean(
-        draft.projectName || draft.description || draft.address ||
-        draft.clientName || draft.clientEmail ||
-        (Array.isArray(draft.measurementRows) && draft.measurementRows.length > 0) ||
-        (Array.isArray(draft.previewTasks) && draft.previewTasks.length > 0)
+        draft.projectName ||
+        draft.description ||
+        draft.address ||
+        draft.clientName ||
+        draft.clientEmail ||
+        (Array.isArray(draft.measurementRows) &&
+          draft.measurementRows.length > 0) ||
+        (Array.isArray(draft.previewTasks) && draft.previewTasks.length > 0),
       );
       if (hasMeaningfulContent) {
-        toast.info("Draft restored", { description: "Your previous progress has been loaded." });
+        toast.info("Draft restored", {
+          description: "Your previous progress has been loaded.",
+        });
       }
     } catch {
       // corrupt draft — ignore
@@ -516,9 +579,15 @@ export default function BasicDetails() {
     if (!draftLoaded) return;
 
     const hasUserContent = Boolean(
-      projectName || scheduledStart || address || clientName ||
-      clientEmail || description || selectedClientId ||
-      (clientPhone !== "+63") || previewTasks.length > 0
+      projectName ||
+      scheduledStart ||
+      address ||
+      clientName ||
+      clientEmail ||
+      description ||
+      selectedClientId ||
+      clientPhone !== "+63" ||
+      previewTasks.length > 0,
     );
 
     if (!hasUserContent) {
@@ -577,7 +646,6 @@ export default function BasicDetails() {
       .slice(0, 4)
       .map((row) => {
         const preset = surfacePresets[row.presetKey];
-
         if (!preset) return null;
 
         return {
@@ -605,6 +673,63 @@ export default function BasicDetails() {
       calling_code: `+${item.calling_code}`,
     }));
   }, []);
+
+  const surfaceMsgDisplayConversations = useMemo(() => {
+    let convs = [...surfaceMsgConversations];
+
+    // Inject a synthetic placeholder for a newly selected employee with no prior conv
+    if (
+      surfaceMsgEmployeeId &&
+      !convs.some((c) => c.employeeId === surfaceMsgEmployeeId)
+    ) {
+      const emp = surfaceMsgEmployees.find((e) => e.id === surfaceMsgEmployeeId);
+      if (emp) {
+        convs = [
+          {
+            id: surfaceMsgEmployeeId,
+            employeeId: surfaceMsgEmployeeId,
+            employeeName: emp.name,
+            employeeEmail: emp.email,
+            messages: [] as StaffConvMessage[],
+          },
+          ...convs,
+        ];
+      }
+    }
+
+    // Pin specs-sent conversations to the top, preserving their send order
+    if (surfaceMsgSpecsEmployeeIds.length > 0) {
+      convs.sort((a, b) => {
+        const ai = surfaceMsgSpecsEmployeeIds.indexOf(a.employeeId);
+        const bi = surfaceMsgSpecsEmployeeIds.indexOf(b.employeeId);
+        const aIsSpecs = ai !== -1;
+        const bIsSpecs = bi !== -1;
+        if (aIsSpecs && !bIsSpecs) return -1;
+        if (!aIsSpecs && bIsSpecs) return 1;
+        if (aIsSpecs && bIsSpecs) return ai - bi;
+        return 0;
+      });
+    }
+
+    return convs;
+  }, [surfaceMsgEmployeeId, surfaceMsgConversations, surfaceMsgEmployees, surfaceMsgSpecsEmployeeIds]);
+
+  const surfaceMsgSpecsConvIds = useMemo(
+    () =>
+      surfaceMsgSpecsEmployeeIds.map((empId) => {
+        const real = surfaceMsgConversations.find((c) => c.employeeId === empId);
+        return real?.id ?? empId;
+      }),
+    [surfaceMsgSpecsEmployeeIds, surfaceMsgConversations],
+  );
+
+  const surfaceMsgSelectedConvId = useMemo(() => {
+    if (!surfaceMsgEmployeeId) return "";
+    const real = surfaceMsgConversations.find(
+      (c) => c.employeeId === surfaceMsgEmployeeId,
+    );
+    return real?.id ?? surfaceMsgEmployeeId;
+  }, [surfaceMsgEmployeeId, surfaceMsgConversations]);
 
   const hasProjectNameInputs = Boolean(
     description.trim() && clientName.trim() && address.trim(),
@@ -736,6 +861,41 @@ export default function BasicDetails() {
 
   function removeMeasurement(id: string) {
     setMeasurementRows((prev) => prev.filter((row) => row.id !== id));
+  }
+
+  function applyExtractedMeasurements(
+    measurements: ExtractedSurfaceMeasurement[],
+  ) {
+    setMeasurementRows((prev) => {
+      const nextRows = [...prev];
+
+      for (const measurement of measurements) {
+        const preset = surfacePresets[measurement.presetKey];
+        if (!preset) continue;
+
+        const existingIndex = nextRows.findIndex(
+          (row) => row.presetKey === measurement.presetKey,
+        );
+
+        if (existingIndex >= 0) {
+          nextRows[existingIndex] = {
+            ...nextRows[existingIndex],
+            estimatedValue: measurement.estimatedValue,
+            isManualOverride: true,
+          };
+          continue;
+        }
+
+        nextRows.push(
+          makeRowFromPreset(surfacePresets, measurement.presetKey, "medium", {
+            estimatedValue: measurement.estimatedValue,
+            isManualOverride: true,
+          }),
+        );
+      }
+
+      return nextRows;
+    });
   }
 
   function handlePhoneCountryChange(callingCode: string) {
@@ -916,17 +1076,23 @@ export default function BasicDetails() {
 
       if ("error" in tasksData) throw new Error(tasksData.error);
 
-      const tasks: PreviewMainTask[] = (tasksData.main_tasks ?? []).map((task) => ({
-        name: String(task.name || "").trim(),
-        priority: Number.isFinite(Number(task.priority)) ? Number(task.priority) : 0,
-        confidence: clamp01(Number(task.confidence || 0)),
-        sub_tasks: Array.isArray(task.sub_tasks)
-          ? task.sub_tasks.map((st) => ({
-              title: String(st.title || "").trim(),
-              priority: Number.isFinite(Number(st.priority)) ? Number(st.priority) : 0,
-            }))
-          : [],
-      }));
+      const tasks: PreviewMainTask[] = (tasksData.main_tasks ?? []).map(
+        (task) => ({
+          name: String(task.name || "").trim(),
+          priority: Number.isFinite(Number(task.priority))
+            ? Number(task.priority)
+            : 0,
+          confidence: clamp01(Number(task.confidence || 0)),
+          sub_tasks: Array.isArray(task.sub_tasks)
+            ? task.sub_tasks.map((st) => ({
+                title: String(st.title || "").trim(),
+                priority: Number.isFinite(Number(st.priority))
+                  ? Number(st.priority)
+                  : 0,
+              }))
+            : [],
+        }),
+      );
 
       setPreviewTasks(tasks);
 
@@ -944,11 +1110,15 @@ export default function BasicDetails() {
 
       if (surfaceKeys.length > 0) {
         setMeasurementRows(
-          surfaceKeys.map((key) => makeRowFromPreset(surfacePresets, key, "medium")),
+          surfaceKeys.map((key) =>
+            makeRowFromPreset(surfacePresets, key, "medium"),
+          ),
         );
       }
 
-      toast.success(`Generated ${tasks.length} main task${tasks.length !== 1 ? "s" : ""}`);
+      toast.success(
+        `Generated ${tasks.length} main task${tasks.length !== 1 ? "s" : ""}`,
+      );
     } catch (error: any) {
       toast.error(error?.message || "Failed to generate tasks.");
     } finally {
@@ -965,35 +1135,33 @@ export default function BasicDetails() {
     try {
       setGenerationStage("Building main tasks and sub tasks");
 
-      let nextTasks: GeneratedMainTask[] = inputTasks.map(
-        (task) => ({
-          name: String(task.name || "").trim(),
-          priority: Number.isFinite(Number(task.priority))
-            ? Number(task.priority)
-            : 0,
-          confidence: clamp01(Number(task.confidence || 0)),
-          reasons: [],
-          sub_tasks: Array.isArray(task.sub_tasks)
-            ? task.sub_tasks.map((subTask) => ({
-                title: String(subTask.title || "").trim(),
-                priority: Number.isFinite(Number(subTask.priority))
-                  ? Number(subTask.priority)
-                  : 0,
-                materials: [],
-                equipment: [],
-                duration: null,
-                assignedEmployees: [],
-                requiredEmployeeCount: 1,
-                assignmentScore: null,
-                assignmentReasons: [],
-                scheduledStartDatetime: null,
-                scheduledEndDatetime: null,
-              }))
-            : [],
-          materials: [],
-          materialCatalog: [],
-        }),
-      );
+      let nextTasks: GeneratedMainTask[] = inputTasks.map((task) => ({
+        name: String(task.name || "").trim(),
+        priority: Number.isFinite(Number(task.priority))
+          ? Number(task.priority)
+          : 0,
+        confidence: clamp01(Number(task.confidence || 0)),
+        reasons: [],
+        sub_tasks: Array.isArray(task.sub_tasks)
+          ? task.sub_tasks.map((subTask) => ({
+              title: String(subTask.title || "").trim(),
+              priority: Number.isFinite(Number(subTask.priority))
+                ? Number(subTask.priority)
+                : 0,
+              materials: [],
+              equipment: [],
+              duration: null,
+              assignedEmployees: [],
+              requiredEmployeeCount: 1,
+              assignmentScore: null,
+              assignmentReasons: [],
+              scheduledStartDatetime: null,
+              scheduledEndDatetime: null,
+            }))
+          : [],
+        materials: [],
+        materialCatalog: [],
+      }));
 
       setGenerationStage("Estimating materials");
 
@@ -1547,10 +1715,16 @@ export default function BasicDetails() {
   const isBusy = saving || loading;
 
   const hasChanges = Boolean(
-    projectName || scheduledStart || address || clientName ||
-    clientEmail || description || selectedClientId ||
-    (clientPhone !== "+63") ||
-    measurementRows.length > 0 || previewTasks.length > 0
+    projectName ||
+    scheduledStart ||
+    address ||
+    clientName ||
+    clientEmail ||
+    description ||
+    selectedClientId ||
+    clientPhone !== "+63" ||
+    measurementRows.length > 0 ||
+    previewTasks.length > 0,
   );
 
   function handleRemoveDraft() {
@@ -1573,55 +1747,118 @@ export default function BasicDetails() {
   }
 
   function formatSurfaceMessage(): string {
-    const lines = measurementRows
-      .map((row) => {
-        const preset = surfacePresets[row.presetKey];
-        if (!preset) return null;
+    const surfaces = Array.from(
+      new Set(
+        measurementRows
+          .map((row) => {
+            const preset = surfacePresets[row.presetKey];
+            return preset?.label?.trim() || null;
+          })
+          .filter(Boolean) as string[],
+      ),
+    );
+
+    const lines = surfaces.map((surface) => `- ${surface}`);
+    /*
         return `  • ${preset.label}: ${row.estimatedValue} ${unitLabel(preset.unit)}`;
       })
       .filter(Boolean) as string[];
 
+    */
+
     return [
       "Hi,",
       "",
-      "Please review the surface measurements required for the upcoming project:",
+      "Please measure the following surfaces for the upcoming project:",
       "",
       ...lines,
       "",
-      "Could you confirm these requirements are suitable and let me know if anything needs to be adjusted?",
+      "Please let me know once these surfaces have been measured or if anything needs to be adjusted.",
       "",
       "Thank you.",
     ].join("\n");
   }
 
   function handleOpenSurfaceMsg() {
-    setSurfaceMsgStep("confirm");
-    setSurfaceMsgEmployeeId("");
-    setSurfaceMsgText("");
     setSurfaceMsgOpen(true);
+    void handleSurfaceMsgProceed(false);
+    void loadStaffConversations(true, false);
   }
 
-  async function handleSurfaceMsgProceed() {
+  function handleOpenSurfaceMsgRecipientPicker() {
+    setRecipientPickerOpen(true);
+
+    if (surfaceMsgLoadError) {
+      void handleSurfaceMsgProceed(true);
+      return;
+    }
+
+    void handleSurfaceMsgProceed(false);
+  }
+
+  async function handleSurfaceMsgProceed(force = true) {
+    if (
+      !force &&
+      (surfaceMsgEmployeesLoadedRef.current || surfaceMsgLoadingEmployees)
+    ) {
+      return;
+    }
+
     setSurfaceMsgLoadingEmployees(true);
+    setSurfaceMsgLoadError(null);
     try {
       const res = await fetch("/api/planning/getStaffUsers");
-      if (!res.ok) throw new Error("Failed to load employees.");
-      const json = await res.json();
+      if (!res.ok) throw new Error("Failed to load active employees.");
+      const json = (await res.json()) as StaffUsersResponse;
 
       setSurfaceMsgEmployees(
-        (json.staffUsers ?? []).map((u: any) => ({
+        (json.staffUsers ?? []).map((u) => ({
           id: String(u.id),
           name: String(u.username || u.email || "Unknown"),
           email: String(u.email || ""),
-          role: "staff",
+          specialties: Array.isArray(u.specialties)
+            ? u.specialties
+                .map((item: unknown) => String(item || "").trim())
+                .filter(Boolean)
+            : [],
         })),
       );
-      setSurfaceMsgText(formatSurfaceMessage());
-      setSurfaceMsgStep("compose");
-    } catch {
-      toast.error("Failed to load employees.");
+      surfaceMsgEmployeesLoadedRef.current = true;
+    } catch (error) {
+      setSurfaceMsgEmployees([]);
+      setSurfaceMsgLoadError(
+        error instanceof Error ? error.message : "Failed to load employees.",
+      );
+      surfaceMsgEmployeesLoadedRef.current = false;
     } finally {
       setSurfaceMsgLoadingEmployees(false);
+    }
+  }
+
+  async function loadStaffConversations(showLoading = true, force = true) {
+    if (
+      !force &&
+      (surfaceMsgConversationsLoadedRef.current ||
+        surfaceMsgConversationsLoading)
+    ) {
+      return;
+    }
+
+    if (showLoading) setSurfaceMsgConversationsLoading(true);
+    setSurfaceMsgConversationError(null);
+    try {
+      const res = await fetch("/api/messages/staff-conversations");
+      if (!res.ok) throw new Error("Failed to load conversations.");
+      const json = await res.json();
+      setSurfaceMsgConversations(json.conversations ?? []);
+      surfaceMsgConversationsLoadedRef.current = true;
+    } catch (error) {
+      setSurfaceMsgConversationError(
+        error instanceof Error ? error.message : "Failed to load conversations.",
+      );
+      surfaceMsgConversationsLoadedRef.current = false;
+    } finally {
+      if (showLoading) setSurfaceMsgConversationsLoading(false);
     }
   }
 
@@ -1636,11 +1873,12 @@ export default function BasicDetails() {
       const convRes = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: surfaceMsgEmployeeId, initiatorId: senderId }),
+        body: JSON.stringify({ targetUserId: surfaceMsgEmployeeId }),
       });
       if (!convRes.ok) throw new Error("Failed to create conversation.");
       const convData = await convRes.json();
-      const conversationId = convData?.conversationId ?? convData?.id ?? convData?.conversation?.id;
+      const conversationId =
+        convData?.conversationId ?? convData?.id ?? convData?.conversation?.id;
       if (!conversationId) throw new Error("No conversation ID returned.");
 
       const { error: msgError } = await supabase.from("messages").insert({
@@ -1650,12 +1888,126 @@ export default function BasicDetails() {
       });
       if (msgError) throw msgError;
 
-      toast.success("Surface requirements sent successfully.");
-      setSurfaceMsgOpen(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to send message.");
+      toast.success("Message sent.");
+      setSurfaceMsgText("");
+      void loadStaffConversations(false);
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send message.",
+      );
     } finally {
       setSurfaceMsgSending(false);
+    }
+  }
+
+  async function handleApplyMeasurementsFromMessage(message: StaffConvMessage) {
+    if (!/\d/.test(message.text)) {
+      toast.info("No measurements found", {
+        description: "That message does not contain any numbers to extract.",
+      });
+      return;
+    }
+
+    const configuredSurfaces = Array.from(
+      new Map(
+        measurementRows
+          .map((row) => {
+            const preset = surfacePresets[row.presetKey];
+            if (!preset) return null;
+
+            return [
+              row.presetKey,
+              {
+                presetKey: row.presetKey,
+                label: preset.label,
+                unit: preset.unit,
+              },
+            ] as const;
+          })
+          .filter(Boolean) as Array<
+          readonly [
+            string,
+            {
+              presetKey: string;
+              label: string;
+              unit: string;
+            },
+          ]
+        >,
+      ).values(),
+    );
+
+    if (configuredSurfaces.length === 0) {
+      toast.error("No configured surfaces found", {
+        description:
+          "Add or recommend surfaces in Basic Details before applying measurements.",
+      });
+      return;
+    }
+
+    setSurfaceMsgApplyingMeasurementId(message.id);
+
+    try {
+      const response = await fetch("/api/planning/extractSurfaceMeasurements", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messageText: message.text,
+          surfaces: configuredSurfaces,
+        }),
+      });
+
+      const data =
+        (await response.json().catch(() => null)) as
+          | ExtractSurfaceMeasurementsApiResponse
+          | null;
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to extract measurements.",
+        );
+      }
+
+      const measurements = Array.isArray(data?.measurements)
+        ? data.measurements.filter(
+            (measurement) =>
+              Boolean(measurement?.presetKey) &&
+              Number.isFinite(Number(measurement?.estimatedValue)),
+          )
+        : [];
+
+      if (measurements.length === 0) {
+        toast.info("No usable measurements found", {
+          description:
+            "AI could not match any numbers in that message to your configured surfaces.",
+        });
+        return;
+      }
+
+      applyExtractedMeasurements(measurements);
+
+      const appliedSurfaceLabels = measurements
+        .map((measurement) => surfacePresets[measurement.presetKey]?.label)
+        .filter(Boolean)
+        .join(", ");
+
+      toast.success("Basic details updated", {
+        description: appliedSurfaceLabels
+          ? `Applied measurements for ${appliedSurfaceLabels}.`
+          : "Applied extracted surface measurements.",
+      });
+    } catch (error) {
+      toast.error("Could not apply measurements", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to extract surface measurements from that message.",
+      });
+    } finally {
+      setSurfaceMsgApplyingMeasurementId(null);
     }
   }
 
@@ -1933,12 +2285,19 @@ export default function BasicDetails() {
                       <button
                         type="button"
                         onClick={handleGenerateTasks}
-                        disabled={!description.trim() || isGeneratingTasks || isBusy}
+                        disabled={
+                          !description.trim() || isGeneratingTasks || isBusy
+                        }
                         className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
                         style={{ backgroundColor: ACCENT }}
                         onMouseEnter={(e) => {
-                          if (description.trim() && !isGeneratingTasks && !isBusy)
-                            e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                          if (
+                            description.trim() &&
+                            !isGeneratingTasks &&
+                            !isBusy
+                          )
+                            e.currentTarget.style.backgroundColor =
+                              ACCENT_HOVER;
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = ACCENT;
@@ -1948,12 +2307,15 @@ export default function BasicDetails() {
                         ) : (
                           <RefreshCw className="h-4 w-4" />
                         )}
-                        {isGeneratingTasks ? "Recommending surfaces..." : "Recommend Surfaces"}
+                        {isGeneratingTasks
+                          ? "Recommending surfaces..."
+                          : "Recommend Surfaces"}
                       </button>
                     </div>
 
                     {/* Configured surfaces */}
-                    <div className={`rounded-xl border ${BORDER} bg-gray-50 p-2`}>
+                    <div
+                      className={`rounded-xl border ${BORDER} bg-gray-50 p-2`}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                           Configured Surfaces
@@ -1974,7 +2336,8 @@ export default function BasicDetails() {
                             className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-semibold text-white shadow-sm transition-all duration-200"
                             style={{ backgroundColor: ACCENT }}
                             onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                              e.currentTarget.style.backgroundColor =
+                                ACCENT_HOVER;
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.backgroundColor = ACCENT;
@@ -1987,7 +2350,8 @@ export default function BasicDetails() {
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {summaryChips.length === 0 ? (
                           <span className="text-[11px] text-gray-400">
-                            Enter a description and click Recommend Surfaces, or edit manually.
+                            Enter a description and click Recommend Surfaces, or
+                            edit manually.
                           </span>
                         ) : (
                           <>
@@ -2047,7 +2411,7 @@ export default function BasicDetails() {
                         e.currentTarget.style.backgroundColor = ACCENT;
                       }
                     }}>
-                    {isBusy ? "Processing..." : "Next"}
+                    {isBusy ? "Processing..." : "Generate"}
                   </button>
                 </div>
               </div>
@@ -2089,154 +2453,114 @@ export default function BasicDetails() {
         />
       </div>
 
-      {/* Surface message modal */}
-      {surfaceMsgOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-              <div>
-                <h3 className="text-base font-semibold text-gray-900">
-                  {surfaceMsgStep === "confirm"
-                    ? "Send Surface Requirements"
-                    : "Compose Message"}
-                </h3>
-                <p className="mt-0.5 text-sm text-gray-500">
-                  {surfaceMsgStep === "confirm"
-                    ? "Pass the configured surface measurements to an employee."
-                    : "Select an employee and review the message before sending."}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSurfaceMsgOpen(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      <StaffMessageModal
+        open={surfaceMsgOpen}
+        onOpenChange={(open) => {
+          setSurfaceMsgOpen(open);
+          if (!open) {
+            setSurfaceMsgSending(false);
+            setSurfaceMsgApplyingMeasurementId(null);
+            setRecipientPickerOpen(false);
+          }
+        }}
+        conversations={surfaceMsgDisplayConversations}
+        loadingConversations={surfaceMsgConversationsLoading}
+        conversationLoadError={surfaceMsgConversationError}
+        onRetryLoadConversations={loadStaffConversations}
+        selectedConversationId={surfaceMsgSelectedConvId}
+        specsSentConversationIds={surfaceMsgSpecsConvIds}
+        onSelectedConversationIdChange={(convId) => {
+          const conv = surfaceMsgDisplayConversations.find(
+            (c) => c.id === convId,
+          );
+          if (conv) setSurfaceMsgEmployeeId(conv.employeeId);
+        }}
+        messageText={surfaceMsgText}
+        onMessageTextChange={setSurfaceMsgText}
+        sending={surfaceMsgSending}
+        applyingMeasurementMessageId={surfaceMsgApplyingMeasurementId}
+        onSend={handleSendSurfaceMsg}
+        onCreateNew={handleOpenSurfaceMsgRecipientPicker}
+        onFillSpecs={() => {
+          setSurfaceMsgText(formatSurfaceMessage());
+          if (surfaceMsgEmployeeId) {
+            setSurfaceMsgSpecsEmployeeIds((prev) =>
+              prev.includes(surfaceMsgEmployeeId)
+                ? prev
+                : [...prev, surfaceMsgEmployeeId],
+            );
+          }
+        }}
+        onApplyMeasurements={handleApplyMeasurementsFromMessage}
+        onDeleteMessage={async (messageId) => {
+          const res = await fetch(
+            `/api/messages/manage?messageId=${messageId}`,
+            { method: "DELETE" },
+          );
+          if (!res.ok) {
+            const data = await res.json();
+            toast.error(data?.error ?? "Failed to delete message.");
+            return;
+          }
+          void loadStaffConversations(false);
+        }}
+      />
 
-            {/* Body */}
-            {surfaceMsgStep === "confirm" ? (
-              <div className="px-5 py-4">
-                <p className="text-sm text-gray-700">
-                  The following surfaces will be included in the message:
-                </p>
-                <ul className="mt-3 space-y-1.5">
-                  {measurementRows.map((row) => {
-                    const preset = surfacePresets[row.presetKey];
-                    if (!preset) return null;
-                    return (
-                      <li
-                        key={row.id}
-                        className="flex items-center gap-2 text-sm text-gray-800">
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: ACCENT }}
-                        />
-                        <span className="font-medium">{preset.label}:</span>
-                        <span className="text-gray-600">
-                          {row.estimatedValue} {unitLabel(preset.unit)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSurfaceMsgOpen(false)}
-                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSurfaceMsgProceed}
-                    disabled={surfaceMsgLoadingEmployees}
-                    className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:opacity-60"
-                    style={{ backgroundColor: ACCENT }}
-                    onMouseEnter={(e) => {
-                      if (!surfaceMsgLoadingEmployees)
-                        e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = ACCENT;
-                    }}>
-                    {surfaceMsgLoadingEmployees ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : null}
-                    Yes, Pick Employee
-                  </button>
-                </div>
+      {/* Recipient Picker Modal */}
+      <Dialog open={recipientPickerOpen} onOpenChange={setRecipientPickerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pick a recipient</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            {surfaceMsgLoadError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <p className="font-semibold">Could not load employees</p>
+                <p className="mt-1 text-xs leading-5">{surfaceMsgLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleSurfaceMsgProceed(true);
+                  }}
+                  className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 transition hover:bg-red-100">
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Retry
+                </button>
               </div>
-            ) : (
-              <div className="px-5 py-4 space-y-3">
-                {/* Employee picker */}
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-600">
-                    Employee
-                  </label>
-                  <select
-                    value={surfaceMsgEmployeeId}
-                    onChange={(e) => setSurfaceMsgEmployeeId(e.target.value)}
-                    className={`mt-1.5 h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
-                    style={{ ["--tw-ring-color" as any]: ACCENT }}>
-                    <option value="">Choose an employee...</option>
-                    {surfaceMsgEmployees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.name}
-                        {emp.role ? ` (${emp.role})` : ""}
-                      </option>
-                    ))}
-                  </select>
+            ) : null}
+            {surfaceMsgEmployees.length === 0 &&
+              !surfaceMsgLoadingEmployees && (
+                <div className="text-gray-500 text-sm">
+                  No employees available.
                 </div>
-
-                {/* Message */}
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-600">
-                    Message
-                  </label>
-                  <textarea
-                    value={surfaceMsgText}
-                    onChange={(e) => setSurfaceMsgText(e.target.value)}
-                    rows={10}
-                    className={`mt-1.5 w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 font-mono text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
-                    style={{ ["--tw-ring-color" as any]: ACCENT }}
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setSurfaceMsgOpen(false)}
-                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">
-                    Close
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSendSurfaceMsg}
-                    disabled={!surfaceMsgEmployeeId || !surfaceMsgText.trim() || surfaceMsgSending}
-                    className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
-                    style={{ backgroundColor: ACCENT }}
-                    onMouseEnter={(e) => {
-                      if (surfaceMsgEmployeeId && !surfaceMsgSending)
-                        e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = ACCENT;
-                    }}>
-                    {surfaceMsgSending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4" />
-                    )}
-                    {surfaceMsgSending ? "Sending..." : "Send Message"}
-                  </button>
-                </div>
-              </div>
+              )}
+            {surfaceMsgLoadingEmployees && (
+              <div className="text-gray-500 text-sm">Loading employees...</div>
             )}
+            {surfaceMsgEmployees.map((emp) => (
+              <button
+                key={emp.id}
+                className="w-full rounded border px-4 py-2 text-left hover:bg-gray-100"
+                onClick={() => {
+                  const hasExisting = surfaceMsgConversations.some(
+                    (c) => c.employeeId === emp.id,
+                  );
+                  if (!hasExisting) {
+                    setSurfaceMsgText(formatSurfaceMessage());
+                    setSurfaceMsgSpecsEmployeeIds((prev) =>
+                      prev.includes(emp.id) ? prev : [...prev, emp.id],
+                    );
+                  }
+                  setSurfaceMsgEmployeeId(emp.id);
+                  setRecipientPickerOpen(false);
+                }}>
+                {emp.name}{" "}
+                <span className="text-xs text-gray-400">{emp.email}</span>
+              </button>
+            ))}
           </div>
-        </div>
-      ) : null}
+        </DialogContent>
+      </Dialog>
 
       {loading ? (
         <div className="fixed inset-0 z-80 flex items-center justify-center bg-white/80 backdrop-blur-sm">
