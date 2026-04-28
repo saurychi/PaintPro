@@ -296,11 +296,11 @@ export default function ClientMessages() {
                   const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
                   return (
-                    <div key={msg.id}>
-                      <div className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}>
+                    <div key={msg.id} className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}>
+                      <div className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
                         <div
                           className={[
-                            "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
+                            "px-4 py-2.5 text-sm shadow-sm",
                             isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
                           ].join(" ")}
                           style={isMe ? { backgroundColor: ACCENT } : undefined}

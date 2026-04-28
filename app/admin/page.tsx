@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import CurrentJobCard, {
@@ -1105,7 +1105,7 @@ export default function DashboardPage() {
     return buildEmployeeReviewItems(mainTasks);
   }, [mainTasks]);
 
-  function toggleProcessRow(id: string) {
+  const toggleProcessRow = useCallback((id: string) => {
     setOpenProcessIds((prev) => {
       const next = new Set(prev);
 
@@ -1114,9 +1114,9 @@ export default function DashboardPage() {
 
       return next;
     });
-  }
+  }, []);
 
-  function toggleSubtaskRow(id: string) {
+  const toggleSubtaskRow = useCallback((id: string) => {
     setOpenSubtaskIds((prev) => {
       const next = new Set(prev);
 
@@ -1125,16 +1125,24 @@ export default function DashboardPage() {
 
       return next;
     });
-  }
+  }, []);
 
-  function handleDashboardProjectChange(projectId: string) {
+  const handleDashboardProjectChange = useCallback((projectId: string) => {
     const nextProject = projects.find((project) => project.id === projectId);
 
     if (!nextProject) return;
 
     setSelectedProjectId(nextProject.id);
     setSelectedProject(nextProject);
-  }
+  }, [projects]);
+
+  const handleRefresh = useCallback(() => {
+    setDetailsRefreshKey((k) => k + 1);
+  }, []);
+
+  const handleCreateJob = useCallback(() => {
+    router.push("/admin/job-creation/basic-details");
+  }, [router]);
 
   /**
    * Dashboard layout percentages.
@@ -1177,7 +1185,7 @@ export default function DashboardPage() {
             selectedProjectId={selectedProjectId}
             onDateChange={setSelectedDashboardDate}
             onProjectChange={handleDashboardProjectChange}
-            onCreateJob={() => router.push("/admin/job-creation/basic-details")}
+            onCreateJob={handleCreateJob}
           />
         </section>
 
@@ -1200,7 +1208,7 @@ export default function DashboardPage() {
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
               employeeReviewItems={employeeReviewItems}
-              onRefresh={() => setDetailsRefreshKey((k) => k + 1)}
+              onRefresh={handleRefresh}
               reviewSummary={reviewSummary}
             />
           </div>

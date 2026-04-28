@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Fragment } from "react";
+import React, { memo, useState, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
@@ -514,7 +514,7 @@ function ProgressSkeleton() {
   );
 }
 
-export default function JobProgressCard({
+function JobProgressCard({
   title = "Progress",
   selectedProject,
   projectId,
@@ -1668,3 +1668,5 @@ export default function JobProgressCard({
     </section>
   );
 }
+
+export default memo(JobProgressCard);
