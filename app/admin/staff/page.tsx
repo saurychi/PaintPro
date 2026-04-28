@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Plus, Search, Pencil, MessageSquare, Loader2 } from "lucide-react"
@@ -153,7 +153,7 @@ export default function Staff() {
 
   // ── Add employee ──────────────────────────────────────────────────────────
 
-  const handleAdd = async (payload: EmployeeInput) => {
+  const handleAdd = useCallback(async (payload: EmployeeInput) => {
     try {
       const res = await fetch("/api/staff", {
         method: "POST",
@@ -179,11 +179,11 @@ export default function Staff() {
       console.error("Failed to add staff:", e)
     }
     setIsAddModalOpen(false)
-  }
+  }, [])
 
   // ── Edit employee (UPDATE in DB) ──────────────────────────────────────────
 
-  const handleEdit = async (payload: EmployeeInput) => {
+  const handleEdit = useCallback(async (payload: EmployeeInput) => {
     if (!editTarget) return
     try {
       const res = await fetch("/api/staff", {
@@ -209,7 +209,7 @@ export default function Staff() {
       console.error("Failed to update staff:", e)
     }
     setEditTarget(null)
-  }
+  }, [editTarget])
 
   // ── Message quick action ──────────────────────────────────────────────────
 
@@ -232,6 +232,19 @@ export default function Staff() {
       setMessagingId(null)
     }
   }
+
+  const handleCloseAddModal = useCallback(() => setIsAddModalOpen(false), [])
+  const handleCloseEditModal = useCallback(() => setEditTarget(null), [])
+
+  const editModalData = useMemo(() => {
+    if (!editTarget) return undefined
+    return {
+      name: editTarget.name,
+      email: editTarget.email,
+      phone: editTarget.phone || "",
+      photoUrl: editTarget.photoUrl || "/paint_pro_logo.png",
+    }
+  }, [editTarget])
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -480,8 +493,8 @@ export default function Staff() {
       {isAddModalOpen && (
         <StaffModal
           mode="add"
-          onClose={() => setIsAddModalOpen(false)}
-          onSave={(payload) => handleAdd(payload)}
+          onClose={handleCloseAddModal}
+          onSave={handleAdd}
         />
       )}
 
@@ -489,14 +502,9 @@ export default function Staff() {
       {editTarget && (
         <StaffModal
           mode="edit"
-          initialData={{
-            name: editTarget.name,
-            email: editTarget.email,
-            phone: editTarget.phone || "",
-            photoUrl: editTarget.photoUrl || "/paint_pro_logo.png",
-          }}
-          onClose={() => setEditTarget(null)}
-          onSave={(payload) => handleEdit(payload)}
+          initialData={editModalData}
+          onClose={handleCloseEditModal}
+          onSave={handleEdit}
         />
       )}
 
@@ -571,7 +579,7 @@ export default function Staff() {
 
 // ─── Staff Modal (shared for Add & Edit) ─────────────────────────────────────
 
-function StaffModal({
+const StaffModal = memo(function StaffModal({
   mode,
   initialData,
   onClose,
@@ -711,11 +719,11 @@ function StaffModal({
       </div>
     </div>
   )
-}
+})
 
 // ─── Radar Chart (labels split onto 2 lines to prevent clipping) ─────────────
 
-function RadarChart({ values }: { values: number[] }) {
+const RadarChart = memo(function RadarChart({ values }: { values: number[] }) {
   const size = 280
   const center = size / 2
   const radius = 88
@@ -813,4 +821,4 @@ function RadarChart({ values }: { values: number[] }) {
       })}
     </svg>
   )
-}
+})

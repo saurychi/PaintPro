@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useClientProject } from "./ClientShellClient";
@@ -578,23 +578,23 @@ export default function ClientDashboardPage() {
     };
   }, [project, projectId, projectStatus]);
 
-  function toggleProcessRow(id: string) {
+  const toggleProcessRow = useCallback((id: string) => {
     setOpenProcessIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
 
-  function toggleSubtaskRow(id: string) {
+  const toggleSubtaskRow = useCallback((id: string) => {
     setOpenSubtaskIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
 
   if (!projectId) {
     return (

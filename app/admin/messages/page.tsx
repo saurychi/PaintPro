@@ -388,40 +388,43 @@ export default function AdminMessages() {
                   return (
                     <div
                       key={msg.id}
-                      className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}
+                      className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}
                       onMouseEnter={() => isMe && showDots(msg.id)}
                       onMouseLeave={() => isMe && startHideDots()}
                     >
-                      <div className="flex items-end gap-1">
-                        {isMe && (
-                          <div className="relative shrink-0 mb-0.5">
-                            <button
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
-                              className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-                            >
-                              <MoreHorizontal className="h-3.5 w-3.5" />
-                            </button>
-                            {menuOpen && (
-                              <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
-                                <button
-                                  onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
-                                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleDelete(msg.id)}
-                                  className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                      {/* Dots button — left of bubble for sent messages */}
+                      {isMe && (
+                        <div className="relative shrink-0 mb-0.5">
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
+                            className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </button>
+                          {menuOpen && (
+                            <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
+                              <button
+                                onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
+                                className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDelete(msg.id)}
+                                className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Bubble + timestamp */}
+                      <div className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
                         {isEditing ? (
-                          <div className="max-w-[72%] flex flex-col gap-1">
+                          <div className="w-full flex flex-col gap-1">
                             <input
                               autoFocus
                               value={editText}
@@ -441,16 +444,16 @@ export default function AdminMessages() {
                         ) : (
                           <div
                             className={[
-                              "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
-                              isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
+                              "px-4 py-2.5 text-sm shadow-sm rounded-lg",
+                              isMe ? "text-white" : "border border-gray-200 bg-white text-gray-900",
                             ].join(" ")}
                             style={isMe ? { backgroundColor: ACCENT } : undefined}
                           >
                             {msg.content}
                           </div>
                         )}
+                        <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
                       </div>
-                      <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
                     </div>
                   )
                 })}
