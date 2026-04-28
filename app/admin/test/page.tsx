@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Braces,
   CalendarDays,
@@ -36,8 +36,10 @@ import type {
 } from "@/lib/planning/surfacePresets";
 
 const ACCENT = "#00c065";
-const ACCENT_HOVER = "#00a054";
 const BORDER = "border border-gray-200";
+const ACCENT_RING_STYLE: CSSProperties & Record<"--tw-ring-color", string> = {
+  "--tw-ring-color": ACCENT,
+};
 
 type MaterialOut = {
   material_id?: string;
@@ -522,10 +524,13 @@ function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
 function buildRowsFromDimensions(
   presets: SurfaceScalePresets,
   dimensions: ProjectDimensions,
-) {
+): MeasurementRow[] {
   const rows: MeasurementRow[] = [];
 
-  for (const [presetKey, field] of Object.entries(dimensions.scaled ?? {})) {
+  for (const presetKey of Object.keys(dimensions.scaled ?? {})) {
+    const field = dimensions.scaled?.[presetKey];
+    if (!field) continue;
+
     const preset = presets[presetKey];
     if (!preset) continue;
 
@@ -580,6 +585,7 @@ export default function AdminTestPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStage, setGenerationStage] = useState("");
   const [result, setResult] = useState<DryRunResult | null>(null);
+  const generateDryRunRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -647,12 +653,24 @@ export default function AdminTestPage() {
       return;
     }
 
-    seedSampleProject({
-      regenerateCode: false,
-      autoGenerate: true,
-    });
+    const nextProjectCode = projectCode.trim() || generateProjectCode();
+
+    setProjectCode(nextProjectCode);
+    setProjectTitle("Dry Run Interior Repaint");
+    setDescription(SAMPLE_DESCRIPTION);
+    setScheduledStart(buildDefaultStartDate());
+    setAddress("18 Sample Street, Quezon City");
+    setSelectedClientId("");
+    setClientName("Sample Client");
+    setClientEmail("sample.client@example.com");
+    setSelectedPhoneCountry("+63");
+    setClientPhone("+639171234567");
+    setResult(null);
+    setLoadSampleMeasurementsWhenReady(false);
+    setMeasurementRows(buildRowsFromDimensions(surfacePresets, SAMPLE_DIMENSIONS));
+    setAutoGeneratePending(true);
     setSampleSeedInitialized(true);
-  }, [sampleSeedInitialized, surfacePresets, surfacePresetsLoading]);
+  }, [projectCode, sampleSeedInitialized, surfacePresets, surfacePresetsLoading]);
 
   useEffect(() => {
     let cancelled = false;
@@ -785,7 +803,7 @@ export default function AdminTestPage() {
         label: AREA_LABELS[key] ?? key,
         value: Number(value),
       }));
-  }, [measurementRows.length, normalizedDimensions, result?.dimensions]);
+  }, [measurementRows, normalizedDimensions, result]);
 
   useEffect(() => {
     if (
@@ -804,7 +822,7 @@ export default function AdminTestPage() {
     }
 
     setAutoGeneratePending(false);
-    void handleGenerateDryRun();
+    void generateDryRunRef.current();
   }, [
     autoGeneratePending,
     address,
@@ -1041,8 +1059,10 @@ export default function AdminTestPage() {
 
       setIsCreateClientModalOpen(false);
       toast.success("Client created successfully.");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to create client.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create client.",
+      );
     } finally {
       setCreatingClient(false);
     }
@@ -1105,8 +1125,10 @@ export default function AdminTestPage() {
       });
 
       toast.success("Recommended surfaces added to the measurement picker.");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to recommend surfaces.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to recommend surfaces.",
+      );
     } finally {
       setIsRecommendingSurfaces(false);
     }
@@ -1496,13 +1518,19 @@ export default function AdminTestPage() {
       toast.success("Dry-run project generated.", {
         description: "Nothing was saved to the database.",
       });
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to generate dry-run project.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate dry-run project.",
+      );
     } finally {
       setIsGenerating(false);
       setGenerationStage("");
     }
   }
+
+  generateDryRunRef.current = handleGenerateDryRun;
 
   function seedSampleProject(options?: {
     regenerateCode?: boolean;
@@ -1792,7 +1820,7 @@ export default function AdminTestPage() {
 
                       <div
                         className={`flex h-10 min-w-0 items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm focus-within:ring-2`}
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}>
+                        style={ACCENT_RING_STYLE}>
                         <span className="shrink-0 px-3 text-sm text-gray-500">
                           {selectedPhoneCountry}
                         </span>
