@@ -27,6 +27,7 @@ function AdminShell({
             ? "md:pl-[var(--sidebar-width)]"
             : "md:pl-[var(--sidebar-width-icon)]",
         )}
+        style={{ background: "var(--app-bg)" }}
       >
         {children}
       </main>

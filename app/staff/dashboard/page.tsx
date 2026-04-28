@@ -1,9 +1,5 @@
-function Dashboard() {
-    return (
-        <div>
-            Staff Dashboard
-        </div>
-    );
-}
+import { redirect } from "next/navigation";
 
-export default Dashboard;
+export default function StaffDashboardRedirectPage() {
+  redirect("/staff");
+}
