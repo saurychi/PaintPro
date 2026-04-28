@@ -1,389 +1,476 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import styles from "./attendance.module.css";
-import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight, Filter, Search } from "lucide-react";
+
+import StaffPageShell from "@/components/staff/StaffPageShell";
 import {
-  Search,
-  CalendarDays,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
-  MoreVertical,
-} from "lucide-react";
+  getAttendancePrimaryDate,
+  getAttendanceStatusLabel,
+  type StaffAttendanceRecord,
+  type StaffAttendanceStatus,
+} from "@/lib/staff/attendance";
+import { cn } from "@/lib/utils";
 
-type AttendanceStatus = "PRESENT" | "LATE" | "ABSENT" | "LEAVE";
-
-type AttendanceRow = {
-  id: string;
-  staffId: string;
-  staffName: string;
-  role: string;
-  dateISO: string; // "2026-01-08"
-  timeIn?: string; // "08:05 AM"
-  timeOut?: string; // "05:12 PM"
-  status: AttendanceStatus;
-  hoursWorked?: number; // decimal hours
-  notes?: string;
+type AttendanceResponse = {
+  records?: StaffAttendanceRecord[];
+  error?: string;
+  details?: string;
 };
 
-type StatusFilter = "ALL" | AttendanceStatus;
+type StatusFilter = "ALL" | StaffAttendanceStatus;
 
-const STATUS_LABEL: Record<AttendanceStatus, string> = {
-  PRESENT: "Present",
-  LATE: "Late",
-  ABSENT: "Absent",
-  LEAVE: "On Leave",
+const STATUS_META: Record<
+  StaffAttendanceStatus,
+  { label: string; pill: string; card: string }
+> = {
+  ASSIGNED: {
+    label: "Assigned",
+    pill: "border border-slate-400/25 bg-slate-500/[0.08] text-slate-900",
+    card: "border-slate-300 bg-slate-50",
+  },
+  UPCOMING: {
+    label: "Upcoming",
+    pill: "border border-sky-500/20 bg-sky-500/15 text-sky-950",
+    card: "border-sky-500/25 bg-sky-500/[0.06]",
+  },
+  IN_PROGRESS: {
+    label: "In Progress",
+    pill: "border border-amber-500/20 bg-amber-500/15 text-orange-950",
+    card: "border-amber-500/25 bg-amber-500/[0.08]",
+  },
+  COMPLETED: {
+    label: "Completed",
+    pill: "border border-green-500/20 bg-green-500/15 text-green-950",
+    card: "border-green-500/25 bg-green-500/[0.06]",
+  },
 };
 
-const MOCK_ROWS: AttendanceRow[] = [
-  {
-    id: "a1",
-    staffId: "S-1001",
-    staffName: "Paul Jackman",
-    role: "Manager",
-    dateISO: "2026-01-08",
-    timeIn: "08:03 AM",
-    timeOut: "05:14 PM",
-    status: "PRESENT",
-    hoursWorked: 8.9,
-  },
-  {
-    id: "a2",
-    staffId: "S-1002",
-    staffName: "Trent Guevara",
-    role: "Technician",
-    dateISO: "2026-01-08",
-    timeIn: "08:27 AM",
-    timeOut: "05:05 PM",
-    status: "LATE",
-    hoursWorked: 8.3,
-    notes: "Traffic delay",
-  },
-  {
-    id: "a3",
-    staffId: "S-1003",
-    staffName: "Walter Caballero",
-    role: "Technician",
-    dateISO: "2026-01-08",
-    status: "ABSENT",
-    notes: "No show",
-  },
-  {
-    id: "a4",
-    staffId: "S-1004",
-    staffName: "Denzel Lawas",
-    role: "Staff",
-    dateISO: "2026-01-08",
-    status: "LEAVE",
-    notes: "Sick leave",
-  },
-  {
-    id: "a5",
-    staffId: "S-1002",
-    staffName: "Trent Guevara",
-    role: "Technician",
-    dateISO: "2026-01-07",
-    timeIn: "08:06 AM",
-    timeOut: "05:01 PM",
-    status: "PRESENT",
-    hoursWorked: 8.6,
-  },
-];
+function formatDateTime(value?: string | null) {
+  if (!value) return "--";
 
-function formatHours(n?: number) {
-  if (n == null) return "—";
-  return `${n.toFixed(1)}h`;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
-function formatDateLabel(dateISO: string) {
-  // Keep simple (backend-ready). Replace with real formatting later.
-  // Example: 2026-01-08 -> Jan 08, 2026
-  const [y, m, d] = dateISO.split("-").map(Number);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[(m ?? 1) - 1]} ${String(d).padStart(2, "0")}, ${y}`;
+function formatHours(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "--";
+  return `${Math.round(value * 10) / 10}h`;
+}
+
+function toDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getDateIso(record: StaffAttendanceRecord) {
+  const raw = getAttendancePrimaryDate(record);
+  if (!raw) return "";
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toISOString().slice(0, 10);
 }
 
 export default function StaffAttendanceReportPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("ALL");
-
-  // date range (backend-ready): store ISO strings
-  const [fromISO, setFromISO] = useState("2026-01-01");
-  const [toISO, setToISO] = useState("2026-01-31");
-
-  // pagination
+  const [fromISO, setFromISO] = useState(() => toDateInputValue(new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)));
+  const [toISO, setToISO] = useState(() => toDateInputValue());
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [records, setRecords] = useState<StaffAttendanceRecord[]>([]);
+
   const pageSize = 8;
 
-  // kebab
-  const [openRowMenuId, setOpenRowMenuId] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAttendance() {
+      try {
+        setLoading(true);
+        setLoadError(null);
+
+        const response = await fetch("/api/staff/attendance", {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as AttendanceResponse;
+
+        if (!response.ok) {
+          throw new Error(
+            [data?.error, data?.details].filter(Boolean).join(": ") ||
+              "Failed to load attendance records.",
+          );
+        }
+
+        if (!alive) return;
+        setRecords(Array.isArray(data.records) ? data.records : []);
+      } catch (error) {
+        if (!alive) return;
+        console.error(error);
+        setRecords([]);
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load attendance records.",
+        );
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
+    loadAttendance();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const normalizedQuery = query.trim().toLowerCase();
 
-    const inRange = MOCK_ROWS.filter((r) => {
-      if (fromISO && r.dateISO < fromISO) return false;
-      if (toISO && r.dateISO > toISO) return false;
+    const inRange = records.filter((record) => {
+      const dateIso = getDateIso(record);
+      if (fromISO && dateIso && dateIso < fromISO) return false;
+      if (toISO && dateIso && dateIso > toISO) return false;
       return true;
     });
 
     const byStatus =
-      status === "ALL" ? inRange : inRange.filter((r) => r.status === status);
+      status === "ALL" ? inRange : inRange.filter((record) => record.status === status);
 
-    const bySearch = !q
+    const bySearch = !normalizedQuery
       ? byStatus
-      : byStatus.filter((r) => {
-          const hay = `${r.staffName} ${r.staffId} ${r.role} ${r.status} ${r.dateISO}`.toLowerCase();
-          return hay.includes(q);
+      : byStatus.filter((record) => {
+          const haystack = [
+            record.projectCode,
+            record.projectTitle,
+            record.mainTaskName,
+            record.subTaskName,
+            record.siteAddress || "",
+            getAttendanceStatusLabel(record.status),
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          return haystack.includes(normalizedQuery);
         });
 
-    // newest first
-    return [...bySearch].sort((a, b) => b.dateISO.localeCompare(a.dateISO));
-  }, [query, status, fromISO, toISO]);
+    return bySearch;
+  }, [fromISO, query, records, status, toISO]);
 
   const totals = useMemo(() => {
-    const base = filtered;
-    const count = (s: AttendanceStatus) => base.filter((r) => r.status === s).length;
+    const count = (targetStatus: StaffAttendanceStatus) =>
+      filtered.filter((record) => record.status === targetStatus).length;
+
     return {
-      present: count("PRESENT"),
-      late: count("LATE"),
-      absent: count("ABSENT"),
-      leave: count("LEAVE"),
-      total: base.length,
+      assigned: count("ASSIGNED"),
+      upcoming: count("UPCOMING"),
+      inProgress: count("IN_PROGRESS"),
+      completed: count("COMPLETED"),
     };
   }, [filtered]);
 
-  const pageCount = useMemo(() => {
-    return Math.max(1, Math.ceil(filtered.length / pageSize));
-  }, [filtered.length]);
+  const pageCount = useMemo(
+    () => Math.max(1, Math.ceil(filtered.length / pageSize)),
+    [filtered.length],
+  );
+
+  const safePage = Math.min(page, pageCount);
 
   const pageRows = useMemo(() => {
-    const start = (page - 1) * pageSize;
+    const start = (safePage - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
-  }, [filtered, page]);
-
-  function closeAllMenus() {
-    setOpenRowMenuId(null);
-  }
+  }, [filtered, safePage]);
 
   function goPrev() {
-    setPage((p) => Math.max(1, p - 1));
+    setPage((currentPage) => Math.max(1, currentPage - 1));
   }
+
   function goNext() {
-    setPage((p) => Math.min(pageCount, p + 1));
-  }
-
-  // keep page valid when filters change
-  useMemo(() => {
-    if (page > pageCount) setPage(pageCount);
-  }, [page, pageCount]);
-
-  // placeholder actions
-  function viewDetails(row: AttendanceRow) {
-    console.log("view attendance details", row);
-    setOpenRowMenuId(null);
-  }
-  function exportRow(row: AttendanceRow) {
-    console.log("export row", row);
-    setOpenRowMenuId(null);
+    setPage((currentPage) => Math.min(pageCount, currentPage + 1));
   }
 
   return (
-    <div className={styles.page} onClick={closeAllMenus}>
-      <div className={styles.headerRow} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.titleWrap}>
-          <h1 className={styles.title}>Attendance</h1>
-          <div className={styles.subtitle}>
-            Staff report • Backend-ready UI
-          </div>
-        </div>
-
-        <div className={styles.controls}>
-          <div className={styles.searchWrap}>
-            <Search className={styles.searchIcon} />
+    <StaffPageShell
+      title="Attendance"
+      subtitle="Showing your real database-backed task assignments, project schedule windows, and completion state."
+      actions={
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative h-[42px] w-[240px] rounded-full border border-gray-200 bg-white min-[921px]:w-[290px]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
-              className={styles.searchInput}
+              className="h-full w-full border-none bg-transparent px-3.5 pl-[34px] text-sm font-normal text-gray-900 outline-none"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search staff, role, status..."
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Search project or task..."
             />
           </div>
 
-          <div className={styles.rangeWrap}>
-            <div className={styles.rangeLabel}>
-              <CalendarDays className={styles.rangeIcon} />
+          <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5">
+            <div className="inline-flex items-center gap-2 text-xs font-medium text-gray-500">
+              <CalendarDays className="h-3.5 w-3.5" />
               Date range
             </div>
-            <div className={styles.rangeInputs}>
+
+            <div className="flex items-center gap-2.5">
               <input
-                className={styles.dateInput}
+                className="h-9 rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
                 type="date"
                 value={fromISO}
-                onChange={(e) => setFromISO(e.target.value)}
+                onChange={(event) => {
+                  setFromISO(event.target.value);
+                  setPage(1);
+                }}
               />
-              <span className={styles.rangeSep}>to</span>
+              <span className="text-xs font-normal text-gray-400">to</span>
               <input
-                className={styles.dateInput}
+                className="h-9 rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
                 type="date"
                 value={toISO}
-                onChange={(e) => setToISO(e.target.value)}
+                onChange={(event) => {
+                  setToISO(event.target.value);
+                  setPage(1);
+                }}
               />
             </div>
           </div>
 
-          <div className={styles.statusWrap}>
-            <div className={styles.statusLabel}>
-              <Filter className={styles.rangeIcon} />
+          <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5">
+            <div className="inline-flex items-center gap-2 text-xs font-medium text-gray-500">
+              <Filter className="h-3.5 w-3.5" />
               Status
             </div>
+
             <select
-              className={styles.select}
+              className="h-9 min-w-[180px] rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value as StatusFilter);
+              onChange={(event) => {
+                setStatus(event.target.value as StatusFilter);
                 setPage(1);
               }}
             >
               <option value="ALL">All</option>
-              <option value="PRESENT">Present</option>
-              <option value="LATE">Late</option>
-              <option value="ABSENT">Absent</option>
-              <option value="LEAVE">On Leave</option>
+              <option value="ASSIGNED">Assigned</option>
+              <option value="UPCOMING">Upcoming</option>
+              <option value="IN_PROGRESS">In Progress</option>
+              <option value="COMPLETED">Completed</option>
             </select>
           </div>
         </div>
-      </div>
-
-      {/* Summary */}
-      <section className={styles.cards}>
-        <div className={cn(styles.card, styles.cardGood)}>
-          <div className={styles.cardLabel}>Present</div>
-          <div className={styles.cardValue}>{totals.present}</div>
+      }
+      bodyClassName="overflow-y-auto pr-1"
+    >
+      <section className="grid grid-cols-1 gap-3 pb-1 min-[561px]:grid-cols-2 min-[1221px]:grid-cols-4">
+        <div
+          className={cn(
+            "min-h-[88px] rounded-[14px] border bg-white p-3.5",
+            STATUS_META.ASSIGNED.card,
+          )}
+        >
+          <div className="text-xs font-medium text-gray-900/70">Assigned</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {totals.assigned}
+          </div>
         </div>
 
-        <div className={cn(styles.card, styles.cardWarn)}>
-          <div className={styles.cardLabel}>Late</div>
-          <div className={styles.cardValue}>{totals.late}</div>
+        <div
+          className={cn(
+            "min-h-[88px] rounded-[14px] border bg-white p-3.5",
+            STATUS_META.UPCOMING.card,
+          )}
+        >
+          <div className="text-xs font-medium text-gray-900/70">Upcoming</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {totals.upcoming}
+          </div>
         </div>
 
-        <div className={cn(styles.card, styles.cardBad)}>
-          <div className={styles.cardLabel}>Absent</div>
-          <div className={styles.cardValue}>{totals.absent}</div>
+        <div
+          className={cn(
+            "min-h-[88px] rounded-[14px] border bg-white p-3.5",
+            STATUS_META.IN_PROGRESS.card,
+          )}
+        >
+          <div className="text-xs font-medium text-gray-900/70">In Progress</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {totals.inProgress}
+          </div>
         </div>
 
-        <div className={cn(styles.card, styles.cardNeutral)}>
-          <div className={styles.cardLabel}>On Leave</div>
-          <div className={styles.cardValue}>{totals.leave}</div>
+        <div
+          className={cn(
+            "min-h-[88px] rounded-[14px] border bg-white p-3.5",
+            STATUS_META.COMPLETED.card,
+          )}
+        >
+          <div className="text-xs font-medium text-gray-900/70">Completed</div>
+          <div className="mt-2.5 text-3xl font-semibold text-gray-900">
+            {totals.completed}
+          </div>
         </div>
       </section>
 
-      {/* Table */}
-      <section className={styles.tableSection}>
-        <div className={styles.tableTop}>
-          <div className={styles.tableTitle}>Attendance Log</div>
-          <div className={styles.tableMeta}>
+      <section className="mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-[14px]">
+          <div className="text-sm font-semibold text-gray-900">
+            Attendance Records
+          </div>
+          <div className="text-xs font-normal text-gray-500">
             Showing <b>{pageRows.length}</b> of <b>{filtered.length}</b>
           </div>
         </div>
 
-        <div className={styles.table}>
-          <div className={styles.tableHeader}>
-            <div className={styles.cellStaff}>STAFF</div>
-            <div className={styles.cellDate}>DATE</div>
-            <div className={styles.cellStatus}>STATUS</div>
-            <div className={styles.cellTime}>TIME IN</div>
-            <div className={styles.cellTime}>TIME OUT</div>
-            <div className={styles.cellHours}>HOURS</div>
-            <div className={styles.cellActions} />
-          </div>
+        <div className="mt-2.5 overflow-hidden rounded-[14px] border border-gray-200 bg-white">
+          {loading ? (
+            <div className="px-4 py-8 text-center text-sm text-gray-500">
+              Loading attendance records...
+            </div>
+          ) : loadError ? (
+            <div className="px-4 py-8 text-center">
+              <div className="text-[15px] font-semibold text-red-700">
+                Failed to load records
+              </div>
+              <div className="mt-1.5 text-[13px] font-normal text-gray-500">
+                {loadError}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <div className="min-w-[1040px]">
+                  <div className="grid grid-cols-[1.25fr_1.35fr_0.85fr_1.1fr_0.9fr_0.65fr] items-center border-b border-gray-200 px-3 py-3 text-xs font-medium tracking-[0.02em] text-gray-500">
+                    <div className="min-w-0">PROJECT</div>
+                    <div className="min-w-0">TASK</div>
+                    <div>STATUS</div>
+                    <div>SCHEDULE</div>
+                    <div>PROJECT</div>
+                    <div className="text-right">HOURS</div>
+                  </div>
 
-          {pageRows.map((r) => (
-            <div key={r.id} className={styles.tableRow} onClick={(e) => e.stopPropagation()}>
-              <div className={styles.cellStaff}>
-                <div className={styles.staffName}>{r.staffName}</div>
-                <div className={styles.staffSub}>
-                  {r.staffId} • {r.role}
+                  {pageRows.map((record) => {
+                    const meta = STATUS_META[record.status];
+
+                    return (
+                      <div
+                        key={record.id}
+                        className="grid grid-cols-[1.25fr_1.35fr_0.85fr_1.1fr_0.9fr_0.65fr] items-center border-b border-slate-100 px-3 py-3.5 text-sm font-normal last:border-b-0"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-gray-900">
+                            {record.projectTitle}
+                          </div>
+                          <div className="mt-1 truncate text-xs font-normal text-gray-500">
+                            {record.projectCode}
+                            {record.siteAddress ? ` / ${record.siteAddress}` : ""}
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-gray-900">
+                            {record.mainTaskName}
+                          </div>
+                          <div className="mt-1 truncate text-xs font-normal text-gray-500">
+                            {record.subTaskName}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span
+                            className={cn(
+                              "inline-flex h-6 items-center justify-center rounded-full px-3 text-xs font-semibold tracking-[0.02em]",
+                              meta.pill,
+                            )}
+                          >
+                            {meta.label}
+                          </span>
+                        </div>
+
+                        <div className="text-[13px] font-normal text-gray-700">
+                          <div>{formatDateTime(record.scheduledStartDatetime)}</div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            to {formatDateTime(record.scheduledEndDatetime)}
+                          </div>
+                        </div>
+
+                        <div className="text-[13px] font-normal text-gray-700">
+                          <div className="truncate font-medium text-gray-900">
+                            {record.projectStatus
+                              ? record.projectStatus.replace(/_/g, " ")
+                              : "--"}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            schedule {record.scheduleStatus
+                              ? record.scheduleStatus.replace(/_/g, " ")
+                              : "--"}
+                          </div>
+                        </div>
+
+                        <div className="truncate text-right text-[13px] font-normal text-gray-700">
+                          {formatHours(record.estimatedHours)}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className={styles.cellDate}>{formatDateLabel(r.dateISO)}</div>
-
-              <div className={styles.cellStatus}>
-                <span
-                  className={cn(
-                    styles.statusPill,
-                    r.status === "PRESENT" && styles.pillPresent,
-                    r.status === "LATE" && styles.pillLate,
-                    r.status === "ABSENT" && styles.pillAbsent,
-                    r.status === "LEAVE" && styles.pillLeave
-                  )}
-                >
-                  {STATUS_LABEL[r.status]}
-                </span>
-              </div>
-
-              <div className={styles.cellTime}>{r.timeIn ?? "—"}</div>
-              <div className={styles.cellTime}>{r.timeOut ?? "—"}</div>
-              <div className={styles.cellHours}>{formatHours(r.hoursWorked)}</div>
-
-              <div className={styles.cellActions}>
-                <button
-                  className={styles.kebabBtn}
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpenRowMenuId((prev) => (prev === r.id ? null : r.id));
-                  }}
-                  aria-label="Row actions"
-                >
-                  <MoreVertical className={styles.kebabIcon} />
-                </button>
-
-                {openRowMenuId === r.id && (
-                  <div className={styles.menu}>
-                    <button className={styles.menuItem} onClick={() => viewDetails(r)}>
-                      View details
-                    </button>
-                    <button className={styles.menuItem} onClick={() => exportRow(r)}>
-                      Export
-                    </button>
+              {filtered.length === 0 && (
+                <div className="px-3 py-6 text-center">
+                  <div className="text-[15px] font-semibold text-gray-900">
+                    No attendance records yet
                   </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {filtered.length === 0 && (
-            <div className={styles.empty}>
-              <div className={styles.emptyTitle}>No results</div>
-              <div className={styles.emptyText}>Try adjusting filters or date range.</div>
-            </div>
+                  <div className="mt-1.5 text-[13px] font-normal text-gray-500">
+                    Your assignment and project schedule records will appear here once work is planned.
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        <div className={styles.pagination}>
-          <button className={styles.pageBtn} type="button" onClick={goPrev} disabled={page <= 1}>
-            <ChevronLeft className={styles.pageIcon} />
+        <div className="mt-3.5 flex items-center justify-end gap-3">
+          <button
+            className="inline-flex h-[34px] cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            onClick={goPrev}
+            disabled={safePage <= 1 || loading}
+          >
+            <ChevronLeft className="h-4 w-4" />
             Prev
           </button>
 
-          <div className={styles.pageInfo}>
-            Page <b>{page}</b> of <b>{pageCount}</b>
+          <div className="text-[13px] font-normal text-gray-700">
+            Page <b>{safePage}</b> of <b>{pageCount}</b>
           </div>
 
           <button
-            className={styles.pageBtn}
+            className="inline-flex h-[34px] cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"
             onClick={goNext}
-            disabled={page >= pageCount}
+            disabled={safePage >= pageCount || loading}
           >
             Next
-            <ChevronRight className={styles.pageIcon} />
+            <ChevronRight className="h-4 w-4" />
           </button>
         </div>
       </section>
-    </div>
+    </StaffPageShell>
   );
 }
-

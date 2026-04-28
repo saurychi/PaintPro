@@ -4,7 +4,10 @@ import React, { useEffect, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
+import type {
+  EventClickArg,
+  EventContentArg,
+} from "@fullcalendar/core";
 import { Loader2, CalendarDays, BriefcaseBusiness } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -65,7 +68,7 @@ function toFCEvent(project: ScheduleProject): FCEvent | null {
   const colors = STATUS_COLORS[status];
   const startDateStr = project.scheduledStartDatetime.slice(0, 10);
 
-  const event: any = {
+  const event: FCEvent = {
     id: project.id,
     title: project.title,
     start: startDateStr,
@@ -92,6 +95,10 @@ function toFCEvent(project: ScheduleProject): FCEvent | null {
   }
 
   return event;
+}
+
+function isFCEvent(event: FCEvent | null): event is FCEvent {
+  return Boolean(event);
 }
 
 function renderEventContent(info: EventContentArg) {
@@ -139,7 +146,7 @@ export default function AdminSchedule() {
         setFcEvents(
           nextProjects
             .map((project) => toFCEvent(project))
-            .filter(Boolean) as FCEvent[],
+            .filter(isFCEvent),
         );
       } catch (error) {
         console.error("Failed to load schedule projects:", error);
@@ -207,6 +214,11 @@ export default function AdminSchedule() {
     if (
       status === "ready_to_start" ||
       status === "in_progress" ||
+      status === "review_pending" ||
+      status === "invoice_pending" ||
+      status === "payment_pending" ||
+      status === "employee_management_pending" ||
+      status === "conclude_job_pending" ||
       status === "ongoing" ||
       status === "active"
     ) {

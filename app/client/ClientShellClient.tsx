@@ -1,11 +1,21 @@
 "use client"
 
-import React from "react"
+import React, { createContext, useContext } from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { cn } from "@/lib/utils"
 
 type Role = "client" | "staff" | "manager" | "admin"
+
+type ClientProjectContextValue = {
+  projectId: string | null
+}
+
+const ClientProjectContext = createContext<ClientProjectContextValue>({ projectId: null })
+
+export function useClientProject() {
+  return useContext(ClientProjectContext)
+}
 
 function ClientShell({ children, role }: { children: React.ReactNode; role: Role }) {
   const { open } = useSidebar()
@@ -18,8 +28,9 @@ function ClientShell({ children, role }: { children: React.ReactNode; role: Role
         className={cn(
           "min-h-screen min-w-0 overflow-auto",
           "transition-[padding-left] duration-300 ease-in-out",
-          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
+          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)",
         )}
+        style={{ background: "var(--cp-bg)" }}
       >
         {children}
       </main>
@@ -30,13 +41,17 @@ function ClientShell({ children, role }: { children: React.ReactNode; role: Role
 export default function ClientShellClient({
   children,
   role,
+  projectId,
 }: {
   children: React.ReactNode
   role: Role
+  projectId: string | null
 }) {
   return (
-    <SidebarProvider>
-      <ClientShell role={role}>{children}</ClientShell>
-    </SidebarProvider>
+    <ClientProjectContext.Provider value={{ projectId }}>
+      <SidebarProvider>
+        <ClientShell role={role}>{children}</ClientShell>
+      </SidebarProvider>
+    </ClientProjectContext.Provider>
   )
 }

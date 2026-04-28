@@ -1,6 +1,4 @@
-import { SURFACE_SCALE_PRESETS, type ScaleBandKey } from "@/lib/planning/aiContext"
-
-type ScalePresetKey = keyof typeof SURFACE_SCALE_PRESETS
+import type { ScaleBandKey, ScalePresetKey } from "@/lib/planning/surfacePresets"
 
 export type SubTask = {
   title: string

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Download, Loader2 } from "lucide-react";
+import { ChevronRight, Download, Loader2, Send } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -38,6 +38,7 @@ export default function JobQuotation() {
   const [status, setStatus] = useState<StatusType>("Not yet Approved");
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [notifyingClient, setNotifyingClient] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [project, setProject] = useState<
@@ -179,6 +180,43 @@ export default function JobQuotation() {
     }
   }
 
+  async function handleNotifyClient() {
+    if (!projectId || notifyingClient || project?.status !== "quotation_pending") {
+      return;
+    }
+
+    try {
+      setNotifyingClient(true);
+
+      const response = await fetch("/api/planning/notifyQuotationClient", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ projectId }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to notify client about the quotation.",
+        );
+      }
+
+      toast.success("Client notified.", {
+        description: "A quotation reminder was sent in the project messages.",
+      });
+    } catch (error: any) {
+      toast.error(
+        error?.message || "Failed to notify client about the quotation.",
+      );
+    } finally {
+      setNotifyingClient(false);
+    }
+  }
+
   const previewSrc = projectId
     ? `/api/quotation/html?projectId=${encodeURIComponent(projectId)}`
     : "";
@@ -261,7 +299,7 @@ export default function JobQuotation() {
                 </div>
 
                 <div>
-                  <div className="text-gray-500">Budget</div>
+                  <div className="text-gray-500">Estimated Payment</div>
                   <div className="mt-1 font-semibold text-gray-900">
                     {formatCurrency(project?.estimated_budget)}
                   </div>
@@ -283,6 +321,28 @@ export default function JobQuotation() {
                   <>
                     <Download className="h-4 w-4" />
                     Download PDF
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNotifyClient}
+                disabled={
+                  notifyingClient ||
+                  !projectId ||
+                  project?.status !== "quotation_pending"
+                }
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60">
+                {notifyingClient ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Notifying...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Notify Client
                   </>
                 )}
               </button>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type CostEstimationResponse = {
   project: {
@@ -89,6 +90,164 @@ function todayString() {
   });
 }
 
+async function getAdminSignatureInfo(projectId: string) {
+  const { data: projectRow, error: projectError } = await supabaseAdmin
+    .from("projects")
+    .select("created_by")
+    .eq("project_id", projectId)
+    .maybeSingle();
+
+  if (projectError) {
+    console.error("Failed to load project creator:", projectError);
+    return {
+      signatureDataUrl: null as string | null,
+      username: null as string | null,
+    };
+  }
+
+  const createdBy = projectRow?.created_by;
+
+  if (!createdBy) {
+    return {
+      signatureDataUrl: null as string | null,
+      username: null as string | null,
+    };
+  }
+
+  const { data: userRow, error: userError } = await supabaseAdmin
+    .from("users")
+    .select("username, signature_url")
+    .eq("id", createdBy)
+    .maybeSingle();
+
+  if (userError) {
+    console.error("Failed to load admin signature info:", userError);
+    return {
+      signatureDataUrl: null as string | null,
+      username: null as string | null,
+    };
+  }
+
+  const username =
+    typeof userRow?.username === "string" && userRow.username.trim()
+      ? userRow.username.trim()
+      : null;
+
+  const signaturePath = userRow?.signature_url;
+
+  if (!signaturePath) {
+    return {
+      signatureDataUrl: null,
+      username,
+    };
+  }
+
+  const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+    .from("signatures")
+    .download(signaturePath);
+
+  if (downloadError || !fileData) {
+    console.error("Failed to download admin signature:", downloadError);
+    return {
+      signatureDataUrl: null,
+      username,
+    };
+  }
+
+  const arrayBuffer = await fileData.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+  return {
+    signatureDataUrl: `data:${fileData.type || "image/png"};base64,${base64}`,
+    username,
+  };
+}
+
+async function getClientQuotationSignatureInfo(projectId: string) {
+  const { data: projectRow, error: projectError } = await supabaseAdmin
+    .from("projects")
+    .select("client_id")
+    .eq("project_id", projectId)
+    .maybeSingle();
+
+  if (projectError) {
+    console.error("Failed to load project client:", projectError);
+  }
+
+  let clientName: string | null = null;
+
+  if (projectRow?.client_id) {
+    const { data: clientRow, error: clientError } = await supabaseAdmin
+      .from("clients")
+      .select("full_name")
+      .eq("client_id", projectRow.client_id)
+      .maybeSingle();
+
+    if (clientError) {
+      console.error("Failed to load client name:", clientError);
+    }
+
+    clientName =
+      typeof clientRow?.full_name === "string" && clientRow.full_name.trim()
+        ? clientRow.full_name.trim()
+        : null;
+  }
+
+  const { data: documentRow, error: documentError } = await supabaseAdmin
+    .from("project_documents")
+    .select("signed_name, client_signature_path")
+    .eq("project_id", projectId)
+    .eq("document_type", "quotation")
+    .neq("document_status", "void")
+    .maybeSingle();
+
+  if (documentError) {
+    console.error("Failed to load client quotation signature:", documentError);
+    return {
+      signatureDataUrl: null as string | null,
+      signedName: clientName,
+    };
+  }
+
+  const signedName =
+    typeof documentRow?.signed_name === "string" && documentRow.signed_name.trim()
+      ? documentRow.signed_name.trim()
+      : clientName;
+
+  const signaturePath = documentRow?.client_signature_path;
+
+  if (!signaturePath) {
+    return {
+      signatureDataUrl: null,
+      signedName,
+    };
+  }
+
+  const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+    .from("signatures")
+    .download(signaturePath);
+
+  if (downloadError || !fileData) {
+    console.error(
+      "Failed to download client quotation signature:",
+      downloadError,
+    );
+
+    return {
+      signatureDataUrl: null,
+      signedName,
+    };
+  }
+
+  const arrayBuffer = await fileData.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+  return {
+    signatureDataUrl: `data:${fileData.type || "image/png"};base64,${base64}`,
+    signedName,
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -124,6 +283,10 @@ export async function GET(request: Request) {
     const client = data.client;
     const mainTasks = Array.isArray(data.mainTasks) ? data.mainTasks : [];
     const summary = data.summary;
+
+    const adminSignatureInfo = await getAdminSignatureInfo(projectId);
+    const clientQuotationSignatureInfo =
+      await getClientQuotationSignatureInfo(projectId);
 
     const html = `
 <!DOCTYPE html>
@@ -278,12 +441,35 @@ export async function GET(request: Request) {
         grid-template-columns: 1fr 1fr;
         gap: 28px;
       }
+      .sig-box {
+        min-height: 86px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+      }
+      .sig-image-wrap {
+        height: 48px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-start;
+        margin-bottom: 6px;
+      }
+      .sig-image {
+        max-height: 48px;
+        max-width: 180px;
+        object-fit: contain;
+      }
       .sig-line {
-        margin-top: 32px;
         border-top: 1px solid #111827;
         padding-top: 6px;
         font-size: 12px;
         color: #6b7280;
+      }
+      .sig-name {
+        margin-top: 4px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #111827;
       }
       @page {
         size: A4;
@@ -418,11 +604,35 @@ export async function GET(request: Request) {
       </div>
 
       <div class="signature">
-        <div>
+        <div class="sig-box">
+          <div class="sig-image-wrap">
+            ${
+              adminSignatureInfo.signatureDataUrl
+                ? `<img src="${adminSignatureInfo.signatureDataUrl}" alt="Prepared by signature" class="sig-image" />`
+                : ""
+            }
+          </div>
           <div class="sig-line">Prepared By</div>
+          ${
+            adminSignatureInfo.username
+              ? `<div class="sig-name">${escapeHtml(adminSignatureInfo.username)}</div>`
+              : ""
+          }
         </div>
-        <div>
+        <div class="sig-box">
+          <div class="sig-image-wrap">
+            ${
+              clientQuotationSignatureInfo.signatureDataUrl
+                ? `<img src="${clientQuotationSignatureInfo.signatureDataUrl}" alt="Client signature" class="sig-image" />`
+                : ""
+            }
+          </div>
           <div class="sig-line">Approved By / Client Signature</div>
+          ${
+            clientQuotationSignatureInfo.signedName
+              ? `<div class="sig-name">${escapeHtml(clientQuotationSignatureInfo.signedName)}</div>`
+              : ""
+          }
         </div>
       </div>
     </div>
@@ -434,6 +644,7 @@ export async function GET(request: Request) {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
       },
     });
   } catch (error: any) {
