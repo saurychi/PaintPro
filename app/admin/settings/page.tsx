@@ -1,53 +1,57 @@
-"use client"
+"use client";
 
-import React, { useEffect, useMemo, useState } from "react"
-import { supabase } from "@/lib/supabaseClient"
-import { useRouter } from "next/navigation"
-import { useTheme } from "next-themes"
-import rawCountries from "@/lib/data/country-by-calling-code.json"
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
+import rawCountries from "@/lib/data/country-by-calling-code.json";
+import SignatureCanvas from "react-signature-canvas";
+import { Upload } from "lucide-react";
 
-const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
+const ACCENT = "#00c065";
+const ACCENT_HOVER = "#00a054";
 
-type CountryRaw = { country: string; calling_code: number }
-type CountryOption = { label: string; code: string }
+type CountryRaw = { country: string; calling_code: number };
+type CountryOption = { label: string; code: string };
 
 type DbUser = {
-  id: string
-  username: string
-  email: string | null
-  phone: string | null
-  role: "client" | "staff" | "manager" | "admin"
-}
+  id: string;
+  username: string;
+  email: string | null;
+  phone: string | null;
+  role: "client" | "staff" | "manager" | "admin";
+  signature_url: string | null;
+};
 
 function rolePill(role: DbUser["role"]) {
-  if (role === "admin") return "border-gray-200 bg-gray-100 text-gray-800"
-  if (role === "manager") return "border-purple-200 bg-purple-500/10 text-purple-700"
-  if (role === "staff") return "border-blue-200 bg-blue-500/10 text-blue-700"
-  return "border-emerald-200 bg-emerald-500/10 text-emerald-700"
+  if (role === "admin") return "border-gray-200 bg-gray-100 text-gray-800";
+  if (role === "manager")
+    return "border-purple-200 bg-purple-500/10 text-purple-700";
+  if (role === "staff") return "border-blue-200 bg-blue-500/10 text-blue-700";
+  return "border-emerald-200 bg-emerald-500/10 text-emerald-700";
 }
 
 function roleLabel(role: DbUser["role"]) {
-  if (role === "admin") return "Admin"
-  if (role === "manager") return "Manager"
-  if (role === "staff") return "Staff"
-  return "Client"
+  if (role === "admin") return "Admin";
+  if (role === "manager") return "Manager";
+  if (role === "staff") return "Staff";
+  return "Client";
 }
 
 function parsePhone(raw?: string | null) {
-  const fallback = { countryCode: "+63", local: "" }
-  if (!raw) return fallback
-  const s = String(raw).trim()
-  const m = s.match(/^(\+\d+)\s*(.*)$/)
-  if (!m) return { ...fallback, local: s }
-  return { countryCode: m[1], local: (m[2] || "").trim() }
+  const fallback = { countryCode: "+63", local: "" };
+  if (!raw) return fallback;
+  const s = String(raw).trim();
+  const m = s.match(/^(\+\d+)\s*(.*)$/);
+  if (!m) return { ...fallback, local: s };
+  return { countryCode: m[1], local: (m[2] || "").trim() };
 }
 
 function formatPhoneFull(countryCode: string, local: string) {
-  const cc = countryCode.trim()
-  const lc = local.trim()
-  if (!lc) return null
-  return `${cc} ${lc}`
+  const cc = countryCode.trim();
+  const lc = local.trim();
+  if (!lc) return null;
+  return `${cc} ${lc}`;
 }
 
 function SectionTitle({
@@ -55,9 +59,9 @@ function SectionTitle({
   subtitle,
   right,
 }: {
-  title: string
-  subtitle?: string
-  right?: React.ReactNode
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -70,40 +74,39 @@ function SectionTitle({
           />
           <p className="text-sm font-semibold text-gray-900">{title}</p>
         </div>
-        {subtitle ? <p className="mt-1 text-sm text-gray-600">{subtitle}</p> : null}
+        {subtitle ? (
+          <p className="mt-1 text-sm text-gray-600">{subtitle}</p>
+        ) : null}
       </div>
       {right ? <div className="shrink-0">{right}</div> : null}
     </div>
-  )
+  );
 }
 
 const btnBase =
-  "inline-flex items-center justify-center rounded-lg text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25"
-const btnNeutral =
-  `${btnBase} border border-gray-200 bg-white px-3 h-9 text-gray-900 hover:bg-gray-50 hover:shadow-md`
-const btnPrimary =
-  `${btnBase} bg-[#00c065] px-3 h-9 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`
-const btnDanger =
-  `${btnBase} border border-red-200 bg-white px-4 py-2 text-red-600 hover:bg-red-50 hover:shadow-md`
+  "inline-flex items-center justify-center rounded-lg text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25";
+const btnNeutral = `${btnBase} border border-gray-200 bg-white px-3 h-9 text-gray-900 hover:bg-gray-50 hover:shadow-md`;
+const btnPrimary = `${btnBase} bg-[#00c065] px-3 h-9 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`;
+const btnDanger = `${btnBase} border border-red-200 bg-white px-4 py-2 text-red-600 hover:bg-red-50 hover:shadow-md`;
 
 export default function AdminSettings() {
-  const router = useRouter()
-  const { resolvedTheme, setTheme } = useTheme()
-  const isDark = resolvedTheme === "dark"
+  const router = useRouter();
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   const countries: CountryOption[] = useMemo(() => {
     const codes = Array.from(
       new Set(
         (rawCountries as CountryRaw[])
           .filter((c) => c?.calling_code)
-          .map((c) => `+${c.calling_code}`)
-      )
-    ).sort((a, b) => a.localeCompare(b))
-    return codes.map((code) => ({ label: code, code }))
-  }, [])
+          .map((c) => `+${c.calling_code}`),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+    return codes.map((code) => ({ label: code, code }));
+  }, []);
 
-  const [loading, setLoading] = useState(true)
-  const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [profile, setProfile] = useState<DbUser>({
     id: "",
@@ -111,131 +114,307 @@ export default function AdminSettings() {
     email: null,
     phone: null,
     role: "client",
-  })
+    signature_url: null,
+  });
 
   const [toggles, setToggles] = useState({
     jobUpdates: false,
     messages: true,
     autoDownload: true,
     assignEmployees: true,
-  })
+  });
 
-  const [phoneEditing, setPhoneEditing] = useState(false)
-  const [phoneBusy, setPhoneBusy] = useState(false)
-  const [phoneMsg, setPhoneMsg] = useState<string | null>(null)
-  const [phoneErr, setPhoneErr] = useState<string | null>(null)
+  const [phoneEditing, setPhoneEditing] = useState(false);
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneMsg, setPhoneMsg] = useState<string | null>(null);
+  const [phoneErr, setPhoneErr] = useState<string | null>(null);
 
   const [phoneDraft, setPhoneDraft] = useState({
     countryCode: "+63",
     local: "",
-  })
+  });
+  const signatureRef = useRef<SignatureCanvas | null>(null);
+  const [signatureMode, setSignatureMode] = useState<"draw" | "upload">("draw");
+  const [uploadedSignatureFile, setUploadedSignatureFile] =
+    useState<File | null>(null);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [signaturePreviewUrl, setSignaturePreviewUrl] = useState<string | null>(
+    null,
+  );
+  const [signatureBusy, setSignatureBusy] = useState(false);
+  const [signatureMsg, setSignatureMsg] = useState<string | null>(null);
+  const [signatureErr, setSignatureErr] = useState<string | null>(null);
 
   useEffect(() => {
     const boot = async () => {
-      setLoading(true)
-      setLoadErr(null)
+      setLoading(true);
+      setLoadErr(null);
 
-      const { data, error: sessErr } = await supabase.auth.getSession()
-      if (sessErr) console.error(sessErr)
+      const { data, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) console.error(sessErr);
 
-      const session = data.session
+      const session = data.session;
       if (!session) {
-        router.replace("/auth/signin")
-        return
+        router.replace("/auth/signin");
+        return;
       }
 
       try {
-        // Fetch from public.users (table name "users" in public schema)
         const { data: row, error } = await supabase
           .from("users")
-          .select("id, username, email, phone, role")
+          .select("id, username, email, phone, role, signature_url")
           .eq("id", session.user.id)
-          .maybeSingle<DbUser>()
+          .maybeSingle<DbUser>();
 
-        if (error) throw error
+        if (error) throw error;
         if (!row) {
-          await supabase.auth.signOut()
-          router.replace("/auth/invite?reason=not_invited")
-          return
+          await supabase.auth.signOut();
+          router.replace("/auth/invite?reason=not_invited");
+          return;
         }
 
-        const mergedEmail = row.email ?? (session.user.email || null)
-        const merged: DbUser = { ...row, email: mergedEmail }
+        const mergedEmail = row.email ?? (session.user.email || null);
+        const merged: DbUser = { ...row, email: mergedEmail };
 
-        setProfile(merged)
-        setPhoneDraft(parsePhone(merged.phone))
+        setProfile(merged);
+        setPhoneDraft(parsePhone(merged.phone));
       } catch (e: any) {
-        console.error(e)
-        setLoadErr(e?.message || "Failed to load profile.")
+        console.error(e);
+        setLoadErr(e?.message || "Failed to load profile.");
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    boot()
-  }, [router])
+    boot();
+  }, [router]);
+
+  useEffect(() => {
+    const loadSignaturePreview = async () => {
+      if (!profile.signature_url) {
+        setSignaturePreviewUrl(null);
+        return;
+      }
+
+      try {
+        const { data, error: sessErr } = await supabase.auth.getSession();
+        if (sessErr) throw sessErr;
+
+        const session = data.session;
+        if (!session) {
+          setSignaturePreviewUrl(null);
+          return;
+        }
+
+        const response = await fetch("/api/signatures", {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            [result?.error, result?.details].filter(Boolean).join(": ") ||
+              "Failed to load signature.",
+          );
+        }
+
+        setSignaturePreviewUrl(result.signedUrl || null);
+      } catch (error) {
+        console.error(error);
+        setSignaturePreviewUrl(null);
+      }
+    };
+
+    loadSignaturePreview();
+  }, [profile.signature_url]);
 
   const handleToggle = (key: keyof typeof toggles) => {
-    setToggles((prev) => ({ ...prev, [key]: !prev[key] }))
-  }
+    setToggles((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const startEditPhone = () => {
-    setPhoneErr(null)
-    setPhoneMsg(null)
-    setPhoneDraft(parsePhone(profile.phone))
-    setPhoneEditing(true)
-  }
+    setPhoneErr(null);
+    setPhoneMsg(null);
+    setPhoneDraft(parsePhone(profile.phone));
+    setPhoneEditing(true);
+  };
 
   const cancelEditPhone = () => {
-    setPhoneErr(null)
-    setPhoneMsg(null)
-    setPhoneDraft(parsePhone(profile.phone))
-    setPhoneEditing(false)
-  }
+    setPhoneErr(null);
+    setPhoneMsg(null);
+    setPhoneDraft(parsePhone(profile.phone));
+    setPhoneEditing(false);
+  };
 
   const savePhone = async () => {
-    setPhoneErr(null)
-    setPhoneMsg(null)
+    setPhoneErr(null);
+    setPhoneMsg(null);
 
-    const phoneFull = formatPhoneFull(phoneDraft.countryCode, phoneDraft.local)
+    const phoneFull = formatPhoneFull(phoneDraft.countryCode, phoneDraft.local);
 
     try {
-      setPhoneBusy(true)
+      setPhoneBusy(true);
 
-      const { data, error: sessErr } = await supabase.auth.getSession()
-      if (sessErr) throw sessErr
-      const session = data.session
+      const { data, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+      const session = data.session;
       if (!session) {
-        router.replace("/auth/signin")
-        return
+        router.replace("/auth/signin");
+        return;
       }
 
       const { error } = await supabase
         .from("users")
         .update({ phone: phoneFull, updated_at: new Date().toISOString() })
-        .eq("id", session.user.id)
+        .eq("id", session.user.id);
 
-      if (error) throw error
+      if (error) throw error;
 
-      setProfile((p) => ({ ...p, phone: phoneFull }))
-      setPhoneEditing(false)
-      setPhoneMsg("Saved.")
+      setProfile((p) => ({ ...p, phone: phoneFull }));
+      setPhoneEditing(false);
+      setPhoneMsg("Saved.");
     } catch (e: any) {
-      console.error(e)
-      setPhoneErr(e?.message || "Failed to save phone.")
+      console.error(e);
+      setPhoneErr(e?.message || "Failed to save phone.");
     } finally {
-      setPhoneBusy(false)
+      setPhoneBusy(false);
     }
-  }
+  };
+
+  const handleSignatureFileChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedSignatureFile(file);
+    setUploadFileName(file.name);
+    setSignatureErr(null);
+    setSignatureMsg(null);
+  };
+
+  const clearUpload = () => {
+    setUploadedSignatureFile(null);
+    setUploadFileName(null);
+    setSignatureErr(null);
+    setSignatureMsg(null);
+  };
+
+  const clearSignature = () => {
+    setSignatureErr(null);
+    setSignatureMsg(null);
+    signatureRef.current?.clear();
+  };
+
+  const fileToDataUrl = (file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+          return;
+        }
+
+        reject(new Error("Failed to read signature file."));
+      };
+
+      reader.onerror = () =>
+        reject(new Error("Failed to read signature file."));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const saveSignature = async () => {
+    setSignatureErr(null);
+    setSignatureMsg(null);
+
+    try {
+      let signatureDataUrl = "";
+
+      if (signatureMode === "draw") {
+        if (!signatureRef.current || signatureRef.current.isEmpty()) {
+          setSignatureErr("Please draw your signature first.");
+          return;
+        }
+
+        signatureDataUrl = signatureRef.current
+          .getTrimmedCanvas()
+          .toDataURL("image/png");
+      } else {
+        if (!uploadedSignatureFile) {
+          setSignatureErr("Please select an image file.");
+          return;
+        }
+
+        signatureDataUrl = await fileToDataUrl(uploadedSignatureFile);
+      }
+
+      setSignatureBusy(true);
+
+      const { data, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+
+      const session = data.session;
+      if (!session) {
+        router.replace("/auth/signin");
+        return;
+      }
+
+      const response = await fetch("/api/signatures", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          signatureDataUrl,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          [result?.error, result?.details].filter(Boolean).join(": ") ||
+            "Failed to save signature.",
+        );
+      }
+
+      setProfile((prev) => ({
+        ...prev,
+        signature_url: result.signaturePath,
+      }));
+
+      setSignaturePreviewUrl(result.signedUrl || null);
+
+      if (signatureMode === "draw") {
+        signatureRef.current?.clear();
+      } else {
+        setUploadedSignatureFile(null);
+        setUploadFileName(null);
+      }
+
+      setSignatureMsg("Signature saved.");
+    } catch (e: any) {
+      console.error(e);
+      setSignatureErr(e?.message || "Failed to save signature.");
+    } finally {
+      setSignatureBusy(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut()
-      router.replace("/auth/signin?choose=1")
+      await supabase.auth.signOut();
+      router.replace("/auth/signin?choose=1");
     } catch (error) {
-      console.error("Error signing out:", error)
+      console.error("Error signing out:", error);
     }
-  }
+  };
 
   if (loading) {
     return (
@@ -245,18 +424,16 @@ export default function AdminSettings() {
           <p className="text-sm text-gray-600">Loading settings…</p>
         </div>
       </div>
-    )
+    );
   }
 
-  // Shared controls style for phone select/input (same length in both modes)
   const phoneSelectClass =
-    "h-10 w-full rounded-lg border border-gray-200 bg-white px-2 pr-8 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
-  const phoneInputClass =
-    [
-      "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm outline-none",
-      "focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20",
-      "sm:max-w-[260px]",
-    ].join(" ")
+    "h-10 w-full rounded-lg border border-gray-200 bg-white px-2 pr-8 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20";
+  const phoneInputClass = [
+    "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm outline-none",
+    "focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20",
+    "sm:max-w-[260px]",
+  ].join(" ");
 
   return (
     <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
@@ -282,8 +459,7 @@ export default function AdminSettings() {
                       className={[
                         "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
                         rolePill(profile.role),
-                      ].join(" ")}
-                    >
+                      ].join(" ")}>
                       {roleLabel(profile.role)}
                     </span>
                   }
@@ -292,8 +468,132 @@ export default function AdminSettings() {
                 <div className="rounded-lg border border-gray-200 bg-white">
                   <div className="px-4 py-4">
                     <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
-                      <div className="text-sm font-semibold text-gray-900">Username</div>
-                      <div className="text-sm font-semibold text-gray-900">{profile.username || ""}</div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        Username
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {profile.username || ""}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="h-px w-full bg-gray-200" />
+
+                  {/* Signature */}
+                  <div className="px-4 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          Signature
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          Used on generated documents
+                        </p>
+                      </div>
+
+                      <div className="flex items-center rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs font-semibold">
+                        {(["draw", "upload"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setSignatureMode(mode)}
+                            className={[
+                              "rounded-md px-3 py-1 capitalize transition-colors",
+                              signatureMode === mode
+                                ? "bg-white text-gray-900 shadow-sm"
+                                : "text-gray-500 hover:text-gray-700",
+                            ].join(" ")}>
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex gap-3">
+                      <div className="min-w-0 flex-1">
+                        {signatureMode === "draw" ? (
+                          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                            <SignatureCanvas
+                              ref={signatureRef}
+                              penColor="black"
+                              canvasProps={{
+                                className: "h-[100px] w-full bg-white",
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <label className="flex h-[100px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-200 bg-white transition hover:bg-gray-50">
+                            <Upload className="h-5 w-5 text-gray-300" />
+                            <span className="px-4 text-center text-xs text-gray-500">
+                              {uploadFileName ?? "Click to upload PNG / JPG"}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/jpg"
+                              className="hidden"
+                              onChange={handleSignatureFileChange}
+                            />
+                          </label>
+                        )}
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {signatureMode === "draw" ? (
+                            <button
+                              type="button"
+                              onClick={clearSignature}
+                              disabled={signatureBusy}
+                              className={`${btnNeutral} disabled:opacity-60`}>
+                              Clear
+                            </button>
+                          ) : uploadedSignatureFile ? (
+                            <button
+                              type="button"
+                              onClick={clearUpload}
+                              disabled={signatureBusy}
+                              className={`${btnNeutral} disabled:opacity-60`}>
+                              Clear
+                            </button>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            onClick={saveSignature}
+                            disabled={signatureBusy}
+                            className={btnPrimary}>
+                            {signatureBusy ? "Saving..." : "Save"}
+                          </button>
+                        </div>
+
+                        {signatureErr ? (
+                          <p className="mt-1.5 text-xs font-semibold text-red-600">
+                            {signatureErr}
+                          </p>
+                        ) : null}
+                        {signatureMsg ? (
+                          <p className="mt-1.5 text-xs font-semibold text-emerald-700">
+                            {signatureMsg}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="w-[110px] shrink-0">
+                        <p className="mb-1.5 text-xs font-medium text-gray-500">
+                          Current
+                        </p>
+                        <div className="flex h-[100px] items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-2">
+                          {signaturePreviewUrl ? (
+                            <img
+                              src={signaturePreviewUrl}
+                              alt="Saved signature"
+                              className="max-h-full max-w-full object-contain"
+                            />
+                          ) : (
+                            <p className="text-center text-[11px] text-gray-400">
+                              No signature saved
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -301,8 +601,12 @@ export default function AdminSettings() {
 
                   <div className="px-4 py-4">
                     <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
-                      <div className="text-sm font-semibold text-gray-900">Email</div>
-                      <div className="text-sm font-semibold text-gray-900">{profile.email || ""}</div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        Email
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {profile.email || ""}
+                      </div>
                     </div>
                   </div>
 
@@ -312,12 +616,19 @@ export default function AdminSettings() {
                   <div className="px-4 py-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-900">Phone</p>
-                        <p className="mt-1 text-sm text-gray-600">Used for contact and job updates</p>
+                        <p className="text-sm font-semibold text-gray-900">
+                          Phone
+                        </p>
+                        <p className="mt-1 text-sm text-gray-600">
+                          Used for contact and job updates
+                        </p>
                       </div>
 
                       {!phoneEditing ? (
-                        <button type="button" onClick={startEditPhone} className={btnNeutral}>
+                        <button
+                          type="button"
+                          onClick={startEditPhone}
+                          className={btnNeutral}>
                           Edit
                         </button>
                       ) : (
@@ -326,11 +637,14 @@ export default function AdminSettings() {
                             type="button"
                             onClick={cancelEditPhone}
                             disabled={phoneBusy}
-                            className={`${btnNeutral} disabled:opacity-60`}
-                          >
+                            className={`${btnNeutral} disabled:opacity-60`}>
                             Cancel
                           </button>
-                          <button type="button" onClick={savePhone} disabled={phoneBusy} className={btnPrimary}>
+                          <button
+                            type="button"
+                            onClick={savePhone}
+                            disabled={phoneBusy}
+                            className={btnPrimary}>
                             {phoneBusy ? "Saving..." : "Save"}
                           </button>
                         </div>
@@ -342,10 +656,14 @@ export default function AdminSettings() {
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                         <select
                           value={phoneDraft.countryCode}
-                          onChange={(e) => setPhoneDraft((p) => ({ ...p, countryCode: e.target.value }))}
+                          onChange={(e) =>
+                            setPhoneDraft((p) => ({
+                              ...p,
+                              countryCode: e.target.value,
+                            }))
+                          }
                           disabled={!phoneEditing}
-                          className={`${phoneSelectClass} ${!phoneEditing ? "bg-gray-50 text-gray-900" : ""} disabled:cursor-not-allowed`}
-                        >
+                          className={`${phoneSelectClass} ${!phoneEditing ? "bg-gray-50 text-gray-900" : ""} disabled:cursor-not-allowed`}>
                           {countries.map((c) => (
                             <option key={c.code} value={c.code}>
                               {c.label}
@@ -355,7 +673,12 @@ export default function AdminSettings() {
 
                         <input
                           value={phoneDraft.local}
-                          onChange={(e) => setPhoneDraft((p) => ({ ...p, local: e.target.value }))}
+                          onChange={(e) =>
+                            setPhoneDraft((p) => ({
+                              ...p,
+                              local: e.target.value,
+                            }))
+                          }
                           disabled={!phoneEditing}
                           inputMode="tel"
                           autoComplete="tel-national"
@@ -365,8 +688,16 @@ export default function AdminSettings() {
                         />
                       </div>
 
-                      {phoneErr ? <p className="text-sm font-semibold text-red-600">{phoneErr}</p> : null}
-                      {phoneMsg ? <p className="text-sm font-semibold text-emerald-700">{phoneMsg}</p> : null}
+                      {phoneErr ? (
+                        <p className="text-sm font-semibold text-red-600">
+                          {phoneErr}
+                        </p>
+                      ) : null}
+                      {phoneMsg ? (
+                        <p className="text-sm font-semibold text-emerald-700">
+                          {phoneMsg}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -376,7 +707,10 @@ export default function AdminSettings() {
 
               {/* Preferences */}
               <div className="grid gap-3">
-                <SectionTitle title="Preferences" subtitle="Notifications and behavior" />
+                <SectionTitle
+                  title="Preferences"
+                  subtitle="Notifications and behavior"
+                />
 
                 <div className="space-y-3">
                   <ToggleRow
@@ -410,18 +744,24 @@ export default function AdminSettings() {
               <div className="pt-2">
                 <div className="h-px w-full bg-gray-200" />
                 <div className="mt-5 grid gap-3">
-                  <SectionTitle title="Appearance" subtitle="Control the look and feel of the interface." />
+                  <SectionTitle
+                    title="Appearance"
+                    subtitle="Control the look and feel of the interface."
+                  />
 
                   <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Dark mode</p>
-                      <p className="mt-1 text-sm text-gray-600">Switch between light and dark interface.</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        Dark mode
+                      </p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Switch between light and dark interface.
+                      </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setTheme(isDark ? "light" : "dark")}
-                      className={btnNeutral}
-                    >
+                      className={btnNeutral}>
                       {isDark ? "Light mode" : "Dark mode"}
                     </button>
                   </div>
@@ -432,10 +772,16 @@ export default function AdminSettings() {
               <div className="pt-2">
                 <div className="h-px w-full bg-gray-200" />
                 <div className="mt-5 grid gap-3">
-                  <SectionTitle title="Session" subtitle="Sign out of your account on this device." />
+                  <SectionTitle
+                    title="Session"
+                    subtitle="Sign out of your account on this device."
+                  />
 
                   <div>
-                    <button type="button" onClick={handleLogout} className={btnDanger}>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className={btnDanger}>
                       Logout
                     </button>
                   </div>
@@ -445,8 +791,14 @@ export default function AdminSettings() {
           </Card>
         </div>
       </div>
+
+      <style jsx global>{`
+        canvas {
+          touch-action: none;
+        }
+      `}</style>
     </div>
-  )
+  );
 }
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -455,7 +807,7 @@ function Card({ children }: { children: React.ReactNode }) {
       <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
       <div className="p-4">{children}</div>
     </div>
-  )
+  );
 }
 
 function ToggleRow({
@@ -464,26 +816,29 @@ function ToggleRow({
   active,
   onClick,
 }: {
-  label: string
-  description?: string
-  active: boolean
-  onClick: () => void
+  label: string;
+  description?: string;
+  active: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 hover:shadow-md active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25"
-      aria-pressed={active}
-    >
+      aria-pressed={active}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-gray-900">{label}</p>
-          {description ? <p className="mt-1 text-sm text-gray-600">{description}</p> : null}
+          {description ? (
+            <p className="mt-1 text-sm text-gray-600">{description}</p>
+          ) : null}
         </div>
 
         <div className="shrink-0 flex flex-col items-end">
-          <div className="relative h-8 w-16 rounded-lg border border-gray-200 bg-white shadow-sm p-1" aria-hidden="true">
+          <div
+            className="relative h-8 w-16 rounded-lg border border-gray-200 bg-white shadow-sm p-1"
+            aria-hidden="true">
             <div
               className="absolute inset-0 rounded-lg transition-opacity"
               style={{
@@ -499,9 +854,11 @@ function ToggleRow({
               }}
             />
           </div>
-          <p className="mt-1 text-[10px] text-gray-500">{active ? "On" : "Off"}</p>
+          <p className="mt-1 text-[10px] text-gray-500">
+            {active ? "On" : "Off"}
+          </p>
         </div>
       </div>
     </button>
-  )
+  );
 }

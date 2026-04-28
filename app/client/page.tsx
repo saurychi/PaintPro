@@ -9,6 +9,8 @@ import JobProgressCard, {
 } from "@/components/dashboard/jobProgressCard";
 import DashboardInsightCard from "@/components/dashboard/dashboardInsightCard";
 import PendingDocumentsCard from "@/components/dashboard/pendingDocumentsCard";
+import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
+import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -21,12 +23,73 @@ type OverviewResponse = {
   details?: string;
 };
 
+const END_OF_WORK_STATUS_ORDER = [
+  "review_pending",
+  "invoice_pending",
+  "payment_pending",
+  "employee_management_pending",
+  "conclude_job_pending",
+] as const;
+
+const END_OF_WORK_STEP_CONFIG = [
+  {
+    id: "review-and-final-checks",
+    title: "Review and Final Checks",
+    pendingStatus: "review_pending",
+  },
+  {
+    id: "invoice-generation",
+    title: "Invoice Generation",
+    pendingStatus: "invoice_pending",
+  },
+  {
+    id: "receive-payment",
+    title: "Receive Payment",
+    pendingStatus: "payment_pending",
+  },
+  {
+    id: "employee-management",
+    title: "Employee Management",
+    pendingStatus: "employee_management_pending",
+  },
+  {
+    id: "conclude-job",
+    title: "Conclude Job",
+    pendingStatus: "conclude_job_pending",
+  },
+] as const;
+
 // ─── helpers (same pattern as admin/page.tsx) ─────────────────────────────────
 
 function normalizeStatus(value?: string | null) {
   return String(value || "")
     .trim()
     .toLowerCase();
+}
+
+function isEndOfWorkStatus(status: string) {
+  return END_OF_WORK_STATUS_ORDER.includes(
+    status as (typeof END_OF_WORK_STATUS_ORDER)[number],
+  );
+}
+
+function getEndOfWorkChildStatus(
+  projectStatus: string,
+  stepIndex: number,
+): StepVisualStatus {
+  const normalized = normalizeStatus(projectStatus);
+
+  if (normalized === "completed" || normalized === "cancelled") return "done";
+  if (normalized === "in_progress") return stepIndex === 0 ? "active" : "pending";
+
+  const activeIndex = END_OF_WORK_STATUS_ORDER.indexOf(
+    normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
+  );
+
+  if (activeIndex === -1) return "pending";
+  if (stepIndex < activeIndex) return "done";
+  if (stepIndex === activeIndex) return "active";
+  return "pending";
 }
 
 function asArray<T = unknown>(value: unknown): T[] {
@@ -114,6 +177,63 @@ function getTaskStatus(rawStatus: string): StepVisualStatus {
   return "pending";
 }
 
+const JUST_IN_TIME_TOLERANCE_MINUTES = 8;
+
+function getCompletionTimingLabel(args: {
+  rawStatus: string;
+  scheduledStart: string;
+  estimatedHours: number;
+  completedAt: string;
+}) {
+  if (getTaskStatus(args.rawStatus) !== "done") return null;
+  if (!args.scheduledStart || !args.completedAt || args.estimatedHours <= 0) {
+    return "Completed";
+  }
+
+  const startDate = new Date(args.scheduledStart);
+  const completedDate = new Date(args.completedAt);
+
+  if (
+    Number.isNaN(startDate.getTime()) ||
+    Number.isNaN(completedDate.getTime())
+  ) {
+    return "Completed";
+  }
+
+  const plannedEndMs =
+    startDate.getTime() + args.estimatedHours * 60 * 60 * 1000;
+  const diffMinutes = (completedDate.getTime() - plannedEndMs) / (1000 * 60);
+
+  if (Math.abs(diffMinutes) <= JUST_IN_TIME_TOLERANCE_MINUTES) {
+    return "on time";
+  }
+
+  return diffMinutes < 0 ? "early" : "late";
+}
+
+function getAutoOpenMainTaskId(mainTasks: Record<string, unknown>[]) {
+  const activeMainTask =
+    mainTasks.find((mainTask) => {
+      const subTasks = [
+        ...asArray<Record<string, unknown>>(mainTask.subTasks),
+        ...asArray<Record<string, unknown>>(mainTask.subtasks),
+        ...asArray<Record<string, unknown>>(mainTask.projectSubTasks),
+        ...asArray<Record<string, unknown>>(mainTask.project_sub_tasks),
+      ];
+
+      return subTasks.some(
+        (subTask) =>
+          getTaskStatus(
+            readString(subTask.status, subTask.rawStatus, subTask.project_status),
+          ) !== "done",
+      );
+    }) ?? mainTasks[0];
+
+  if (!activeMainTask) return "";
+
+  return readString(activeMainTask.project_task_id, activeMainTask.id);
+}
+
 function collectEmployeeLabels(subTask: Record<string, unknown>) {
   const labels: string[] = [];
   const direct = readString(
@@ -172,7 +292,9 @@ function getProjectPhase(
 ): "job_creation" | "ready" | "in_progress" | "completed" | "cancelled" {
   if (JOB_CREATION_STATUSES.includes(normalized)) return "job_creation";
   if (normalized === "ready_to_start") return "ready";
-  if (normalized === "in_progress") return "in_progress";
+  if (normalized === "in_progress" || isEndOfWorkStatus(normalized)) {
+    return "in_progress";
+  }
   if (normalized === "completed") return "completed";
   if (normalized === "cancelled") return "cancelled";
   return "job_creation";
@@ -199,10 +321,15 @@ function buildProcessItems(
     ];
 
     const childItems: ProcessItem[] = subTasks.map((st, si) => {
-      const status = getTaskStatus(
-        readString(st.status, st.rawStatus, st.project_status),
-      );
+      const rawStatus = readString(st.status, st.rawStatus, st.project_status);
+      const status = getTaskStatus(rawStatus);
       const employees = collectEmployeeLabels(st);
+      const scheduledStart = readString(
+        st.scheduled_start_datetime,
+        st.scheduledStartDatetime,
+        st.start_datetime,
+      );
+      const completedAt = readString(st.updated_at, st.updatedAt);
       const estimatedHours = readNumber(
         st.estimatedHours,
         st.estimated_hours,
@@ -215,24 +342,36 @@ function buildProcessItems(
           readString(st.description, st.title, st.name, st.sub_task_name) ||
           `Sub Task ${si + 1}`,
         status,
+        statusLabelOverride:
+          status === "done"
+            ? getCompletionTimingLabel({
+                rawStatus,
+                scheduledStart,
+                estimatedHours,
+                completedAt,
+              }) || undefined
+            : undefined,
         startLabel: formatDateTime(
-          readString(
-            st.scheduled_start_datetime,
-            st.scheduledStartDatetime,
-            st.start_datetime,
-          ) || null,
+          scheduledStart || null,
         ),
         endLabel:
           status === "done"
             ? formatDateTime(
-                readString(
-                  st.scheduled_end_datetime,
-                  st.scheduledEndDatetime,
-                  st.end_datetime,
-                ) || null,
+                completedAt ||
+                  readString(
+                    st.scheduled_end_datetime,
+                    st.scheduledEndDatetime,
+                    st.end_datetime,
+                  ) ||
+                  null,
               )
             : "-",
-        detail: { employees, estimatedHours: formatHours(estimatedHours) },
+        detail: {
+          employees,
+          employeeIds: [],
+          estimatedHours: formatHours(estimatedHours),
+          completedAt: completedAt || null,
+        },
       };
     });
 
@@ -288,12 +427,36 @@ function buildProcessItems(
     });
   }
 
-  const manageEndStatus: StepVisualStatus =
-    phase === "completed"
-      ? "done"
-      : phase === "in_progress"
-        ? "active"
-        : "pending";
+  const manageEndChildren: ProcessItem[] = END_OF_WORK_STEP_CONFIG.map(
+    (step, stepIndex) => {
+      const status = getEndOfWorkChildStatus(normalized, stepIndex);
+
+      return {
+        id: step.id,
+        title: step.title,
+        status,
+        startLabel: formatDateTime(projectEnd),
+        endLabel:
+          status === "done"
+            ? normalized === "cancelled" && step.id === "conclude-job"
+              ? "Cancelled"
+              : normalized === "completed" && step.id === "conclude-job"
+                ? "Completed"
+                : formatDateTime(projectEnd)
+            : status === "active"
+              ? "Working on it..."
+              : "-",
+      };
+    },
+  );
+
+  const manageEndStatus: StepVisualStatus = manageEndChildren.every(
+    (child) => child.status === "done",
+  )
+    ? "done"
+    : manageEndChildren.some((child) => child.status !== "pending")
+      ? "active"
+      : "pending";
 
   items.push({
     id: "manage-end-of-work",
@@ -301,25 +464,14 @@ function buildProcessItems(
     status: manageEndStatus,
     startLabel: formatDateTime(projectEnd),
     endLabel:
-      manageEndStatus === "done"
+      phase === "completed"
         ? formatDateTime(projectEnd)
-        : manageEndStatus === "active"
-          ? "Working on it..."
-          : "-",
-    children: [
-      {
-        id: "review-and-final-checks",
-        title: "Review and Final Checks",
-        status: manageEndStatus,
-        startLabel: formatDateTime(projectEnd),
-        endLabel:
-          manageEndStatus === "done"
-            ? formatDateTime(projectEnd)
-            : manageEndStatus === "active"
-              ? "Working on it..."
-              : "-",
-      },
-    ],
+        : phase === "cancelled"
+          ? "Cancelled"
+          : manageEndStatus === "active"
+            ? "Working on it..."
+            : "-",
+    children: manageEndChildren,
   });
 
   return items;
@@ -365,11 +517,10 @@ export default function ClientDashboardPage() {
         setMainTasks(nextMainTasks);
 
         const defaultOpen = new Set<string>();
-        if (nextMainTasks.length > 0) {
-          const firstId =
-            readString(nextMainTasks[0].project_task_id, nextMainTasks[0].id) ||
-            "0";
-          defaultOpen.add(`task-${firstId}`);
+        const autoOpenMainTaskId = getAutoOpenMainTaskId(nextMainTasks);
+
+        if (autoOpenMainTaskId) {
+          defaultOpen.add(`task-${autoOpenMainTaskId}`);
         }
         setOpenProcessIds(defaultOpen);
         setOpenSubtaskIds(new Set());
@@ -398,6 +549,17 @@ export default function ClientDashboardPage() {
     () => buildProcessItems(mainTasks, projectEnd, projectStatus),
     [mainTasks, projectEnd, projectStatus],
   );
+
+  const reviewSummary = useMemo(() => {
+    return buildProjectReviewSummary({
+      project,
+      mainTasks,
+    });
+  }, [project, mainTasks]);
+
+  const employeeReviewItems = useMemo(() => {
+    return buildEmployeeReviewItems(mainTasks);
+  }, [mainTasks]);
 
   const pendingDocumentProject = useMemo(() => {
     if (!project) return null;
@@ -503,6 +665,8 @@ export default function ClientDashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
+              employeeReviewItems={employeeReviewItems}
+              reviewSummary={reviewSummary}
             />
           </div>
 

@@ -5,9 +5,9 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import rawCountries from "@/lib/data/country-by-calling-code.json"
+import StaffPageShell from "@/components/staff/StaffPageShell"
 
 const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
 
 type CountryRaw = { country: string; calling_code: number }
 type CountryOption = { label: string; code: string }
@@ -164,9 +164,11 @@ export default function AdminSettings() {
 
         setProfile(merged)
         setPhoneDraft(parsePhone(merged.phone))
-      } catch (e: any) {
-        console.error(e)
-        setLoadErr(e?.message || "Failed to load profile.")
+      } catch (error) {
+        console.error(error)
+        setLoadErr(
+          error instanceof Error ? error.message : "Failed to load profile."
+        )
       } finally {
         setLoading(false)
       }
@@ -220,9 +222,11 @@ export default function AdminSettings() {
       setProfile((p) => ({ ...p, phone: phoneFull }))
       setPhoneEditing(false)
       setPhoneMsg("Saved.")
-    } catch (e: any) {
-      console.error(e)
-      setPhoneErr(e?.message || "Failed to save phone.")
+    } catch (error) {
+      console.error(error)
+      setPhoneErr(
+        error instanceof Error ? error.message : "Failed to save phone."
+      )
     } finally {
       setPhoneBusy(false)
     }
@@ -259,13 +263,13 @@ export default function AdminSettings() {
     ].join(" ")
 
   return (
-    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
-      <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
-
-      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-        <div className="h-full overflow-y-auto pr-1">
-          <Card>
-            <div className="grid gap-6">
+    <StaffPageShell
+      title="Settings"
+      subtitle="Manage your account details, preferences, and session with the same green-accented staff layout."
+      bodyClassName="overflow-y-auto pr-1"
+    >
+      <Card>
+        <div className="grid gap-6">
               {loadErr ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
                   {loadErr}
@@ -441,11 +445,9 @@ export default function AdminSettings() {
                   </div>
                 </div>
               </div>
-            </div>
-          </Card>
         </div>
-      </div>
-    </div>
+      </Card>
+    </StaffPageShell>
   )
 }
 
