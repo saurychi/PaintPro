@@ -1,20 +1,51 @@
 "use client"
 
-import React, { useMemo, useState, useEffect, useRef } from "react"
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import {
   fetchConversations,
   fetchMessages,
   postMessage,
   fetchAvailableUsers,
-  createOrGetConversation,
   markConversationAsRead,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import StaffPageShell from "@/components/staff/StaffPageShell"
 
 const ACCENT = "#00c065"
+
+type ConversationSummary = {
+  id: string
+  name: string
+  role: string
+  profile_image_url: string | null
+  lastMessage: string
+  unread: boolean
+  lastActivity: number
+}
+
+type AvailableUser = {
+  id: string
+  username: string
+  role: string
+  profile_image_url: string | null
+}
+
+type ConversationPayload = {
+  conversation_id: string
+  users?: {
+    username?: string | null
+    role?: string | null
+    profile_image_url?: string | null
+  } | null
+  latest_message?: {
+    content?: string | null
+    created_at: string
+  } | null
+  last_read_at?: string | null
+}
 
 export default function AdminMessages() {
   // UI State
@@ -25,17 +56,33 @@ export default function AdminMessages() {
 
   // Data State
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [conversations, setConversations] = useState<any[]>([])
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [chatHistory, setChatHistory] = useState<Message[]>([])
 
   // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
-  const [availableUsers, setAvailableUsers] = useState<any[]>([])
+  const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
+  // Message actions state
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editText, setEditText] = useState("")
+  const [visibleDotsId, setVisibleDotsId] = useState<string | null>(null)
+
   // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showDots = (msgId: string) => {
+    if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
+    setVisibleDotsId(msgId)
+  }
+  const startHideDots = () => {
+    dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
+  }
 
   // 1. Get current user
   useEffect(() => {
@@ -56,9 +103,9 @@ export default function AdminMessages() {
   }, [chatHistory])
 
   // 3. Helper function to load/refresh conversations
-  const loadConversations = async (userId: string, selectChatId?: string) => {
-    const data = await fetchConversations(userId)
-    const mappedConvos = data.map((cp: any) => {
+  const loadConversations = useCallback(async (userId: string, selectChatId?: string) => {
+    const data = await fetchConversations(userId) as ConversationPayload[]
+    const mappedConvos = data.map((cp) => {
       // Calculate unread status by comparing timestamps
       const lastMsg = cp.latest_message
       const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
@@ -70,7 +117,7 @@ export default function AdminMessages() {
         name: cp.users?.username || "Unknown User",
         role: cp.users?.role || "Client",
         profile_image_url: cp.users?.profile_image_url || null,
-        lastMessage: lastMsg ? lastMsg.content : "Say hello!",
+        lastMessage: lastMsg?.content || "Say hello!",
         unread: isUnread,
         lastActivity: lastMsgTime // <-- NEW: Store time for sorting
       }
@@ -83,16 +130,16 @@ export default function AdminMessages() {
 
     if (selectChatId) {
       setActiveChatId(selectChatId)
-    } else if (mappedConvos.length > 0 && !activeChatId) {
-      setActiveChatId(mappedConvos[0].id)
+    } else if (mappedConvos.length > 0) {
+      setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
     }
     setIsLoading(false)
-  }
+  }, [])
 
   // 4. Initial Load
   useEffect(() => {
     if (currentUserId) loadConversations(currentUserId)
-  }, [currentUserId])
+  }, [currentUserId, loadConversations])
 
   // 5. When user CLICKS a chat, Mark as Read in DB
   useEffect(() => {
@@ -113,6 +160,11 @@ export default function AdminMessages() {
       setChatHistory(msgs)
     }
     loadMessages()
+  }, [activeChatId])
+
+  // Focus input whenever a conversation is opened
+  useEffect(() => {
+    if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
   // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
@@ -180,6 +232,7 @@ export default function AdminMessages() {
       console.error("Error sending message:", error)
     } finally {
       setIsSending(false)
+      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
 
@@ -187,11 +240,41 @@ export default function AdminMessages() {
     if (e.key === 'Enter') handleSendMessage()
   }
 
+  const handleDelete = async (messageId: string) => {
+    setOpenMenuId(null)
+    startHideDots()
+    try {
+      const res = await fetch(`/api/messages/manage?messageId=${messageId}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Failed to delete")
+      setChatHistory((prev) => prev.filter((m) => m.id !== messageId))
+    } catch (error) {
+      console.error("Error deleting message:", error)
+    }
+  }
+
+  const handleSaveEdit = async (messageId: string) => {
+    if (!editText.trim()) return
+    try {
+      const res = await fetch("/api/messages/manage", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, content: editText.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || "Failed to update")
+      setChatHistory((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
+      setEditingId(null)
+      startHideDots()
+    } catch (error) {
+      console.error("Error updating message:", error)
+    }
+  }
+
   // Modal Handlers
   const handleOpenNewChat = async () => {
     setIsNewChatOpen(true)
     if (currentUserId) {
-      const users = await fetchAvailableUsers(currentUserId)
+      const users = await fetchAvailableUsers(currentUserId) as AvailableUser[]
       setAvailableUsers(users)
     }
   }
@@ -200,8 +283,14 @@ export default function AdminMessages() {
     if (!currentUserId) return
     setIsCreatingChat(true)
     try {
-      const newChatId = await createOrGetConversation(currentUserId, targetUserId)
-      await loadConversations(currentUserId, newChatId)
+      const res = await fetch("/api/messages/conversation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || "Failed to start conversation.")
+      await loadConversations(currentUserId, data.conversationId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
     } catch (error) {
@@ -222,15 +311,34 @@ export default function AdminMessages() {
   )
 
   if (isLoading) {
-    return <div className="p-6 text-gray-500 font-medium">Loading messages...</div>
+    return (
+      <StaffPageShell
+        title="Messages"
+        subtitle="Stay connected with teammates and clients using the same polished staff workspace framing."
+        bodyClassName="overflow-hidden"
+      >
+        <div className="flex h-full gap-6 overflow-hidden">
+          <aside className="flex min-w-[260px] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:w-1/4 xl:w-1/5">
+            <p className="mb-3 shrink-0 text-sm font-semibold text-gray-900">Conversations</p>
+            <div className="flex flex-1 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+            </div>
+          </aside>
+          <div className="flex min-w-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm">
+            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+          </div>
+        </div>
+      </StaffPageShell>
+    )
   }
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-      <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
-
-      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-        <div className="flex gap-6 h-full overflow-hidden">
+    <StaffPageShell
+      title="Messages"
+      subtitle="Stay connected with teammates and clients using the same polished staff workspace framing."
+      bodyClassName="overflow-hidden"
+    >
+      <div className="flex h-full gap-6 overflow-hidden">
 
           {/* Conversation Sidebar */}
           <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
@@ -274,7 +382,7 @@ export default function AdminMessages() {
           </aside>
 
           {/* Chat Area */}
-          {activeChat && (
+          {activeChat ? (
             <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
               {/* Header */}
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
@@ -297,24 +405,80 @@ export default function AdminMessages() {
                 {chatHistory.length === 0 && (
                   <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
                 )}
+                {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
                 {chatHistory.map((msg) => {
                   const isMe = msg.sender_id === currentUserId
                   const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  const isEditing = editingId === msg.id
+                  const menuOpen = openMenuId === msg.id
+                  const dotsVisible = visibleDotsId === msg.id || menuOpen
 
                   return (
-                    <div key={msg.id}>
-                      <div className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}>
-                        <div
-                          className={[
-                            "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
-                            isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
-                          ].join(" ")}
-                          style={isMe ? { backgroundColor: ACCENT } : undefined}
-                        >
-                          {msg.content}
-                        </div>
-                        <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
+                    <div
+                      key={msg.id}
+                      className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}
+                      onMouseEnter={() => isMe && showDots(msg.id)}
+                      onMouseLeave={() => isMe && startHideDots()}
+                    >
+                      <div className="flex items-end gap-1">
+                        {isMe && (
+                          <div className="relative shrink-0 mb-0.5">
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
+                              className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </button>
+                            {menuOpen && (
+                              <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
+                                <button
+                                  onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(msg.id)}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {isEditing ? (
+                          <div className="max-w-[72%] flex flex-col gap-1">
+                            <input
+                              autoFocus
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEdit(msg.id)
+                                if (e.key === 'Escape') setEditingId(null)
+                              }}
+                              className="px-3 py-2 text-sm rounded-lg border-2 outline-none"
+                              style={{ borderColor: ACCENT }}
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveEdit(msg.id)} className="text-xs font-semibold" style={{ color: ACCENT }}>Save</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className={[
+                              "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
+                              isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
+                            ].join(" ")}
+                            style={isMe ? { backgroundColor: ACCENT } : undefined}
+                          >
+                            {msg.content}
+                          </div>
+                        )}
                       </div>
+                      <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
                     </div>
                   )
                 })}
@@ -326,15 +490,16 @@ export default function AdminMessages() {
               <div className="p-4 border-t border-gray-200 shrink-0">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
                   <input
+                    ref={inputRef}
                     type="text"
                     placeholder="Enter your message..."
                     className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    disabled={isSending}
                   />
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleSendMessage}
                     disabled={isSending || !inputMessage.trim()}
                     className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
@@ -345,9 +510,14 @@ export default function AdminMessages() {
                 </div>
               </div>
             </section>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
+              <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
+              <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
+              <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
+            </div>
           )}
         </div>
-      </div>
 
       {/* --- NEW CHAT MODAL --- */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
@@ -399,6 +569,6 @@ export default function AdminMessages() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </StaffPageShell>
   )
 }
