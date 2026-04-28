@@ -9,7 +9,6 @@ import type {
   EventContentArg,
 } from "@fullcalendar/core";
 import { Loader2, CalendarDays, BriefcaseBusiness } from "lucide-react";
-import { useRouter } from "next/navigation";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -111,9 +110,7 @@ function renderEventContent(info: EventContentArg) {
   );
 }
 
-export default function AdminSchedule() {
-  const router = useRouter();
-
+export default function ClientSchedule() {
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
   const [fcEvents, setFcEvents] = useState<FCEvent[]>([]);
   const [currentProject, setCurrentProject] = useState<ScheduleProject | null>(
@@ -165,80 +162,6 @@ export default function AdminSchedule() {
     const found = fcEvents.find((e) => e.id === info.event.id);
     if (found) setSelectedEvent(found);
   };
-
-  function getProjectRoute(projectId: string, rawStatus: string) {
-    const status = String(rawStatus || "")
-      .trim()
-      .toLowerCase();
-
-    if (
-      status === "main_task_pending" ||
-      status === "draft" ||
-      status === "pending"
-    ) {
-      return `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "sub_task_pending") {
-      return `/admin/job-creation/sub-task-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "materials_pending") {
-      return `/admin/job-creation/materials-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "equipment_pending") {
-      return `/admin/job-creation/equipment-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "schedule_pending") {
-      return `/admin/job-creation/project-schedule?projectId=${projectId}`;
-    }
-
-    if (status === "employee_assignment_pending") {
-      return `/admin/job-creation/employee-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "cost_estimation_pending") {
-      return `/admin/job-creation/cost-estimation?projectId=${projectId}`;
-    }
-
-    if (status === "overview_pending") {
-      return `/admin/job-creation/overview?projectId=${projectId}`;
-    }
-
-    if (status === "quotation_pending") {
-      return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
-    }
-
-    if (
-      status === "ready_to_start" ||
-      status === "in_progress" ||
-      status === "review_pending" ||
-      status === "invoice_pending" ||
-      status === "payment_pending" ||
-      status === "employee_management_pending" ||
-      status === "conclude_job_pending" ||
-      status === "ongoing" ||
-      status === "active"
-    ) {
-      return `/admin/projects`
-    }
-
-    if (status === "completed" || status === "done") {
-      return `/admin/report`
-    }
-
-    if (status === "cancelled") {
-      return `/admin/projects`
-    }
-
-    if (status === "cancelled") {
-      return `/admin/schedule`;
-    }
-
-    return `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
-  }
 
   return (
     <>
@@ -364,7 +287,7 @@ export default function AdminSchedule() {
                           </p>
                         </div>
                         <p className="mt-1 text-xs text-gray-500">
-                          Calendar view of scheduled jobs and activity.
+                          Calendar view of your scheduled jobs and activity.
                         </p>
                       </div>
 
@@ -600,20 +523,6 @@ export default function AdminSchedule() {
               </div>
 
               <div className="border-t border-gray-200 px-5 py-4 flex justify-end gap-3">
-                <button
-                  onClick={() => {
-                    router.push(
-                      getProjectRoute(
-                        selectedEvent.id,
-                        selectedEvent.extendedProps.rawStatus,
-                      ),
-                    );
-                    setSelectedEvent(null);
-                  }}
-                  className={`rounded-lg ${BORDER} bg-white px-4 py-2 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50`}>
-                  Go to Project
-                </button>
-
                 <button
                   onClick={() => setSelectedEvent(null)}
                   className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"

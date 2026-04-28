@@ -308,7 +308,7 @@ function ActionMenu({
 
 /* ---------------------------------- page ---------------------------------- */
 
-export default function AdminDocuments() {
+export default function ClientDocuments() {
   const [query, setQuery] = useState("")
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
 

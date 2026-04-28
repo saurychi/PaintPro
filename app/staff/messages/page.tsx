@@ -388,7 +388,7 @@ export default function AdminMessages() {
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
-                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
+                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-gray-800" style={{ backgroundColor: ACCENT }} />
                     <span className="text-xs font-semibold text-gray-700">
                       {activeChat.name.slice(0, 1).toUpperCase()}
                     </span>
@@ -416,11 +416,11 @@ export default function AdminMessages() {
                   return (
                     <div
                       key={msg.id}
-                      className={isMe ? "flex flex-col items-end" : "flex flex-col items-start"}
+                      className={isMe ? "flex w-full flex-col items-end" : "flex w-full flex-col items-start"}
                       onMouseEnter={() => isMe && showDots(msg.id)}
                       onMouseLeave={() => isMe && startHideDots()}
                     >
-                      <div className="flex items-end gap-1">
+                      <div className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}>
                         {isMe && (
                           <div className="relative shrink-0 mb-0.5">
                             <button
@@ -470,7 +470,7 @@ export default function AdminMessages() {
                           <div
                             className={[
                               "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
-                              isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-white text-gray-900",
+                              isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-gray-100 text-gray-900",
                             ].join(" ")}
                             style={isMe ? { backgroundColor: ACCENT } : undefined}
                           >
@@ -488,12 +488,12 @@ export default function AdminMessages() {
 
               {/* Input Area */}
               <div className="p-4 border-t border-gray-200 shrink-0">
-                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm">
                   <input
                     ref={inputRef}
                     type="text"
                     placeholder="Enter your message..."
-                    className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
+                    className="flex-1 outline-none bg-transparent text-sm text-gray-700 placeholder:text-gray-400"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}

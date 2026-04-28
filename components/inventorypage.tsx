@@ -150,7 +150,6 @@ export function InventoryPage() {
               type="materials"
               isLoading={false}
               onRowClick={handleRowClick}
-              onSelectionChange={setSelectedRows}
             />
           </TabsContent>
 

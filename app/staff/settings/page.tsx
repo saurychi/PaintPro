@@ -5,9 +5,9 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import rawCountries from "@/lib/data/country-by-calling-code.json"
-import StaffPageShell from "@/components/staff/StaffPageShell"
 
 const ACCENT = "#00c065"
+const ACCENT_HOVER = "#00a054"
 
 type CountryRaw = { country: string; calling_code: number }
 type CountryOption = { label: string; code: string }
@@ -86,7 +86,7 @@ const btnPrimary =
 const btnDanger =
   `${btnBase} border border-red-200 bg-white px-4 py-2 text-red-600 hover:bg-red-50 hover:shadow-md`
 
-export default function AdminSettings() {
+export default function StaffSettings() {
   const router = useRouter()
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
@@ -110,14 +110,13 @@ export default function AdminSettings() {
     username: "",
     email: null,
     phone: null,
-    role: "client",
+    role: "staff",
   })
 
   const [toggles, setToggles] = useState({
     jobUpdates: false,
     messages: true,
     autoDownload: true,
-    assignEmployees: true,
   })
 
   const [phoneEditing, setPhoneEditing] = useState(false)
@@ -145,7 +144,6 @@ export default function AdminSettings() {
       }
 
       try {
-        // Fetch from public.users (table name "users" in public schema)
         const { data: row, error } = await supabase
           .from("users")
           .select("id, username, email, phone, role")
@@ -164,11 +162,9 @@ export default function AdminSettings() {
 
         setProfile(merged)
         setPhoneDraft(parsePhone(merged.phone))
-      } catch (error) {
-        console.error(error)
-        setLoadErr(
-          error instanceof Error ? error.message : "Failed to load profile."
-        )
+      } catch (e: any) {
+        console.error(e)
+        setLoadErr(e?.message || "Failed to load profile.")
       } finally {
         setLoading(false)
       }
@@ -222,11 +218,9 @@ export default function AdminSettings() {
       setProfile((p) => ({ ...p, phone: phoneFull }))
       setPhoneEditing(false)
       setPhoneMsg("Saved.")
-    } catch (error) {
-      console.error(error)
-      setPhoneErr(
-        error instanceof Error ? error.message : "Failed to save phone."
-      )
+    } catch (e: any) {
+      console.error(e)
+      setPhoneErr(e?.message || "Failed to save phone.")
     } finally {
       setPhoneBusy(false)
     }
@@ -252,7 +246,6 @@ export default function AdminSettings() {
     )
   }
 
-  // Shared controls style for phone select/input (same length in both modes)
   const phoneSelectClass =
     "h-10 w-full rounded-lg border border-gray-200 bg-white px-2 pr-8 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
   const phoneInputClass =
@@ -263,13 +256,13 @@ export default function AdminSettings() {
     ].join(" ")
 
   return (
-    <StaffPageShell
-      title="Settings"
-      subtitle="Manage your account details, preferences, and session with the same green-accented staff layout."
-      bodyClassName="overflow-y-auto pr-1"
-    >
-      <Card>
-        <div className="grid gap-6">
+    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
+      <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
+
+      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+        <div className="h-full overflow-y-auto pr-1">
+          <Card>
+            <div className="grid gap-6">
               {loadErr ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
                   {loadErr}
@@ -342,7 +335,6 @@ export default function AdminSettings() {
                     </div>
 
                     <div className="mt-3 grid gap-2">
-                      {/* SAME controls in both modes so width and look match */}
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                         <select
                           value={phoneDraft.countryCode}
@@ -401,12 +393,6 @@ export default function AdminSettings() {
                     active={toggles.autoDownload}
                     onClick={() => handleToggle("autoDownload")}
                   />
-                  <ToggleRow
-                    label="Automatically assign employees"
-                    description="Let the system auto-assign employees based on availability."
-                    active={toggles.assignEmployees}
-                    onClick={() => handleToggle("assignEmployees")}
-                  />
                 </div>
               </div>
 
@@ -414,8 +400,10 @@ export default function AdminSettings() {
               <div className="pt-2">
                 <div className="h-px w-full bg-gray-200" />
                 <div className="mt-5 grid gap-3">
-                  <SectionTitle title="Appearance" subtitle="Control the look and feel of the interface." />
-
+                  <SectionTitle
+                    title="Appearance"
+                    subtitle="Control the look and feel of the interface."
+                  />
                   <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">Dark mode</p>
@@ -445,9 +433,11 @@ export default function AdminSettings() {
                   </div>
                 </div>
               </div>
+            </div>
+          </Card>
         </div>
-      </Card>
-    </StaffPageShell>
+      </div>
+    </div>
   )
 }
 
