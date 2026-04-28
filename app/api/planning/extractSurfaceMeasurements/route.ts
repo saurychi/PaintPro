@@ -59,24 +59,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    const body = await request.json().catch(() => null);
-    const messageText = String(body?.messageText || "").trim();
-    const surfaces = Array.isArray(body?.surfaces)
-      ? body.surfaces
-          .map((surface: unknown) => {
-            const candidate = isObj(surface) ? surface : {};
+    const body = (await request.json().catch(() => null)) as unknown;
+    const bodyObj = isObj(body) ? body : null;
+    const messageText = String(bodyObj?.messageText || "").trim();
+    const rawSurfaces = Array.isArray(bodyObj?.surfaces) ? bodyObj.surfaces : [];
+    const surfaces: SurfaceOption[] = rawSurfaces
+      .map((surface: unknown) => {
+        const candidate = isObj(surface) ? surface : {};
 
-            return {
-              presetKey: String(candidate.presetKey || "").trim(),
-              label: String(candidate.label || "").trim(),
-              unit: String(candidate.unit || "").trim(),
-            };
-          })
-          .filter(
-            (surface): surface is SurfaceOption =>
-              Boolean(surface.presetKey && surface.label && surface.unit),
-          )
-      : [];
+        return {
+          presetKey: String(candidate.presetKey || "").trim(),
+          label: String(candidate.label || "").trim(),
+          unit: String(candidate.unit || "").trim(),
+        };
+      })
+      .filter((surface) =>
+        Boolean(surface.presetKey && surface.label && surface.unit),
+      );
 
     if (!messageText) {
       return NextResponse.json(
