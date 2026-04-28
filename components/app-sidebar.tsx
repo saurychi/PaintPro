@@ -77,7 +77,26 @@ const adminItems: Item[] = [
     url: "/admin/schedule",
     icon: CalendarDays,
   },
-  { key: "report", title: "Report", url: "/admin/report", icon: BarChart3 },
+  {
+    key: "report",
+    title: "Report",
+    url: "/admin/report",
+    icon: BarChart3,
+    subItems: [
+      {
+        key: "project-report-list",
+        title: "Project Report List",
+        url: "/admin/report/report-list",
+        matchUrls: ["/admin/report/report-list"],
+      },
+      {
+        key: "dashboard-charts",
+        title: "Dashboard Charts",
+        url: "/admin/report/report-overview",
+        matchUrls: ["/admin/report/report-overview"],
+      },
+    ],
+  },
   {
     key: "inventory",
     title: "Inventory",
@@ -250,7 +269,6 @@ function firstLetter(nameOrEmail?: string | null) {
 }
 
 function roleBadgeClass(r: string | null | undefined) {
-  // role colors per your request
   switch (r) {
     case "admin":
       return "bg-purple-500/10 text-purple-700 border-purple-200";
@@ -282,6 +300,22 @@ export function AppSidebar({ role }: AppSidebarProps) {
       pathname.startsWith("/admin/documents") ||
       pathname.startsWith("/client/documents"),
   });
+
+  React.useEffect(() => {
+    setOpenMenus((prev) => ({
+      ...prev,
+      dashboard:
+        prev.dashboard ||
+        pathname === "/admin" ||
+        pathname.startsWith("/admin/job-creation") ||
+        pathname.startsWith("/admin/projects"),
+      report: prev.report || pathname.startsWith("/admin/report"),
+      documents:
+        prev.documents ||
+        pathname.startsWith("/admin/documents") ||
+        pathname.startsWith("/client/documents"),
+    }));
+  }, [pathname]);
 
   React.useEffect(() => {
     let alive = true;
@@ -352,7 +386,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
         type="button"
         onClick={() => setMobileOpen(true)}
         aria-label="Open mobile menu"
-        className="fixed left-4 top-4 z-[60] inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 md:hidden">
+        className="fixed left-4 top-4 z-[60] inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 md:hidden"
+      >
         <Menu className="h-5 w-5" />
       </button>
 
@@ -390,7 +425,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
                 type="button"
                 onClick={() => setMobileOpen(false)}
                 aria-label="Close mobile menu"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-all duration-200 hover:bg-gray-50">
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-all duration-200 hover:bg-gray-50"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -421,11 +457,13 @@ export function AppSidebar({ role }: AppSidebarProps) {
                               isActive || isSubItemActive
                                 ? "bg-[#00BF63] text-white shadow-sm"
                                 : "text-gray-600 hover:bg-gray-50",
-                            )}>
+                            )}
+                          >
                             <Link
                               href={item.url}
                               onClick={() => setMobileOpen(false)}
-                              className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-sm font-medium">
+                              className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-sm font-medium"
+                            >
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
                             </Link>
@@ -443,7 +481,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
                                 isExpanded
                                   ? `Collapse ${item.title}`
                                   : `Expand ${item.title}`
-                              }>
+                              }
+                            >
                               <ChevronDown
                                 className={cn(
                                   "h-4 w-4 transition-transform duration-300",
@@ -457,9 +496,10 @@ export function AppSidebar({ role }: AppSidebarProps) {
                             className={cn(
                               "ml-4 overflow-hidden border-l border-gray-200 pl-3 transition-all duration-300 ease-out",
                               isExpanded
-                                ? "mt-1 max-h-40 opacity-100"
+                                ? "mt-1 max-h-52 opacity-100"
                                 : "max-h-0 opacity-0",
-                            )}>
+                            )}
+                          >
                             <div className="space-y-1 py-1">
                               {item.subItems!.map((subItem) => {
                                 const subActive = isSubRouteActive(
@@ -477,7 +517,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
                                       subActive
                                         ? "bg-[#00BF63]/10 text-[#00BF63]"
                                         : "text-gray-500 hover:bg-gray-50",
-                                    )}>
+                                    )}
+                                  >
                                     {subItem.title}
                                   </Link>
                                 );
@@ -494,7 +535,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
                             isActive
                               ? "bg-[#00BF63] text-white shadow-sm"
                               : "text-gray-600 hover:bg-gray-50",
-                          )}>
+                          )}
+                        >
                           <Icon className="h-5 w-5 shrink-0" />
                           <span className="truncate">{item.title}</span>
                         </Link>
@@ -511,7 +553,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
                   className={cn(
                     "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
                     !user?.profile_image_url && avatarClass,
-                  )}>
+                  )}
+                >
                   {user?.profile_image_url ? (
                     <Image
                       src={user.profile_image_url}
@@ -540,12 +583,14 @@ export function AppSidebar({ role }: AppSidebarProps) {
           </div>
         </div>
       ) : null}
+
       <Sidebar
         collapsible="icon"
         className={cn(
           "fixed inset-y-0 left-0 z-40 max-md:hidden",
           "border-r border-gray-200/60",
-        )}>
+        )}
+      >
         <button
           type="button"
           onClick={() => setOpen(!open)}
@@ -558,7 +603,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
             "grid place-items-center text-gray-400 shadow-sm",
             "transition-all duration-200 ease-out hover:scale-105 hover:bg-gray-50 hover:shadow-md active:scale-95",
             "flex justify-between content-center",
-          )}>
+          )}
+        >
           <ChevronLeft className="h-5 transition-transform duration-200" />
           <ChevronRight className="h-5 transition-transform duration-200" />
         </button>
@@ -568,7 +614,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
             className={cn(
               "flex items-center",
               open ? "gap-3" : "justify-center",
-            )}>
+            )}
+          >
             <Image
               src="/paint_pro_logo.png"
               alt="Paul Jackman logo"
@@ -592,158 +639,175 @@ export function AppSidebar({ role }: AppSidebarProps) {
         </SidebarHeader>
 
         {/* IMPORTANT: make SidebarContent a full-height flex column so collapsed does not overlap */}
-        <SidebarContent className="flex h-full flex-col px-2 py-4">
-          <SidebarMenu
+        <SidebarContent className="flex h-full min-h-0 flex-col overflow-hidden px-2 py-4">
+          <div
             className={cn(
-              "space-y-1 flex",
-              open ? "w-full flex-col" : "items-center",
-            )}>
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = isRouteActive(pathname, item.url);
-              const hasSubItems =
-                open &&
-                Array.isArray(item.subItems) &&
-                item.subItems.length > 0;
-              const isSubItemActive =
-                hasSubItems &&
-                item.subItems!.some((subItem) =>
-                  isSubRouteActive(pathname, subItem),
-                );
-              const isExpanded = Boolean(openMenus[item.key]);
+              "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1",
+              "[&::-webkit-scrollbar]:w-2",
+              "[&::-webkit-scrollbar-track]:bg-transparent",
+              "[&::-webkit-scrollbar-thumb]:rounded-full",
+              "[&::-webkit-scrollbar-thumb]:bg-emerald-500/70",
+              "[&::-webkit-scrollbar-thumb]:hover:bg-emerald-600",
+            )}
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: "#10B981 transparent",
+            }}>
+            <SidebarMenu
+              className={cn(
+                "space-y-1 flex",
+                open ? "w-full flex-col" : "items-center",
+              )}>
+              {menuItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = isRouteActive(pathname, item.url);
+                const hasSubItems =
+                  open &&
+                  Array.isArray(item.subItems) &&
+                  item.subItems.length > 0;
+                const isSubItemActive =
+                  hasSubItems &&
+                  item.subItems!.some((subItem) =>
+                    isSubRouteActive(pathname, subItem),
+                  );
+                const isExpanded = Boolean(openMenus[item.key]);
 
-              return (
-                <SidebarMenuItem
-                  key={item.key}
-                  className={cn(open ? "w-full" : "")}>
-                  {hasSubItems ? (
-                    <div className="w-full">
-                      <div
+                return (
+                  <SidebarMenuItem
+                    key={item.key}
+                    className={cn(open ? "w-full" : "")}>
+                    {hasSubItems ? (
+                      <div className="w-full">
+                        <div
+                          className={cn(
+                            "flex h-10 items-center rounded-md transition-all duration-200 ease-out",
+                            "hover:scale-[1.01]",
+                            isActive || isSubItemActive
+                              ? "bg-[#00BF63] text-white shadow-sm"
+                              : "text-gray-500 hover:bg-gray-50 hover:shadow-sm",
+                          )}>
+                          <Link
+                            href={item.url}
+                            className="flex min-w-0 flex-1 items-center gap-3 px-3 text-sm font-medium transition-all duration-200">
+                            <Icon className="h-5 w-5 shrink-0" />
+                            <span className="truncate">{item.title}</span>
+                          </Link>
+
+                          <button
+                            type="button"
+                            onClick={() => toggleMenu(item.key)}
+                            className={cn(
+                              "mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-out",
+                              "hover:scale-105 active:scale-95",
+                              isActive || isSubItemActive
+                                ? "text-white/90 hover:bg-white/10"
+                                : "text-gray-500 hover:bg-gray-100",
+                            )}
+                            aria-label={
+                              isExpanded
+                                ? `Collapse ${item.title}`
+                                : `Expand ${item.title}`
+                            }>
+                            <ChevronDown
+                              className={cn(
+                                "h-4 w-4 transition-transform duration-300 ease-out",
+                                isExpanded ? "rotate-180" : "rotate-0",
+                              )}
+                            />
+                          </button>
+                        </div>
+
+                        <div
+                          className={cn(
+                            "mt-1 ml-4 overflow-hidden border-l border-gray-200 pl-3 transition-all duration-300 ease-out",
+                            isExpanded
+                              ? "max-h-40 opacity-100 translate-y-0"
+                              : "max-h-0 opacity-0 -translate-y-1",
+                          )}>
+                          <div className="space-y-1 py-1">
+                            {item.subItems!.map((subItem) => {
+                              const subActive = isSubRouteActive(
+                                pathname,
+                                subItem,
+                              );
+
+                              return (
+                                <Link
+                                  key={subItem.key}
+                                  href={subItem.url}
+                                  className={cn(
+                                    "flex h-9 items-center rounded-md px-3 text-sm font-medium transition-all duration-200 ease-out",
+                                    "hover:translate-x-1 hover:scale-[1.01]",
+                                    subActive
+                                      ? "bg-[#00BF63]/10 text-[#00BF63]"
+                                      : "text-gray-500 hover:bg-gray-50",
+                                  )}>
+                                  {subItem.title}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <SidebarMenuButton
+                        asChild
+                        tooltip={item.title}
                         className={cn(
-                          "flex h-10 items-center rounded-md transition-all duration-200 ease-out",
-                          "hover:scale-[1.01]",
-                          isActive || isSubItemActive
-                            ? "bg-[#00BF63] text-white shadow-sm"
-                            : "text-gray-500 hover:bg-gray-50 hover:shadow-sm",
+                          isActive
+                            ? "text-white hover:text-[#00BF63]"
+                            : "text-gray-500",
                         )}>
                         <Link
                           href={item.url}
-                          className="flex min-w-0 flex-1 items-center gap-3 px-3 text-sm font-medium transition-all duration-200">
-                          <Icon className="h-5 w-5 shrink-0" />
-                          <span className="truncate">{item.title}</span>
-                        </Link>
-
-                        <button
-                          type="button"
-                          onClick={() => toggleMenu(item.key)}
                           className={cn(
-                            "mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-out",
-                            "hover:scale-105 active:scale-95",
-                            isActive || isSubItemActive
-                              ? "text-white/90 hover:bg-white/10"
-                              : "text-gray-500 hover:bg-gray-100",
-                          )}
-                          aria-label={
-                            isExpanded
-                              ? `Collapse ${item.title}`
-                              : `Expand ${item.title}`
-                          }>
-                          <ChevronDown
+                            "w-full overflow-visible transition-all duration-200 ease-out",
+                            open
+                              ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium hover:scale-[1.01]"
+                              : cn(
+                                  "flex h-14 items-center justify-center rounded-md hover:scale-105",
+                                  "[&>svg]:h-5! [&>svg]:w-5!",
+                                ),
+                            isActive
+                              ? "bg-[#00BF63] text-white shadow-sm"
+                              : "hover:bg-gray-50 hover:shadow-sm",
+                          )}>
+                          <Icon
                             className={cn(
-                              "h-4 w-4 transition-transform duration-300 ease-out",
-                              isExpanded ? "rotate-180" : "rotate-0",
+                              open ? "h-5 w-5" : "h-5! w-5!",
+                              "transition-transform duration-200",
                             )}
                           />
-                        </button>
-                      </div>
-
-                      <div
-                        className={cn(
-                          "mt-1 ml-4 overflow-hidden border-l border-gray-200 pl-3 transition-all duration-300 ease-out",
-                          isExpanded
-                            ? "max-h-40 opacity-100 translate-y-0"
-                            : "max-h-0 opacity-0 -translate-y-1",
-                        )}>
-                        <div className="space-y-1 py-1">
-                          {item.subItems!.map((subItem) => {
-                            const subActive = isSubRouteActive(
-                              pathname,
-                              subItem,
-                            );
-
-                            return (
-                              <Link
-                                key={subItem.key}
-                                href={subItem.url}
-                                className={cn(
-                                  "flex h-9 items-center rounded-md px-3 text-sm font-medium transition-all duration-200 ease-out",
-                                  "hover:translate-x-1 hover:scale-[1.01]",
-                                  subActive
-                                    ? "bg-[#00BF63]/10 text-[#00BF63]"
-                                    : "text-gray-500 hover:bg-gray-50",
-                                )}>
-                                {subItem.title}
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <SidebarMenuButton
-                      asChild
-                      tooltip={item.title}
-                      className={cn(
-                        isActive
-                          ? "text-white hover:text-[#00BF63]"
-                          : "text-gray-500",
-                      )}>
-                      <Link
-                        href={item.url}
-                        className={cn(
-                          "w-full overflow-visible transition-all duration-200 ease-out",
-                          open
-                            ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium hover:scale-[1.01]"
-                            : cn(
-                                "flex h-14 items-center justify-center rounded-md hover:scale-105",
-                                "[&>svg]:h-5! [&>svg]:w-5!",
-                              ),
-                          isActive
-                            ? "bg-[#00BF63] text-white shadow-sm"
-                            : "hover:bg-gray-50 hover:shadow-sm",
-                        )}>
-                        <Icon
-                          className={cn(
-                            open ? "h-5 w-5" : "h-5! w-5!",
-                            "transition-transform duration-200",
+                          {open && (
+                            <span className="truncate">{item.title}</span>
                           )}
-                        />
-                        {open && <span className="truncate">{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  )}
-                </SidebarMenuItem>
-              );
-            })}
-          </SidebarMenu>
+                        </Link>
+                      </SidebarMenuButton>
+                    )}
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </div>
 
           {/* Divider only, no extra container */}
-          <div className="mt-auto px-2 pt-4">
+          <div className="shrink-0 px-2 pt-4">
             <div className="h-px w-full bg-gray-200/60" />
 
             <div
               className={cn(
                 "mt-4",
                 open ? "flex items-center gap-3" : "grid place-items-center",
-              )}>
-              {/* Avatar */}
+              )}
+            >
               <div
                 className={cn(
                   "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
                   !user?.profile_image_url && avatarClass,
                 )}
                 aria-label="User avatar"
-                title={displayName || user?.email || "User"}>
+                title={displayName || user?.email || "User"}
+              >
                 {user?.profile_image_url ? (
                   <Image
                     src={user.profile_image_url}
@@ -773,7 +837,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
                       className={cn(
                         "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
                         roleBadgeClass(effectiveRole),
-                      )}>
+                      )}
+                    >
                       {effectiveRole.toUpperCase()}
                     </span>
                   </div>
