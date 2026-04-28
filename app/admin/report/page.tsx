@@ -514,7 +514,7 @@ function ManagementNote({
   description: string
 }) {
   return (
-    <div className="flex h-full flex-col justify-center rounded-lg border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
       <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">
         {title}
       </div>
@@ -979,9 +979,9 @@ export default function AdminReportPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-1rem)] min-h-0 flex-col overflow-hidden bg-[#f7f8fa] px-4 py-4 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-6">
-      <div className="flex shrink-0 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
-        <div>
+    <div className="min-h-screen overflow-x-hidden bg-[#f7f8fa] px-4 py-4 pb-6 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-6">
+      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
+        <div className="min-w-0">
           <h1 className="text-[22px] font-semibold tracking-tight text-gray-950 dark:text-slate-100">
             Report
           </h1>
@@ -990,13 +990,13 @@ export default function AdminReportPage() {
           </p>
         </div>
 
-        <div className={toolbarShell}>
+        <div className={`${toolbarShell} w-full 2xl:w-auto`}>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-none">
               <select
                 value={view}
                 onChange={(e) => setView(e.target.value as ReportView)}
-                className="h-9 min-w-[125px] appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 pr-8 text-sm font-semibold text-gray-900 transition-colors hover:border-[#00c065]/40 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:border-[#00c065]/40"
+                className="h-9 w-full min-w-[125px] appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 pr-8 text-sm font-semibold text-gray-900 transition-colors hover:border-[#00c065]/40 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:border-[#00c065]/40"
               >
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
@@ -1038,8 +1038,8 @@ export default function AdminReportPage() {
         </div>
       </div>
 
-      <div className="mt-5 grid min-h-0 flex-1 grid-cols-1 items-stretch gap-4 overflow-hidden xl:grid-cols-12">
-        <section className={`h-full xl:col-span-8 ${cardShell} ${cardAccent}`}>
+      <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,0.85fr)]">
+        <section className={`${cardShell} ${cardAccent}`}>
           <div className={sectionHeader}>
             <div>
               <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
@@ -1051,7 +1051,7 @@ export default function AdminReportPage() {
             </div>
           </div>
 
-          <div className="flex h-[calc(100%-57px)] flex-col p-4">
+          <div className="p-4">
             <div className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/35">
               <div className="flex items-center gap-2">
                 <CalendarDays className="h-4 w-4 text-gray-500 dark:text-slate-400" />
@@ -1190,7 +1190,7 @@ export default function AdminReportPage() {
               </SummaryInsight>
             </div>
 
-            <div className="mt-3 flex flex-1 flex-col justify-center rounded-lg border border-gray-200 bg-gray-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/35">
+            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/35">
               <div className="flex items-center gap-2">
                 <Target className="h-4 w-4 text-[#00a054] dark:text-emerald-300" />
                 <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
@@ -1198,7 +1198,7 @@ export default function AdminReportPage() {
                 </div>
               </div>
 
-              <div className="mt-3 grid flex-1 gap-3 lg:grid-cols-3">
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
                 <ManagementNote
                   title="Overall Standing"
                   value={profitStatus}
@@ -1231,122 +1231,120 @@ export default function AdminReportPage() {
           </div>
         </section>
 
-        <aside className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1 pb-4 xl:col-span-4">
-          <div className="space-y-4">
-            <section className={`${cardShell} ${cardAccent}`}>
-              <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
-                  Report Actions
-                </div>
-                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
-                  Common report tasks.
-                </div>
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-2rem)] xl:overflow-y-auto xl:overscroll-contain xl:pr-1 xl:pb-4">
+          <section className={`${cardShell} ${cardAccent}`}>
+            <div className={sectionHeader}>
+              <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                Report Actions
               </div>
-
-              <div className="grid gap-2 p-4">
-                <ActionLink
-                  href="/admin/report/report-list"
-                  icon={<FileText className="h-4 w-4" />}
-                  title="Project Report List"
-                  desc="Review individual project records and financial values."
-                />
-
-                <ActionLink
-                  href="/admin/report/report-overview"
-                  icon={<BarChart3 className="h-4 w-4" />}
-                  title="Dashboard Charts"
-                  desc="Open visual charts for project and financial analysis."
-                />
-
-                <ActionButton
-                  icon={<FileSpreadsheet className="h-4 w-4" />}
-                  title="Download CSV Summary"
-                  desc="Export the current KPI summary for documentation."
-                  onClick={handleExportCsv}
-                  disabled={loading}
-                />
+              <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                Common report tasks.
               </div>
-            </section>
+            </div>
 
-            <section className={`${cardShell} ${cardAccent}`}>
-              <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
-                  Revenue Breakdown
-                </div>
-                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
-                  Shows how much of the estimated revenue is cost and profit.
-                </div>
+            <div className="grid gap-2 p-4">
+              <ActionLink
+                href="/admin/report/report-list"
+                icon={<FileText className="h-4 w-4" />}
+                title="Project Report List"
+                desc="Review individual project records and financial values."
+              />
+
+              <ActionLink
+                href="/admin/report/report-overview"
+                icon={<BarChart3 className="h-4 w-4" />}
+                title="Dashboard Charts"
+                desc="Open visual charts for project and financial analysis."
+              />
+
+              <ActionButton
+                icon={<FileSpreadsheet className="h-4 w-4" />}
+                title="Download CSV Summary"
+                desc="Export the current KPI summary for documentation."
+                onClick={handleExportCsv}
+                disabled={loading}
+              />
+            </div>
+          </section>
+
+          <section className={`${cardShell} ${cardAccent}`}>
+            <div className={sectionHeader}>
+              <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                Revenue Breakdown
               </div>
-
-              <div className="space-y-3 p-4">
-                <ProgressLine
-                  label="Estimated Revenue"
-                  value={revenueCoverage}
-                  amount={currency(kpi.totalRevenue)}
-                  note="Total estimated budget from projects in the selected range."
-                />
-
-                <ProgressLine
-                  label="Estimated Cost"
-                  value={costRatio}
-                  amount={`${percent(costRatio)} · ${currency(kpi.totalCost)}`}
-                  note="Portion of revenue expected to be spent on project costs."
-                />
-
-                <ProgressLine
-                  label="Estimated Profit"
-                  value={profitShare}
-                  amount={`${percent(profitShare)} · ${currency(kpi.netProfit)}`}
-                  note="Remaining portion after estimated costs are deducted."
-                />
+              <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                Shows how much of the estimated revenue is cost and profit.
               </div>
-            </section>
+            </div>
 
-            <section className={`${cardShell} ${cardAccent}`}>
-              <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
-                  Previous Period Check
-                </div>
-                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
-                  Compares this report range with {previousRangeText}.
-                </div>
+            <div className="space-y-3 p-4">
+              <ProgressLine
+                label="Estimated Revenue"
+                value={revenueCoverage}
+                amount={currency(kpi.totalRevenue)}
+                note="Total estimated budget from projects in the selected range."
+              />
+
+              <ProgressLine
+                label="Estimated Cost"
+                value={costRatio}
+                amount={`${percent(costRatio)} · ${currency(kpi.totalCost)}`}
+                note="Portion of revenue expected to be spent on project costs."
+              />
+
+              <ProgressLine
+                label="Estimated Profit"
+                value={profitShare}
+                amount={`${percent(profitShare)} · ${currency(kpi.netProfit)}`}
+                note="Remaining portion after estimated costs are deducted."
+              />
+            </div>
+          </section>
+
+          <section className={`${cardShell} ${cardAccent}`}>
+            <div className={sectionHeader}>
+              <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                Previous Period Check
               </div>
-
-              <div className="space-y-2 p-4">
-                <ComparisonRow
-                  icon={<TrendingUp className="h-4 w-4" />}
-                  title="Revenue Movement"
-                  desc="Checks if estimated revenue increased, decreased, or started from no previous data."
-                  current={kpi.totalRevenue}
-                  previous={previousKpi.totalRevenue}
-                  currentLabel={currency(kpi.totalRevenue)}
-                  previousLabel={currency(previousKpi.totalRevenue)}
-                />
-
-                <ComparisonRow
-                  icon={<PhilippinePeso className="h-4 w-4" />}
-                  title="Profit Movement"
-                  desc="Compares estimated profit against the previous report range."
-                  current={kpi.netProfit}
-                  previous={previousKpi.netProfit}
-                  currentLabel={currency(kpi.netProfit)}
-                  previousLabel={currency(previousKpi.netProfit)}
-                />
-
-                <ComparisonRow
-                  icon={<Briefcase className="h-4 w-4" />}
-                  title="Project Activity"
-                  desc="Shows whether more projects were updated in this report range."
-                  current={kpi.totalJobs}
-                  previous={previousKpi.totalJobs}
-                  currentLabel={`${kpi.totalJobs} project${kpi.totalJobs === 1 ? "" : "s"}`}
-                  previousLabel={`${previousKpi.totalJobs} project${
-                    previousKpi.totalJobs === 1 ? "" : "s"
-                  }`}
-                />
+              <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                Compares this report range with {previousRangeText}.
               </div>
-            </section>
-          </div>
+            </div>
+
+            <div className="space-y-2 p-4">
+              <ComparisonRow
+                icon={<TrendingUp className="h-4 w-4" />}
+                title="Revenue Movement"
+                desc="Checks if estimated revenue increased, decreased, or started from no previous data."
+                current={kpi.totalRevenue}
+                previous={previousKpi.totalRevenue}
+                currentLabel={currency(kpi.totalRevenue)}
+                previousLabel={currency(previousKpi.totalRevenue)}
+              />
+
+              <ComparisonRow
+                icon={<PhilippinePeso className="h-4 w-4" />}
+                title="Profit Movement"
+                desc="Compares estimated profit against the previous report range."
+                current={kpi.netProfit}
+                previous={previousKpi.netProfit}
+                currentLabel={currency(kpi.netProfit)}
+                previousLabel={currency(previousKpi.netProfit)}
+              />
+
+              <ComparisonRow
+                icon={<Briefcase className="h-4 w-4" />}
+                title="Project Activity"
+                desc="Shows whether more projects were updated in this report range."
+                current={kpi.totalJobs}
+                previous={previousKpi.totalJobs}
+                currentLabel={`${kpi.totalJobs} project${kpi.totalJobs === 1 ? "" : "s"}`}
+                previousLabel={`${previousKpi.totalJobs} project${
+                  previousKpi.totalJobs === 1 ? "" : "s"
+                }`}
+              />
+            </div>
+          </section>
         </aside>
       </div>
     </div>
