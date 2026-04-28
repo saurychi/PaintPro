@@ -106,9 +106,12 @@ export default function AdminMessages() {
     setIsLoading(false)
   }
 
-  // 4. Initial Load
+  // 4. Initial Load — pick up pendingConvId from staff Message button if present
   useEffect(() => {
-    if (currentUserId) loadConversations(currentUserId)
+    if (!currentUserId) return
+    const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined
+    if (pendingConvId) localStorage.removeItem("pendingConvId")
+    loadConversations(currentUserId, pendingConvId)
   }, [currentUserId])
 
   // 5. When user CLICKS a chat, Mark as Read in DB
