@@ -153,6 +153,12 @@ const staffItems: Item[] = [
     icon: Home,
   },
   {
+    key: "schedule",
+    title: "Schedule",
+    url: "/staff/schedule",
+    icon: CalendarDays,
+  },
+  {
     key: "report",
     title: "Report",
     url: "/staff/report",
