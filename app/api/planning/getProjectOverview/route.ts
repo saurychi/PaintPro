@@ -239,7 +239,7 @@ export async function GET(request: Request) {
 
     const { data: mainTasks, error: mainTasksError } = await supabaseAdmin
       .from("main_task")
-      .select("main_task_id, name, sort_order")
+      .select("main_task_id, name, sort_order:default_sort_order")
       .in("main_task_id", mainTaskIds)
       .returns<MainTaskRow[]>();
 

@@ -14,12 +14,22 @@ export type CostEstimationMaterial = {
   estimatedCost?: number | null;
 };
 
+export type CostEstimationEquipment = {
+  id: string;
+  equipmentId?: string | null;
+  name: string;
+  quantity: number;
+  unitCost: number;
+  notes?: string | null;
+};
+
 export type CostEstimationSubTask = {
   projectSubTaskId: string;
   subTaskId: string;
   title: string;
   estimatedHours: number;
   assignedStaff: CostEstimationAssignedStaff[];
+  equipment: CostEstimationEquipment[];
   scheduledStartDatetime?: string | null;
   scheduledEndDatetime?: string | null;
 };
@@ -29,7 +39,6 @@ export type CostEstimationMainTask = {
   mainTaskId: string;
   title: string;
   sortOrder: number;
-  basePrice: number;
   materials: CostEstimationMaterial[];
   subtasks: CostEstimationSubTask[];
 };
@@ -65,8 +74,6 @@ export function calculateProjectCostEstimation(input: CostEstimationInput) {
 
   const mainTasks = input.mainTasks
     .map((task) => {
-      const basePrice = roundMoney(Number(task.basePrice ?? 0));
-
       const materials = task.materials.map((material) => {
         const estimatedQuantity = Number(material.estimatedQuantity ?? 0);
         const unitCost = Number(material.unitCost ?? 0);
@@ -114,11 +121,10 @@ export function calculateProjectCostEstimation(input: CostEstimationInput) {
         subtasks.reduce((sum, subtask) => sum + subtask.laborCost, 0),
       );
 
-      const totalCost = roundMoney(basePrice + materialTotal + laborTotal);
+      const totalCost = roundMoney(materialTotal + laborTotal);
 
       return {
         ...task,
-        basePrice,
         materials,
         subtasks,
         materialTotal,
@@ -128,10 +134,6 @@ export function calculateProjectCostEstimation(input: CostEstimationInput) {
     })
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  const basePriceTotal = roundMoney(
-    mainTasks.reduce((sum, task) => sum + task.basePrice, 0),
-  );
-
   const materialTotal = roundMoney(
     mainTasks.reduce((sum, task) => sum + task.materialTotal, 0),
   );
@@ -140,7 +142,7 @@ export function calculateProjectCostEstimation(input: CostEstimationInput) {
     mainTasks.reduce((sum, task) => sum + task.laborTotal, 0),
   );
 
-  const totalCost = roundMoney(basePriceTotal + materialTotal + laborTotal);
+  const totalCost = roundMoney(materialTotal + laborTotal);
   const profitAmount = roundMoney(totalCost * markupRate);
   const quotationTotal = roundMoney(totalCost + profitAmount);
 
@@ -156,7 +158,6 @@ export function calculateProjectCostEstimation(input: CostEstimationInput) {
     markupRate,
     mainTasks,
     summary: {
-      basePriceTotal,
       materialTotal,
       laborTotal,
       totalCost,

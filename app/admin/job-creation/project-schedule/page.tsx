@@ -56,6 +56,14 @@ function normalizeNumber(value: unknown) {
   return Number.isFinite(num) ? num : null;
 }
 
+function normalizeSortOrder(
+  value: unknown,
+  fallback = Number.MAX_SAFE_INTEGER,
+) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
 function toInputDateTimeLocal(value: string | null) {
   if (!value) return "";
 
@@ -162,8 +170,6 @@ export default function ProjectSchedulePage() {
 
   const allowBrowserBackRef = useRef(false);
   const suppressLeaveGuardRef = useRef(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
     async function loadSchedule() {
@@ -194,9 +200,40 @@ export default function ProjectSchedulePage() {
                   ? data.rows
                   : [];
 
+            const sortedRows = [...rawGroups].sort((a: any, b: any) => {
+              const mainTaskOrder =
+                normalizeSortOrder(
+                  a?.project_task?.sort_order ??
+                    a?.project_task?.main_task?.sort_order ??
+                    a?.main_task_sort_order,
+                ) -
+                normalizeSortOrder(
+                  b?.project_task?.sort_order ??
+                    b?.project_task?.main_task?.sort_order ??
+                    b?.main_task_sort_order,
+                );
+
+              if (mainTaskOrder !== 0) return mainTaskOrder;
+
+              const subTaskOrder =
+                normalizeSortOrder(a?.sort_order ?? a?.sub_task?.sort_order) -
+                normalizeSortOrder(b?.sort_order ?? b?.sub_task?.sort_order);
+
+              if (subTaskOrder !== 0) return subTaskOrder;
+
+              const aTitle = String(
+                a?.sub_task?.description ?? a?.sub_task_description ?? a?.title ?? "",
+              );
+              const bTitle = String(
+                b?.sub_task?.description ?? b?.sub_task_description ?? b?.title ?? "",
+              );
+
+              return aTitle.localeCompare(bTitle);
+            });
+
             const groupedMap = new Map<string, ServiceGroup>();
 
-            for (const row of rawGroups) {
+            for (const row of sortedRows) {
               const mainTaskId =
                 row?.project_task?.main_task?.main_task_id ??
                 row?.main_task_id ??
@@ -286,29 +323,40 @@ export default function ProjectSchedulePage() {
             ? draft.generatedTasks
             : [];
 
-          const nextServices: ServiceGroup[] = generatedTasks.map(
-            (task: any, taskIndex: number) => ({
+          const nextServices: ServiceGroup[] = [...generatedTasks]
+            .sort(
+              (a: any, b: any) =>
+                normalizeSortOrder(a?.sortOrder ?? a?.sort_order) -
+                normalizeSortOrder(b?.sortOrder ?? b?.sort_order),
+            )
+            .map((task: any, taskIndex: number) => ({
               id: `task-${taskIndex}`,
               title: task?.name ?? "Main Task",
               status: "pending",
               children: Array.isArray(task?.sub_tasks)
-                ? task.sub_tasks.map((subTask: any, subTaskIndex: number) => ({
-                    id: `task-${taskIndex}-sub-${subTaskIndex}`,
-                    subTaskId: String(subTaskIndex),
-                    title: subTask?.title ?? "Sub Task",
-                    status: "pending",
-                    estimatedHours: normalizeNumber(
-                      subTask?.duration?.adjustedDurationHours ??
-                        subTask?.duration?.roundedHours ??
-                        subTask?.duration?.estimatedHours,
-                    ),
-                    scheduledStartDatetime:
-                      subTask?.scheduledStartDatetime ?? null,
-                    scheduledEndDatetime: subTask?.scheduledEndDatetime ?? null,
-                  }))
+                ? [...task.sub_tasks]
+                    .sort(
+                      (a: any, b: any) =>
+                        normalizeSortOrder(a?.sortOrder ?? a?.sort_order) -
+                        normalizeSortOrder(b?.sortOrder ?? b?.sort_order),
+                    )
+                    .map((subTask: any, subTaskIndex: number) => ({
+                      id: `task-${taskIndex}-sub-${subTaskIndex}`,
+                      subTaskId: String(subTaskIndex),
+                      title: subTask?.title ?? "Sub Task",
+                      status: "pending",
+                      estimatedHours: normalizeNumber(
+                        subTask?.duration?.estimatedHours ??
+                          subTask?.duration?.roundedHours ??
+                          subTask?.duration?.adjustedDurationHours,
+                      ),
+                      scheduledStartDatetime:
+                        subTask?.scheduledStartDatetime ?? null,
+                      scheduledEndDatetime: subTask?.scheduledEndDatetime ?? null,
+                    }))
                 : [],
             }),
-          );
+            );
 
           setServices(nextServices);
           setExpanded(new Set(nextServices.map((group) => group.id)));
@@ -391,24 +439,58 @@ export default function ProjectSchedulePage() {
     return true;
   }
 
+  function getStatusForAction(action: "next" | "back" | "browserBack") {
+    return action === "next"
+      ? "employee_assignment_pending"
+      : "equipment_pending";
+  }
+
+  function navigateForAction(action: "next" | "back" | "browserBack") {
+    if (action === "next") {
+      suppressLeaveGuardRef.current = true;
+      allowBrowserBackRef.current = true;
+      router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
+      return;
+    }
+
+    if (action === "back") {
+      suppressLeaveGuardRef.current = true;
+      allowBrowserBackRef.current = true;
+      router.push(
+        `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
+      );
+      return;
+    }
+
+    suppressLeaveGuardRef.current = true;
+    allowBrowserBackRef.current = true;
+    window.history.back();
+  }
+
   function requestLeave(action: "next" | "back" | "browserBack") {
     if (!isDirty) {
       if (action === "next") {
         setIsNavigatingNext(true);
-        void handleConfirmSave(true, "next");
+        void (async () => {
+          const ok = await updateProjectStatus(getStatusForAction("next"));
+          if (!ok) {
+            setIsNavigatingNext(false);
+            return;
+          }
+          navigateForAction("next");
+        })();
         return;
       }
 
       if (action === "back") {
+        setIsNavigatingBack(true);
         void (async () => {
-          const ok = await updateProjectStatus("equipment_pending");
+          const ok = await updateProjectStatus(getStatusForAction("back"));
           if (!ok) {
             setIsNavigatingBack(false);
             return;
           }
-          suppressLeaveGuardRef.current = true;
-          allowBrowserBackRef.current = true;
-          router.push(`/admin/job-creation/equipment-assignment?projectId=${projectId}`);
+          navigateForAction("back");
         })();
         return;
       }
@@ -472,6 +554,7 @@ export default function ProjectSchedulePage() {
           body: JSON.stringify({
             projectId,
             schedules: payload,
+            nextStatus: getStatusForAction(action),
           }),
         });
 
@@ -480,28 +563,6 @@ export default function ProjectSchedulePage() {
         if (!saveResponse.ok) {
           throw new Error(
             saveData?.error || "Failed to save project schedule.",
-          );
-        }
-
-        const statusResponse = await fetch(
-          "/api/planning/updateProjectStatus",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              projectId,
-              status: action === "back" ? "equipment_pending" : "employee_assignment_pending",
-            }),
-          },
-        );
-
-        const statusData = await statusResponse.json();
-
-        if (!statusResponse.ok) {
-          throw new Error(
-            statusData?.error || "Failed to update project status.",
           );
         }
 
@@ -515,31 +576,17 @@ export default function ProjectSchedulePage() {
       } finally {
         setIsSavingFromModal(false);
       }
+    } else if (action === "next" || action === "back" || action === "browserBack") {
+      const ok = await updateProjectStatus(getStatusForAction(action));
+
+      if (!ok) {
+        setIsNavigatingNext(false);
+        setIsNavigatingBack(false);
+        return;
+      }
     }
 
-    if (action === "next") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
-      return;
-    }
-
-    setIsNavigatingNext(false);
-
-    if (action === "back") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      router.push(
-        `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
-      );
-      return;
-    }
-
-    if (action === "browserBack") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      window.history.back();
-    }
+    navigateForAction(action);
   }
 
   const totalSubTasks = useMemo(() => {

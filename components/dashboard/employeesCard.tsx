@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -78,7 +78,7 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-export default function EmployeesCard({
+function EmployeesCard({
   title = "Employees",
   employees: externalEmployees,
 }: Props) {
@@ -363,3 +363,5 @@ export default function EmployeesCard({
     </section>
   );
 }
+
+export default memo(EmployeesCard);

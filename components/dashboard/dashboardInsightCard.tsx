@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, PieChart } from "lucide-react";
 import { type ProcessItem } from "@/components/dashboard/jobProgressCard";
 
@@ -404,7 +404,7 @@ function CostSpreadView({
   );
 }
 
-export default function DashboardInsightCard({
+function DashboardInsightCard({
   processItems,
   loadingDetails,
   projectId,
@@ -595,3 +595,5 @@ export default function DashboardInsightCard({
     </section>
   );
 }
+
+export default memo(DashboardInsightCard);

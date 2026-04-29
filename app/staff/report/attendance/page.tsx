@@ -26,23 +26,23 @@ const STATUS_META: Record<
 > = {
   ASSIGNED: {
     label: "Assigned",
-    pill: "border border-slate-400/25 bg-slate-500/[0.08] text-slate-900",
-    card: "border-slate-300 bg-slate-50",
+    pill: "border border-slate-400/25 bg-slate-500/[0.08] text-slate-900 dark:text-slate-300",
+    card: "border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800/60",
   },
   UPCOMING: {
     label: "Upcoming",
-    pill: "border border-sky-500/20 bg-sky-500/15 text-sky-950",
-    card: "border-sky-500/25 bg-sky-500/[0.06]",
+    pill: "border border-sky-500/20 bg-sky-500/15 text-sky-950 dark:text-sky-300",
+    card: "border-sky-500/25 bg-sky-500/[0.06] dark:bg-sky-500/[0.15] dark:border-sky-500/40",
   },
   IN_PROGRESS: {
     label: "In Progress",
-    pill: "border border-amber-500/20 bg-amber-500/15 text-orange-950",
-    card: "border-amber-500/25 bg-amber-500/[0.08]",
+    pill: "border border-amber-500/20 bg-amber-500/15 text-orange-950 dark:text-amber-300",
+    card: "border-amber-500/25 bg-amber-500/[0.08] dark:bg-amber-500/[0.15] dark:border-amber-500/40",
   },
   COMPLETED: {
     label: "Completed",
-    pill: "border border-green-500/20 bg-green-500/15 text-green-950",
-    card: "border-green-500/25 bg-green-500/[0.06]",
+    pill: "border border-green-500/20 bg-green-500/15 text-green-950 dark:text-green-300",
+    card: "border-green-500/25 bg-green-500/[0.06] dark:bg-green-500/[0.15] dark:border-green-500/40",
   },
 };
 
@@ -284,7 +284,7 @@ export default function StaffAttendanceReportPage() {
             STATUS_META.ASSIGNED.card,
           )}
         >
-          <div className="text-xs font-medium text-gray-900/70">Assigned</div>
+          <div className="text-xs font-medium text-gray-900/70 dark:text-gray-400">Assigned</div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
             {totals.assigned}
           </div>
@@ -296,7 +296,7 @@ export default function StaffAttendanceReportPage() {
             STATUS_META.UPCOMING.card,
           )}
         >
-          <div className="text-xs font-medium text-gray-900/70">Upcoming</div>
+          <div className="text-xs font-medium text-gray-900/70 dark:text-gray-400">Upcoming</div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
             {totals.upcoming}
           </div>
@@ -308,7 +308,7 @@ export default function StaffAttendanceReportPage() {
             STATUS_META.IN_PROGRESS.card,
           )}
         >
-          <div className="text-xs font-medium text-gray-900/70">In Progress</div>
+          <div className="text-xs font-medium text-gray-900/70 dark:text-gray-400">In Progress</div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
             {totals.inProgress}
           </div>
@@ -320,7 +320,7 @@ export default function StaffAttendanceReportPage() {
             STATUS_META.COMPLETED.card,
           )}
         >
-          <div className="text-xs font-medium text-gray-900/70">Completed</div>
+          <div className="text-xs font-medium text-gray-900/70 dark:text-gray-400">Completed</div>
           <div className="mt-2.5 text-3xl font-semibold text-gray-900">
             {totals.completed}
           </div>
@@ -370,7 +370,7 @@ export default function StaffAttendanceReportPage() {
                     return (
                       <div
                         key={record.id}
-                        className="grid grid-cols-[1.25fr_1.35fr_0.85fr_1.1fr_0.9fr_0.65fr] items-center border-b border-slate-100 px-3 py-3.5 text-sm font-normal last:border-b-0"
+                        className="grid grid-cols-[1.25fr_1.35fr_0.85fr_1.1fr_0.9fr_0.65fr] items-center border-b border-slate-100 dark:border-gray-700 px-3 py-3.5 text-sm font-normal last:border-b-0"
                       >
                         <div className="min-w-0">
                           <div className="truncate font-semibold text-gray-900">

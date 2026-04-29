@@ -7,6 +7,11 @@ type IncomingTask = {
   project_task_id?: string
 }
 
+type MainTaskCatalogRow = {
+  main_task_id: string
+  sort_order: number | null
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -94,15 +99,36 @@ export async function POST(request: NextRequest) {
     let insertedRows: any[] = []
 
     if (toInsert.length > 0) {
+      const { data: mainTaskCatalogRows, error: mainTaskCatalogError } = await supabaseAdmin
+        .from("main_task")
+        .select("main_task_id, sort_order:default_sort_order")
+        .in("main_task_id", toInsert)
+        .returns<MainTaskCatalogRow[]>()
+
+      if (mainTaskCatalogError) {
+        return NextResponse.json(
+          {
+            error: "Failed to load main task sort order defaults.",
+            details: mainTaskCatalogError.message,
+          },
+          { status: 500 }
+        )
+      }
+
+      const mainTaskSortOrderMap = new Map(
+        (mainTaskCatalogRows ?? []).map((row) => [row.main_task_id, Number(row.sort_order ?? 0)])
+      )
+
       const rowsToInsert = toInsert.map((mainTaskId) => ({
         project_id: projectId,
         main_task_id: mainTaskId,
+        sort_order: mainTaskSortOrderMap.get(mainTaskId) ?? 0,
       }))
 
       const { data: inserted, error: insertError } = await supabaseAdmin
         .from("project_task")
         .insert(rowsToInsert)
-        .select("project_task_id, project_id, main_task_id")
+        .select("project_task_id, project_id, main_task_id, sort_order")
 
       if (insertError) {
         return NextResponse.json(

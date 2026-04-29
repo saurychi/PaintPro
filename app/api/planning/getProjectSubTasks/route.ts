@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
+function toSortOrder(value: unknown, fallback = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 export async function GET(request: NextRequest) {
   try {
     const projectId = request.nextUrl.searchParams.get("projectId")
@@ -37,7 +42,7 @@ export async function GET(request: NextRequest) {
 
     const { data: projectTasks, error: projectTasksError } = await supabaseAdmin
       .from("project_task")
-      .select("project_task_id, project_id, main_task_id")
+      .select("project_task_id, project_id, main_task_id, sort_order")
       .eq("project_id", projectId)
 
     console.log("[getProjectSubTasks] project_task rows:", {
@@ -55,6 +60,13 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       )
     }
+
+    const projectTaskSortOrderMap = new Map(
+      (projectTasks ?? []).map((row) => [
+        row.project_task_id,
+        toSortOrder(row.sort_order),
+      ])
+    )
 
     const projectTaskIds = (projectTasks ?? []).map((row) => row.project_task_id)
 
@@ -85,16 +97,17 @@ export async function GET(request: NextRequest) {
           project_task_id,
           project_id,
           main_task_id,
+          sort_order,
           main_task:main_task_id!inner (
             main_task_id,
             name,
-            sort_order
+            sort_order:default_sort_order
           )
         ),
         sub_task:sub_task_id!inner (
           sub_task_id,
           description,
-          sort_order
+          sort_order:default_sort_order
         )
       `)
       .in("project_task_id", projectTaskIds)
@@ -123,15 +136,42 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const sortedProjectSubTasks = [...(data ?? [])].sort((a: any, b: any) => {
+      const mainTaskOrder =
+        toSortOrder(
+          projectTaskSortOrderMap.get(a?.project_task_id) ??
+            a?.project_task?.sort_order ??
+            a?.project_task?.main_task?.sort_order
+        ) -
+        toSortOrder(
+          projectTaskSortOrderMap.get(b?.project_task_id) ??
+            b?.project_task?.sort_order ??
+            b?.project_task?.main_task?.sort_order
+        )
+
+      if (mainTaskOrder !== 0) return mainTaskOrder
+
+      const subTaskOrder =
+        toSortOrder(a?.sort_order ?? a?.sub_task?.sort_order) -
+        toSortOrder(b?.sort_order ?? b?.sub_task?.sort_order)
+
+      if (subTaskOrder !== 0) return subTaskOrder
+
+      const aTitle = String(a?.sub_task?.description ?? a?.title ?? "")
+      const bTitle = String(b?.sub_task?.description ?? b?.title ?? "")
+
+      return aTitle.localeCompare(bTitle)
+    })
+
     // here
     console.log("[getProjectSubTasks] final response:", {
       project,
-      projectSubTasks: data ?? [],
+      projectSubTasks: sortedProjectSubTasks,
     })
 
     return NextResponse.json({
       project,
-      projectSubTasks: data ?? [],
+      projectSubTasks: sortedProjectSubTasks,
     })
   } catch (error: any) {
     return NextResponse.json(

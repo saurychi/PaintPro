@@ -6,8 +6,11 @@ import StaffShellClient from "./StaffShellClient"
 
 type DbUser = {
   id: string
+  username: string | null
+  email: string | null
   role: "client" | "staff" | "manager" | "admin"
   status: "active" | "inactive" | "pending"
+  profile_image_url: string | null
 }
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
@@ -41,15 +44,25 @@ export default async function StaffLayout({ children }: { children: ReactNode })
 
   const { data: profile } = await supabase
     .from("users")
-    .select("id, role, status")
+    .select("id, username, email, role, status, profile_image_url")
     .eq("id", authUser.id)
     .maybeSingle<DbUser>()
 
   if (!profile) redirect("/auth/invite?reason=not_invited")
   if (profile.status !== "active") redirect("/auth/post-auth")
-
-  // Staff-only access
   if (profile.role !== "staff") redirect("/auth/post-auth")
 
-  return <StaffShellClient>{children}</StaffShellClient>
+  return (
+    <StaffShellClient
+      user={{
+        id: profile.id,
+        username: profile.username ?? authUser.user_metadata?.username ?? null,
+        email: profile.email ?? authUser.email ?? null,
+        role: profile.role,
+        profile_image_url: profile.profile_image_url ?? authUser.user_metadata?.avatar_url ?? null,
+      }}
+    >
+      {children}
+    </StaffShellClient>
+  )
 }

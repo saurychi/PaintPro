@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import { memo, useMemo, useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, FileText, Loader2 } from "lucide-react";
 
@@ -31,7 +31,7 @@ function getSizeMode(width: number, height: number): SizeMode {
   return "normal";
 }
 
-export default function PendingDocumentsCard({
+function PendingDocumentsCard({
   title = "Pending Documents",
   projects = [],
   selectedProject = null,
@@ -196,3 +196,5 @@ export default function PendingDocumentsCard({
     </section>
   );
 }
+
+export default memo(PendingDocumentsCard);

@@ -3,17 +3,85 @@ import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
 import { createServerClient } from "@supabase/ssr"
 import ClientShellClient from "./ClientShellClient"
+import type { SidebarUser } from "@/components/app-sidebar"
+import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
 const CLIENT_COOKIE = "paintpro_client_project_id"
 
 type DbUser = {
   id: string
+  username: string | null
+  email: string | null
   role: "client" | "staff" | "manager" | "admin"
   status: "active" | "inactive" | "pending"
+  profile_image_url: string | null
+}
+
+type ProjectAccessRow = {
+  project_id: string
+  project_code: string | null
+  client_id: string | null
+}
+
+type ClientProfileRow = {
+  client_id: string
+  full_name: string | null
+  email: string | null
+}
+
+type CookieOptions = {
+  domain?: string
+  expires?: Date
+  httpOnly?: boolean
+  maxAge?: number
+  path?: string
+  priority?: "low" | "medium" | "high"
+  sameSite?: boolean | "lax" | "strict" | "none"
+  secure?: boolean
 }
 
 const ALLOW_CROSS_ROLE_ACCESS = true
 const ALLOWED_ROLES: DbUser["role"][] = ["client", "admin", "manager", "staff"]
+
+async function getProjectAccessSidebarUser(
+  projectId: string,
+): Promise<SidebarUser | null> {
+  const { data: project, error: projectError } = await supabaseAdmin
+    .from("projects")
+    .select("project_id, project_code, client_id")
+    .eq("project_id", projectId)
+    .maybeSingle<ProjectAccessRow>()
+
+  if (projectError) throw projectError
+  if (!project) return null
+
+  if (!project.client_id) {
+    return {
+      id: project.project_id,
+      username: project.project_code?.trim() || "Client",
+      email: null,
+      role: "client",
+      profile_image_url: null,
+    }
+  }
+
+  const { data: clientRow, error: clientError } = await supabaseAdmin
+    .from("clients")
+    .select("client_id, full_name, email")
+    .eq("client_id", project.client_id)
+    .maybeSingle<ClientProfileRow>()
+
+  if (clientError) throw clientError
+
+  return {
+    id: clientRow?.client_id ?? project.client_id,
+    username:
+      clientRow?.full_name?.trim() || project.project_code?.trim() || "Client",
+    email: clientRow?.email ?? null,
+    role: "client",
+    profile_image_url: null,
+  }
+}
 
 export default async function ClientLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies()
@@ -26,15 +94,11 @@ export default async function ClientLayout({ children }: { children: ReactNode }
         get(name: string) {
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options: any) {
+        set(name: string, value: string, options: CookieOptions) {
           cookieStore.set({ name, value, ...options })
         },
-        remove(name: string, options: any) {
-          try {
-            ;(cookieStore as any).delete({ name, ...options })
-          } catch {
-            cookieStore.delete(name)
-          }
+        remove(name: string) {
+          cookieStore.delete(name)
         },
       },
     }
@@ -47,8 +111,14 @@ export default async function ClientLayout({ children }: { children: ReactNode }
   if (!authUser) {
     const clientProjectId = cookieStore.get(CLIENT_COOKIE)?.value
     if (!clientProjectId) redirect("/auth/signin")
+    const guestSidebarUser = await getProjectAccessSidebarUser(clientProjectId)
+    if (!guestSidebarUser) redirect("/auth/signin")
     return (
-      <ClientShellClient role="client" projectId={clientProjectId}>
+      <ClientShellClient
+        role="client"
+        projectId={clientProjectId}
+        user={guestSidebarUser}
+      >
         {children}
       </ClientShellClient>
     )
@@ -57,7 +127,7 @@ export default async function ClientLayout({ children }: { children: ReactNode }
   // Supabase session exists — staff / admin flow
   const { data: profile } = await supabase
     .from("users")
-    .select("id, role, status")
+    .select("id, username, email, role, status, profile_image_url")
     .eq("id", authUser.id)
     .maybeSingle<DbUser>()
 
@@ -73,7 +143,18 @@ export default async function ClientLayout({ children }: { children: ReactNode }
   const sidebarRole: DbUser["role"] = ALLOW_CROSS_ROLE_ACCESS ? profile.role : "client"
 
   return (
-    <ClientShellClient role={sidebarRole} projectId={null}>
+    <ClientShellClient
+      role={sidebarRole}
+      projectId={null}
+      user={{
+        id: profile.id,
+        username: profile.username ?? authUser.user_metadata?.username ?? null,
+        email: profile.email ?? authUser.email ?? null,
+        role: profile.role,
+        profile_image_url:
+          profile.profile_image_url ?? authUser.user_metadata?.avatar_url ?? null,
+      }}
+    >
       {children}
     </ClientShellClient>
   )
