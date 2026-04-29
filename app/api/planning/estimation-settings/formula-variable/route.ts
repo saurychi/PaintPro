@@ -34,7 +34,12 @@ function normalizeDataType(
   value: unknown,
 ): EstimationVariableDataType | null {
   if (typeof value !== "string") return null;
-  return isEstimationVariableDataType(value.trim()) ? value.trim() : null;
+
+  const trimmedValue = value.trim();
+
+  if (!isEstimationVariableDataType(trimmedValue)) return null;
+
+  return trimmedValue;
 }
 
 function mapFormulaVariableRow(row: FormulaVariableRow): EstimationFormulaVariable {
