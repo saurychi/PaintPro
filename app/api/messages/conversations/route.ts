@@ -132,7 +132,7 @@ export async function GET() {
         return NextResponse.json({ error: directParticipantsError.message }, { status: 500 })
       }
 
-      for (const participant of (directParticipants ?? []) as DirectParticipantRow[]) {
+      for (const participant of (directParticipants ?? []) as unknown as DirectParticipantRow[]) {
         if (!directParticipantMap.has(participant.conversation_id)) {
           directParticipantMap.set(participant.conversation_id, participant)
         }
