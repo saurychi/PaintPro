@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
         sub_task (
           sub_task_id,
           description,
-          sort_order
+          sort_order:default_sort_order
         ),
         project_task (
           project_task_id,
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
           main_task (
             main_task_id,
             name,
-            sort_order
+            sort_order:default_sort_order
           )
         )
       `)

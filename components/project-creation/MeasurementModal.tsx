@@ -16,6 +16,7 @@ export type MeasurementRow = {
   sizeBand: ScaleBandKey;
   estimatedValue: number;
   isManualOverride: boolean;
+  isMeasurementPending?: boolean;
 };
 
 type Props = {
@@ -243,10 +244,11 @@ export default function MeasurementModal({
                               type="number"
                               min={0}
                               step="0.1"
-                              value={row.estimatedValue}
+                              value={row.isMeasurementPending ? "" : row.estimatedValue}
                               onChange={(e) =>
                                 onManualValueChange(row.id, e.target.value)
                               }
+                              placeholder="Enter measurement"
                               className="min-w-0 flex-1 border-none bg-transparent px-3 text-sm text-gray-900 outline-none"
                             />
 
@@ -260,11 +262,19 @@ export default function MeasurementModal({
                               Current value
                             </div>
                             <div className="mt-0.5 text-sm font-semibold text-gray-900">
-                              {row.estimatedValue} {unitLabel(preset.unit)}
+                              {row.isMeasurementPending
+                                ? "Not set"
+                                : `${row.estimatedValue} ${unitLabel(preset.unit)}`}
                             </div>
                           </div>
 
-                          {row.isManualOverride ? (
+                          {row.isMeasurementPending ? (
+                            <div className="mt-3 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                              Measurement pending
+                            </div>
+                          ) : null}
+
+                          {row.isManualOverride && !row.isMeasurementPending ? (
                             <div className="mt-3 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
                               Manual override
                             </div>
