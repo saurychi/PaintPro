@@ -26,7 +26,12 @@ function normalizeString(value: unknown) {
 
 function normalizeScope(value: unknown): EstimationFormulaScope | null {
   if (typeof value !== "string") return null;
-  return isEstimationFormulaScope(value.trim()) ? value.trim() : null;
+
+  const trimmedValue = value.trim();
+
+  if (!isEstimationFormulaScope(trimmedValue)) return null;
+
+  return trimmedValue;
 }
 
 function normalizeBoolean(value: unknown) {
