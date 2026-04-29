@@ -2,164 +2,107 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { cn } from "@/lib/utils"
 import {
+  ArrowDownToLine,
+  ArrowUpDown,
+  CheckCircle2,
+  ChevronLeft,
+  Eye,
+  FileText,
+  Folder,
+  FolderInput,
+  FolderPlus,
+  Loader2,
   MoreVertical,
   Search,
   SlidersHorizontal,
-  ArrowUpDown,
-  Folder,
-  Download,
-  Pencil,
-  Archive,
   X,
-  ChevronLeft,
-  AlertTriangle,
-  Loader2,
-  Upload,
-  Check,
-  Info,
 } from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import {
-  listFolders,
+  createFolder,
   listDocuments,
-  type FolderItem,
-  type FileItem,
+  listFolders,
+  moveDocument,
   type DocType,
+  type FileItem,
+  type FolderItem,
   type SortKey,
 } from "@/lib/data/documents.repo"
 
-/* ----------------------------- non-standard input props ----------------------------- */
-/** Fixes TS error for folder upload inputs (webkitdirectory/directory not in React typings) */
-const folderPickerProps = {
-  webkitdirectory: "true",
-  directory: "true",
-} as any
+type ArchiveTab = "active" | "archived"
 
-/* ----------------------------------- meta ----------------------------------- */
+type Toast = {
+  id: string
+  message: string
+  tone?: "default" | "success" | "danger"
+}
 
-const typeMeta: Record<DocType, { label: string; pillClass: string; pillText: string }> = {
+const typeMeta: Record<
+  DocType,
+  {
+    label: string
+    pillText: string
+    pillClass: string
+  }
+> = {
   INV: {
     label: "Invoice",
     pillText: "INV",
-    pillClass: "bg-[#00c065]/15 text-green-900 border border-[#00c065]/20",
+    pillClass:
+      "border border-[#00c065]/20 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
   },
   PAY: {
-    label: "Payroll",
+    label: "Payment",
     pillText: "PAY",
-    pillClass: "bg-red-500/10 text-red-900 border border-red-500/20",
+    pillClass:
+      "border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/25 dark:bg-blue-500/15 dark:text-blue-300",
   },
   RCP: {
     label: "Receipt",
     pillText: "RCP",
-    pillClass: "bg-[#00c065]/15 text-green-900 border border-[#00c065]/20",
+    pillClass:
+      "border border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-400/25 dark:bg-purple-500/15 dark:text-purple-300",
   },
   QTE: {
-    label: "Quote",
+    label: "Quotation",
     pillText: "QTE",
-    pillClass: "bg-[#00c065]/15 text-green-900 border border-[#00c065]/20",
+    pillClass:
+      "border border-[#00c065]/20 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
   },
 }
 
-/* --------------------------------- styling --------------------------------- */
+const cardShell =
+  "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700/70 dark:bg-slate-800 dark:shadow-slate-950/20"
+
+const cardAccent = "before:block before:h-1 before:w-full before:bg-[#00c065]"
+
+const sectionHeader = "border-b border-gray-100 px-4 py-3 dark:border-slate-700/70"
 
 const btnBase =
-  "inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-800 shadow-sm transition-all duration-200 hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300"
 
 const btnPrimary =
-  "inline-flex h-10 items-center gap-2 rounded-lg bg-[#00c065] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#00a054] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
-
-const btnDanger =
-  "inline-flex h-10 items-center gap-2 rounded-lg border border-red-500/25 bg-white px-4 text-sm font-semibold text-red-900 shadow-sm hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/25 active:scale-[0.98]"
+  "inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#00c065] px-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#00a054] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
 
 const iconBtn =
-  "grid h-9 w-9 place-items-center rounded-lg border border-transparent bg-transparent hover:border-gray-200 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
+  "grid h-9 w-9 place-items-center rounded-lg border border-transparent bg-transparent text-gray-500 transition-colors hover:border-gray-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-700"
 
-const menuBox = "min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm"
+const menuBox =
+  "min-w-[240px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800"
+
 const menuItem =
-  "inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50"
+  "inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50 dark:text-slate-100 dark:hover:bg-slate-700"
 
-const inputBase =
-  "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
-
-/* -------------------------------- utilities -------------------------------- */
-
-function MenuItemBtn({
-  icon,
-  label,
-  onClick,
-  tone = "default",
-}: {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  tone?: "default" | "danger"
-}) {
-  return (
-    <button
-      className={cn(menuItem, tone === "danger" && "text-red-900 hover:bg-red-50")}
-      type="button"
-      onClick={onClick}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-function Modal({
-  open,
-  title,
-  children,
-  onClose,
-}: {
-  open: boolean
-  title: string
-  children: React.ReactNode
-  onClose: () => void
-}) {
-  if (!open) return null
-  return (
-    <div className="fixed inset-0 z-[200]">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="text-sm font-semibold text-gray-900">{title}</div>
-          <button className={iconBtn} type="button" onClick={onClose} aria-label="Close">
-            <X className="h-4 w-4 text-gray-500" />
-          </button>
-        </div>
-        <div className="mt-4">{children}</div>
-      </div>
-    </div>
-  )
-}
-
-type Toast = { id: string; message: string; tone?: "default" | "success" | "danger" }
-
-function ToastStack({ toasts }: { toasts: Toast[] }) {
-  return (
-    <div className="fixed bottom-5 right-5 z-[250] flex w-[92vw] max-w-[380px] flex-col gap-2">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className={cn(
-            "rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-sm",
-            t.tone === "success" && "border-[#00c065]/25 bg-[#00c065]/10 text-[#166534]",
-            t.tone === "danger" && "border-red-500/25 bg-red-50 text-red-900"
-          )}
-        >
-          {t.message}
-        </div>
-      ))}
-    </div>
-  )
+function makeId(prefix: string) {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
 }
 
 function formatDateISO(iso: string) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
+
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -167,44 +110,166 @@ function formatDateISO(iso: string) {
   }).format(d)
 }
 
-function safeBytesToMbLabel(bytes: number) {
-  const mb = bytes / (1024 * 1024)
-  if (!Number.isFinite(mb) || mb <= 0) return "—"
-  const rounded = Math.max(1, Math.round(mb))
-  return `${rounded} MB`
+function getClientProjectCode() {
+  if (typeof window === "undefined") return ""
+
+  const url = new URL(window.location.href)
+
+  const fromUrl =
+    url.searchParams.get("projectCode") ||
+    url.searchParams.get("project_code") ||
+    url.searchParams.get("code")
+
+  if (fromUrl?.trim()) return fromUrl.trim()
+
+  const keys = [
+    "paintpro_client_project_code",
+    "client_project_code",
+    "project_code",
+    "paintpro_project_code",
+  ]
+
+  for (const key of keys) {
+    const value = window.localStorage.getItem(key)?.trim()
+    if (value) return value
+  }
+
+  return ""
 }
 
-function downloadTextFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/plain" })
+function getClientFolderStorageKey(projectCode: string) {
+  return `paintpro_client_folder_ids:${projectCode || "no_project_code"}`
+}
+
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? "").toLowerCase()
+}
+
+function documentBelongsToProject(file: FileItem, projectCode: string) {
+  const code = projectCode.trim().toLowerCase()
+
+  if (!code) return false
+
+  const searchableText = [file.name, file.originalFilename, file.content]
+    .map(normalizeText)
+    .join(" ")
+
+  return searchableText.includes(code)
+}
+
+function downloadFile(file: FileItem) {
+  const content = file.content ?? ""
+  const contentType = file.contentType ?? "text/plain"
+  const extension =
+    contentType.includes("html") || file.originalFilename?.endsWith(".html")
+      ? "html"
+      : contentType.includes("pdf") || file.originalFilename?.endsWith(".pdf")
+        ? "pdf"
+        : "txt"
+
+  const safeName =
+    file.originalFilename?.trim() ||
+    `${file.name.replace(/[^\w\- ]+/g, "").trim() || "paintpro-document"}.${extension}`
+
+  const blob = new Blob([content], { type: contentType })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
+
   a.href = url
-  a.download = filename
+  a.download = safeName
+
   document.body.appendChild(a)
   a.click()
   a.remove()
+
   URL.revokeObjectURL(url)
 }
 
-function pickDocTypeFromFilename(name: string): DocType {
-  const n = name.toLowerCase()
-  if (n.includes("pay")) return "PAY"
-  if (n.includes("receipt") || n.includes("rcp")) return "RCP"
-  if (n.includes("quote") || n.includes("qte")) return "QTE"
-  return "INV"
+function ToastStack({ toasts }: { toasts: Toast[] }) {
+  return (
+    <div className="fixed bottom-5 right-5 z-[250] flex w-[92vw] max-w-[380px] flex-col gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={cn(
+            "rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100",
+            toast.tone === "success" &&
+              "border-[#00c065]/25 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300",
+            toast.tone === "danger" &&
+              "border-red-500/25 bg-red-50 text-red-900 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-300",
+          )}
+        >
+          {toast.message}
+        </div>
+      ))}
+    </div>
+  )
 }
 
-function makeId(prefix: string) {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
+function Modal({
+  open,
+  title,
+  subtitle,
+  children,
+  onClose,
+}: {
+  open: boolean
+  title: string
+  subtitle?: string
+  children: React.ReactNode
+  onClose: () => void
+}) {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[200]">
+      <div className="absolute inset-0 bg-black/45" onClick={onClose} />
+
+      <div className="absolute left-1/2 top-1/2 flex max-h-[88vh] w-[94vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-slate-700">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-gray-950 dark:text-slate-100">
+              {title}
+            </div>
+            {subtitle ? (
+              <div className="mt-1 truncate text-xs text-gray-500 dark:text-slate-400">
+                {subtitle}
+              </div>
+            ) : null}
+          </div>
+
+          <button
+            className={iconBtn}
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {children}
+      </div>
+    </div>
+  )
 }
 
-function folderMeta(count: number, size: string) {
-  return `${count} files  •  ${size}`
+function MenuItemBtn({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button className={menuItem} type="button" onClick={onClick}>
+      {icon}
+      {label}
+    </button>
+  )
 }
-
-type ArchiveTab = "active" | "archived"
-
-/* -------------------------- portal dropdown (fix clipping) -------------------------- */
 
 function PortalMenu<T extends HTMLElement>({
   open,
@@ -218,7 +283,10 @@ function PortalMenu<T extends HTMLElement>({
   children: React.ReactNode
 }) {
   const [mounted, setMounted] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number }>({
+    top: 0,
+    left: 0,
+  })
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => setMounted(true), [])
@@ -231,9 +299,12 @@ function PortalMenu<T extends HTMLElement>({
       if (!el) return
 
       const r = el.getBoundingClientRect()
-      const menuWidth = 240
+      const menuWidth = 260
       const gap = 10
-      const left = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, r.right - menuWidth))
+      const left = Math.max(
+        12,
+        Math.min(window.innerWidth - menuWidth - 12, r.right - menuWidth),
+      )
       const top = Math.min(window.innerHeight - 12, r.bottom + gap)
 
       setPos({ top, left })
@@ -276,7 +347,7 @@ function PortalMenu<T extends HTMLElement>({
         {children}
       </div>
     </div>,
-    document.body
+    document.body,
   )
 }
 
@@ -295,8 +366,14 @@ function ActionMenu({
 
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
-      <button ref={btnRef} className={iconBtn} type="button" onClick={onToggle} aria-label="Actions">
-        <MoreVertical className="h-[18px] w-[18px] text-gray-500" />
+      <button
+        ref={btnRef}
+        className={iconBtn}
+        type="button"
+        onClick={onToggle}
+        aria-label="Actions"
+      >
+        <MoreVertical className="h-[18px] w-[18px]" />
       </button>
 
       <PortalMenu open={isOpen} anchorRef={btnRef} onClose={onClose}>
@@ -306,9 +383,170 @@ function ActionMenu({
   )
 }
 
-/* ---------------------------------- page ---------------------------------- */
+function DocumentPreview({
+  file,
+  onDownload,
+}: {
+  file: FileItem
+  onDownload: () => void
+}) {
+  const content = file.content ?? ""
+  const contentType = file.contentType ?? "text/plain"
+  const isHtml = contentType.includes("html") || content.trim().startsWith("<")
 
-export default function AdminDocuments() {
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-slate-700">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-gray-500 dark:text-slate-400">
+          <span>{file.originalFilename ?? `${file.name}.html`}</span>
+          <span>•</span>
+          <span>{contentType}</span>
+          <span>•</span>
+          <span>{file.sizeLabel}</span>
+        </div>
+
+        <button type="button" className={btnPrimary} onClick={onDownload}>
+          <ArrowDownToLine className="h-4 w-4" />
+          Download
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto bg-gray-100 p-4 dark:bg-slate-900">
+        {isHtml ? (
+          <iframe
+            title={file.name}
+            srcDoc={content}
+            className="mx-auto h-[72vh] w-full max-w-4xl rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700"
+          />
+        ) : (
+          <pre className="mx-auto max-h-[72vh] max-w-4xl overflow-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-800 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+            {content || "No preview content available."}
+          </pre>
+        )}
+      </div>
+    </>
+  )
+}
+
+function CreateFolderModal({
+  open,
+  value,
+  saving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  value: string
+  saving: boolean
+  onChange: (value: string) => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  return (
+    <Modal
+      open={open}
+      title="Create Folder"
+      subtitle="Create a folder for organizing your project documents."
+      onClose={onClose}
+    >
+      <div className="p-4">
+        <label className="text-xs font-semibold text-gray-500 dark:text-slate-400">
+          Folder Name
+        </label>
+
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Example: Signed Quotations"
+          className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:placeholder:text-slate-400"
+          autoFocus
+        />
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className={btnBase} onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className={btnPrimary} onClick={onSubmit} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+            Create Folder
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function MoveDocumentModal({
+  open,
+  file,
+  folders,
+  selectedFolderId,
+  moving,
+  onSelectFolder,
+  onClose,
+  onMove,
+}: {
+  open: boolean
+  file: FileItem | null
+  folders: FolderItem[]
+  selectedFolderId: string
+  moving: boolean
+  onSelectFolder: (folderId: string) => void
+  onClose: () => void
+  onMove: () => void
+}) {
+  return (
+    <Modal
+      open={open}
+      title="Move to Folder"
+      subtitle={file ? `Select a destination folder for ${file.name}.` : undefined}
+      onClose={onClose}
+    >
+      <div className="p-4">
+        <label className="text-xs font-semibold text-gray-500 dark:text-slate-400">
+          Destination Folder
+        </label>
+
+        <select
+          value={selectedFolderId}
+          onChange={(e) => onSelectFolder(e.target.value)}
+          className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100"
+        >
+          <option value="">No folder</option>
+          {folders.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.name}
+            </option>
+          ))}
+        </select>
+
+        {folders.length === 0 ? (
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-900/35 dark:text-slate-400">
+            Create a folder first before moving a document.
+          </div>
+        ) : null}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className={btnBase} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={btnPrimary}
+            onClick={onMove}
+            disabled={moving || !file}
+          >
+            {moving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}
+            Move Document
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+export default function ClientDocumentsPage() {
   const [query, setQuery] = useState("")
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
 
@@ -319,55 +557,51 @@ export default function AdminDocuments() {
   const [sortKey, setSortKey] = useState<SortKey>("date_desc")
   const [tab, setTab] = useState<ArchiveTab>("active")
 
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [sortOpen, setSortOpen] = useState(false)
-  const [newOpen, setNewOpen] = useState(false)
-
-  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
 
   const [folders, setFolders] = useState<FolderItem[]>([])
+  const [clientFolderIds, setClientFolderIds] = useState<string[]>([])
   const [filesAll, setFilesAll] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [archivedFileIds, setArchivedFileIds] = useState<Record<string, boolean>>({})
-  const [archivedFolderIds, setArchivedFolderIds] = useState<Record<string, boolean>>({})
-
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [renameKind, setRenameKind] = useState<"file" | "folder">("file")
-  const [renameTargetId, setRenameTargetId] = useState<string>("")
-  const [renameValue, setRenameValue] = useState("")
-
-  const [newFolderOpen, setNewFolderOpen] = useState(false)
-  const [newFolderName, setNewFolderName] = useState("")
-
-  const [uploadFileOpen, setUploadFileOpen] = useState(false)
-  const [uploadFolderOpen, setUploadFolderOpen] = useState(false)
-  const [uploadFolderTargetId, setUploadFolderTargetId] = useState<string>("")
-
-  const [confirmArchiveFolderOpen, setConfirmArchiveFolderOpen] = useState(false)
-  const [archiveFolderTargetId, setArchiveFolderTargetId] = useState<string>("")
-
-  const [confirmRestoreFolderOpen, setConfirmRestoreFolderOpen] = useState(false)
-  const [restoreFolderTargetId, setRestoreFolderTargetId] = useState<string>("")
-
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const [clientProjectCode, setClientProjectCode] = useState("")
 
-  const isSearching = query.trim().length > 0
+  const [createFolderOpen, setCreateFolderOpen] = useState(false)
+  const [newFolderName, setNewFolderName] = useState("")
+  const [savingFolder, setSavingFolder] = useState(false)
+
+  const [moveModalOpen, setMoveModalOpen] = useState(false)
+  const [moveTargetFile, setMoveTargetFile] = useState<FileItem | null>(null)
+  const [selectedMoveFolderId, setSelectedMoveFolderId] = useState("")
+  const [movingFile, setMovingFile] = useState(false)
+
   const showArchived = tab === "archived"
+  const isSearching = query.trim().length > 0
+
+  const clientFolderStorageKey = useMemo(
+    () => getClientFolderStorageKey(clientProjectCode),
+    [clientProjectCode],
+  )
 
   const types: Partial<Record<DocType, boolean>> = useMemo(
-    () => ({ INV: filterINV, PAY: filterPAY, RCP: filterRCP, QTE: filterQTE }),
-    [filterINV, filterPAY, filterRCP, filterQTE]
+    () => ({
+      INV: filterINV,
+      PAY: filterPAY,
+      RCP: filterRCP,
+      QTE: filterQTE,
+    }),
+    [filterINV, filterPAY, filterRCP, filterQTE],
   )
 
   const activeFolder = useMemo(() => {
     if (!activeFolderId) return null
-    return folders.find((f) => f.id === activeFolderId) ?? null
+    return folders.find((folder) => folder.id === activeFolderId) ?? null
   }, [activeFolderId, folders])
 
   const sortLabel =
@@ -379,110 +613,334 @@ export default function AdminDocuments() {
           ? "Name A-Z"
           : "Name Z-A"
 
-  const filterItems: { id: DocType; label: string; checked: boolean; setChecked: (v: boolean) => void }[] = [
-    { id: "INV", label: "Invoices (INV)", checked: filterINV, setChecked: setFilterINV },
-    { id: "PAY", label: "Payroll (PAY)", checked: filterPAY, setChecked: setFilterPAY },
-    { id: "RCP", label: "Receipts (RCP)", checked: filterRCP, setChecked: setFilterRCP },
-    { id: "QTE", label: "Quotes (QTE)", checked: filterQTE, setChecked: setFilterQTE },
+  const filterItems: {
+    id: DocType
+    label: string
+    checked: boolean
+    setChecked: (value: boolean) => void
+  }[] = [
+    {
+      id: "QTE",
+      label: "Quotations",
+      checked: filterQTE,
+      setChecked: setFilterQTE,
+    },
+    {
+      id: "INV",
+      label: "Invoices",
+      checked: filterINV,
+      setChecked: setFilterINV,
+    },
+    {
+      id: "RCP",
+      label: "Receipts",
+      checked: filterRCP,
+      setChecked: setFilterRCP,
+    },
+    {
+      id: "PAY",
+      label: "Payments",
+      checked: filterPAY,
+      setChecked: setFilterPAY,
+    },
   ]
 
   function pushToast(message: string, tone: Toast["tone"] = "default") {
     const id = makeId("toast")
     setToasts((prev) => [...prev, { id, message, tone }])
+
     window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id))
+      setToasts((prev) => prev.filter((toast) => toast.id !== id))
     }, 2500)
   }
+
+  function closeAll() {
+    setFiltersOpen(false)
+    setSortOpen(false)
+    setOpenMenuKey(null)
+  }
+
+  function openFolder(folderId: string) {
+    setActiveFolderId(folderId)
+    closeAll()
+  }
+
+  function goBackToRoot() {
+    setActiveFolderId(null)
+    closeAll()
+  }
+
+  function handleDownload(file: FileItem) {
+    downloadFile(file)
+    setOpenMenuKey(null)
+    pushToast("Document downloaded.", "success")
+  }
+
+  function handlePreview(file: FileItem) {
+    setPreviewFile(file)
+    setOpenMenuKey(null)
+  }
+
+  function openMoveModal(file: FileItem) {
+    setMoveTargetFile(file)
+    setSelectedMoveFolderId(file.folderId ?? "")
+    setMoveModalOpen(true)
+    setOpenMenuKey(null)
+  }
+
+  function saveClientFolderIds(nextIds: string[]) {
+    setClientFolderIds(nextIds)
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(clientFolderStorageKey, JSON.stringify(nextIds))
+    }
+  }
+
+  async function refreshDocuments() {
+    const [folderRows, documentRows] = await Promise.all([
+      listFolders(),
+      listDocuments({
+        query: "",
+        folderId: null,
+        types: {
+          INV: true,
+          PAY: true,
+          RCP: true,
+          QTE: true,
+        },
+        sort: "date_desc",
+      }),
+    ])
+
+    setFolders(folderRows)
+    setFilesAll(documentRows)
+  }
+
+  async function handleCreateFolder() {
+    const name = newFolderName.trim()
+
+    if (!name) {
+      pushToast("Folder name is required.", "danger")
+      return
+    }
+
+    try {
+      setSavingFolder(true)
+
+      const folder = await createFolder(name)
+
+      setFolders((prev) => [folder, ...prev])
+
+      const nextFolderIds = Array.from(new Set([folder.id, ...clientFolderIds]))
+      saveClientFolderIds(nextFolderIds)
+
+      setNewFolderName("")
+      setCreateFolderOpen(false)
+      pushToast("Folder created.", "success")
+    } catch (error: any) {
+      pushToast(error?.message ?? "Failed to create folder.", "danger")
+    } finally {
+      setSavingFolder(false)
+    }
+  }
+
+  async function handleMoveDocument() {
+    if (!moveTargetFile) return
+
+    try {
+      setMovingFile(true)
+
+      const folderId = selectedMoveFolderId || null
+      await moveDocument(moveTargetFile.id, folderId)
+
+      if (folderId && !clientFolderIds.includes(folderId)) {
+        saveClientFolderIds(Array.from(new Set([folderId, ...clientFolderIds])))
+      }
+
+      setFilesAll((prev) =>
+        prev.map((file) =>
+          file.id === moveTargetFile.id
+            ? {
+                ...file,
+                folderId: folderId ?? undefined,
+              }
+            : file,
+        ),
+      )
+
+      setMoveModalOpen(false)
+      setMoveTargetFile(null)
+      setSelectedMoveFolderId("")
+      pushToast(folderId ? "Document moved to folder." : "Document removed from folder.", "success")
+
+      await refreshDocuments()
+    } catch (error: any) {
+      pushToast(error?.message ?? "Failed to move document.", "danger")
+    } finally {
+      setMovingFile(false)
+    }
+  }
+
+  useEffect(() => {
+    setClientProjectCode(getClientProjectCode())
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const raw = window.localStorage.getItem(clientFolderStorageKey)
+
+    try {
+      const parsed = raw ? JSON.parse(raw) : []
+      setClientFolderIds(Array.isArray(parsed) ? parsed.filter(Boolean) : [])
+    } catch {
+      setClientFolderIds([])
+    }
+  }, [clientFolderStorageKey])
 
   useEffect(() => {
     let cancelled = false
 
-    async function seed() {
+    async function loadDocuments() {
       try {
         setLoading(true)
         setLoadError(null)
 
-        const [f, a] = await Promise.all([
+        const [folderRows, documentRows] = await Promise.all([
           listFolders(),
           listDocuments({
             query: "",
             folderId: null,
-            types: { INV: true, PAY: true, RCP: true, QTE: true },
+            types: {
+              INV: true,
+              PAY: true,
+              RCP: true,
+              QTE: true,
+            },
             sort: "date_desc",
           }),
         ])
 
         if (cancelled) return
-        setFolders(f)
-        setFilesAll(a)
-      } catch (e: any) {
+
+        setFolders(folderRows)
+        setFilesAll(documentRows)
+      } catch (error: any) {
         if (cancelled) return
-        setLoadError(e?.message ?? "Failed to load documents")
+        setLoadError(error?.message ?? "Failed to load client documents")
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
 
-    seed()
+    loadDocuments()
+
     return () => {
       cancelled = true
     }
   }, [])
 
+  const projectScopedFiles = useMemo(() => {
+    const code = clientProjectCode.trim()
+
+    if (!code) return []
+
+    return filesAll.filter((file) => documentBelongsToProject(file, code))
+  }, [filesAll, clientProjectCode])
+
   const visibleFolders = useMemo(() => {
-    return folders.filter((f) =>
-      showArchived ? Boolean(archivedFolderIds[f.id]) : !archivedFolderIds[f.id]
+    const folderIds = new Set(
+      projectScopedFiles
+        .filter((file) => Boolean(file.folderId))
+        .map((file) => file.folderId as string),
     )
-  }, [folders, archivedFolderIds, showArchived])
+
+    for (const folderId of clientFolderIds) {
+      folderIds.add(folderId)
+    }
+
+    return folders.filter((folder) => {
+      if (!folderIds.has(folder.id)) return false
+      return showArchived ? folder.isArchived : !folder.isArchived
+    })
+  }, [folders, projectScopedFiles, showArchived, clientFolderIds])
 
   const folderStats = useMemo(() => {
-    const map: Record<string, { count: number; totalBytesApprox: number }> = {}
-    for (const f of filesAll) {
-      const isArchived = Boolean(archivedFileIds[f.id])
-      if (showArchived ? !isArchived : isArchived) continue
-      if (!f.folderId) continue
-      if (!map[f.folderId]) map[f.folderId] = { count: 0, totalBytesApprox: 0 }
-      map[f.folderId].count += 1
-      const m = /(\d+)\s*MB/i.exec(f.sizeLabel || "")
-      if (m) map[f.folderId].totalBytesApprox += Number(m[1]) * 1024 * 1024
+    const map: Record<string, { count: number; totalKb: number }> = {}
+
+    for (const file of projectScopedFiles) {
+      if (!file.folderId) continue
+      if (showArchived ? !file.isArchived : file.isArchived) continue
+
+      if (!map[file.folderId]) {
+        map[file.folderId] = {
+          count: 0,
+          totalKb: 0,
+        }
+      }
+
+      map[file.folderId].count += 1
+
+      const kbMatch = /(\d+)\s*KB/i.exec(file.sizeLabel || "")
+      const mbMatch = /(\d+)\s*MB/i.exec(file.sizeLabel || "")
+
+      if (kbMatch) map[file.folderId].totalKb += Number(kbMatch[1])
+      if (mbMatch) map[file.folderId].totalKb += Number(mbMatch[1]) * 1024
     }
+
     return map
-  }, [filesAll, archivedFileIds, showArchived])
+  }, [projectScopedFiles, showArchived])
 
   const scopedFiles = useMemo(() => {
-    let rows = filesAll.slice()
-    if (activeFolderId) rows = rows.filter((f) => f.folderId === activeFolderId)
+    let rows = projectScopedFiles.slice()
 
-    rows = rows.filter((f) => {
-      const isArchived = Boolean(archivedFileIds[f.id])
+    if (activeFolderId) {
+      rows = rows.filter((file) => file.folderId === activeFolderId)
+    }
+
+    rows = rows.filter((file) => {
+      const isArchived = Boolean(file.isArchived)
       return showArchived ? isArchived : !isArchived
     })
 
-    rows = rows.filter((f) => types[f.type] !== false)
+    rows = rows.filter((file) => types[file.type] !== false)
 
     const q = query.trim().toLowerCase()
-    if (q) rows = rows.filter((f) => `${f.name} ${f.createdBy}`.toLowerCase().includes(q))
+
+    if (q) {
+      rows = rows.filter((file) => {
+        const searchable = `${file.name} ${file.createdBy} ${
+          file.originalFilename ?? ""
+        }`.toLowerCase()
+        return searchable.includes(q)
+      })
+    }
 
     rows.sort((a, b) => {
       if (sortKey === "name_asc") return a.name.localeCompare(b.name)
       if (sortKey === "name_desc") return b.name.localeCompare(a.name)
+
       const aMs = Number.isNaN(Date.parse(a.dateISO)) ? 0 : Date.parse(a.dateISO)
       const bMs = Number.isNaN(Date.parse(b.dateISO)) ? 0 : Date.parse(b.dateISO)
+
       if (sortKey === "date_asc") return aMs - bMs
       return bMs - aMs
     })
 
     return rows
-  }, [filesAll, activeFolderId, archivedFileIds, showArchived, types, query, sortKey])
+  }, [projectScopedFiles, activeFolderId, showArchived, types, query, sortKey])
 
   const recentFiles = useMemo(() => {
-    if (isSearching) return []
-    if (showArchived) return []
+    if (isSearching || showArchived) return []
 
-    let rows = filesAll.slice()
-    if (activeFolderId) rows = rows.filter((f) => f.folderId === activeFolderId)
-    rows = rows.filter((f) => !archivedFileIds[f.id])
-    rows = rows.filter((f) => types[f.type] !== false)
+    let rows = projectScopedFiles.slice()
+
+    if (activeFolderId) {
+      rows = rows.filter((file) => file.folderId === activeFolderId)
+    }
+
+    rows = rows.filter((file) => !file.isArchived)
+    rows = rows.filter((file) => types[file.type] !== false)
 
     rows.sort((a, b) => {
       const aMs = Number.isNaN(Date.parse(a.dateISO)) ? 0 : Date.parse(a.dateISO)
@@ -491,327 +949,46 @@ export default function AdminDocuments() {
     })
 
     return rows.slice(0, 3)
-  }, [filesAll, activeFolderId, archivedFileIds, types, isSearching, showArchived])
+  }, [projectScopedFiles, activeFolderId, isSearching, showArchived, types])
 
-  const selectedCount = useMemo(() => Object.values(selectedIds).filter(Boolean).length, [selectedIds])
-  const allCheckedOnScreen = useMemo(
-    () => scopedFiles.length > 0 && scopedFiles.every((f) => Boolean(selectedIds[f.id])),
-    [scopedFiles, selectedIds]
-  )
+  const quotationCount = useMemo(() => {
+    return projectScopedFiles.filter((file) => file.type === "QTE" && !file.isArchived).length
+  }, [projectScopedFiles])
 
-  function closeAll() {
-    setOpenMenuKey(null)
-    setFiltersOpen(false)
-    setSortOpen(false)
-    setNewOpen(false)
-  }
+  const activeFileCount = useMemo(() => {
+    return projectScopedFiles.filter((file) => !file.isArchived).length
+  }, [projectScopedFiles])
 
-  function openFolder(folderId: string) {
-    setActiveFolderId(folderId)
-    setSelectedIds({})
-    closeAll()
-  }
-
-  function goBackToRoot() {
-    setActiveFolderId(null)
-    setSelectedIds({})
-    closeAll()
-  }
-
-  function toggleOne(id: string, checked: boolean) {
-    setSelectedIds((prev) => ({ ...prev, [id]: checked }))
-  }
-
-  function toggleAll(checked: boolean) {
-    setSelectedIds((prev) => {
-      const next = { ...prev }
-      for (const f of scopedFiles) next[f.id] = checked
-      return next
-    })
-  }
-
-  function clearSelection() {
-    setSelectedIds({})
-  }
-
-  function selectedItems() {
-    const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
-    return scopedFiles.filter((f) => ids.has(f.id))
-  }
-
-  function actionDownloadFile(file: FileItem) {
-    const content = [
-      `PaintPro Document (Dummy)`,
-      `Name: ${file.name}`,
-      `Type: ${file.type}`,
-      `Created By: ${file.createdBy}`,
-      `Date: ${formatDateISO(file.dateISO)}`,
-      `Size: ${file.sizeLabel}`,
-      ``,
-      `This is a placeholder download while the database/storage is not finalized.`,
-    ].join("\n")
-
-    const safeName = file.name.replace(/[^\w\- ]+/g, "").trim() || "document"
-    downloadTextFile(`${safeName}.txt`, content)
-    pushToast("Downloaded document (dummy).", "success")
-    setOpenMenuKey(null)
-  }
-
-  function actionArchiveFile(fileId: string) {
-    setArchivedFileIds((prev) => ({ ...prev, [fileId]: true }))
-    setOpenMenuKey(null)
-    setSelectedIds((prev) => {
-      if (!prev[fileId]) return prev
-      const next = { ...prev }
-      delete next[fileId]
-      return next
-    })
-    pushToast("Document archived.", "success")
-  }
-
-  function actionUnarchiveFile(fileId: string) {
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      delete next[fileId]
-      return next
-    })
-    setOpenMenuKey(null)
-    pushToast("Document restored.", "success")
-  }
-
-  function requestArchiveFolder(folderId: string) {
-    setArchiveFolderTargetId(folderId)
-    setConfirmArchiveFolderOpen(true)
-    setOpenMenuKey(null)
-  }
-
-  function confirmArchiveFolder() {
-    const folderId = archiveFolderTargetId
-    if (!folderId) return
-
-    setArchivedFolderIds((prev) => ({ ...prev, [folderId]: true }))
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of filesAll) if (f.folderId === folderId) next[f.id] = true
-      return next
-    })
-
-    if (activeFolderId === folderId) setActiveFolderId(null)
-
-    setConfirmArchiveFolderOpen(false)
-    setArchiveFolderTargetId("")
-    pushToast("Folder archived (files inside archived too).", "success")
-  }
-
-  function requestRestoreFolder(folderId: string) {
-    setRestoreFolderTargetId(folderId)
-    setConfirmRestoreFolderOpen(true)
-    setOpenMenuKey(null)
-  }
-
-  function confirmRestoreFolder() {
-    const folderId = restoreFolderTargetId
-    if (!folderId) return
-
-    setArchivedFolderIds((prev) => {
-      const next = { ...prev }
-      delete next[folderId]
-      return next
-    })
-
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of filesAll) if (f.folderId === folderId) delete next[f.id]
-      return next
-    })
-
-    setConfirmRestoreFolderOpen(false)
-    setRestoreFolderTargetId("")
-    pushToast("Folder restored (files inside restored too).", "success")
-  }
-
-  function openRenameModal(kind: "file" | "folder", id: string, currentName: string) {
-    setRenameKind(kind)
-    setRenameTargetId(id)
-    setRenameValue(currentName)
-    setRenameOpen(true)
-    setOpenMenuKey(null)
-  }
-
-  function submitRename() {
-    const nextName = renameValue.trim()
-    if (!nextName) return
-
-    if (renameKind === "folder") {
-      setFolders((prev) => prev.map((f) => (f.id === renameTargetId ? { ...f, name: nextName } : f)))
-      pushToast("Folder renamed.", "success")
-    } else {
-      setFilesAll((prev) => prev.map((f) => (f.id === renameTargetId ? { ...f, name: nextName } : f)))
-      pushToast("Document renamed.", "success")
-    }
-
-    setRenameOpen(false)
-  }
-
-  function bulkDownload() {
-    const items = selectedItems()
-    const content = [
-      `PaintPro Bulk Download (Dummy)`,
-      `Count: ${items.length}`,
-      ``,
-      ...items.map((f, i) => `${i + 1}. ${f.name} (${f.type}) - ${formatDateISO(f.dateISO)}`),
-    ].join("\n")
-
-    downloadTextFile(`paintpro_bulk_${new Date().toISOString().slice(0, 10)}.txt`, content)
-    clearSelection()
-    pushToast("Downloaded selection (dummy).", "success")
-  }
-
-  function bulkArchive() {
-    const items = selectedItems()
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of items) next[f.id] = true
-      return next
-    })
-    clearSelection()
-    pushToast("Selected documents archived.", "success")
-  }
-
-  function bulkRestore() {
-    const items = selectedItems()
-    setArchivedFileIds((prev) => {
-      const next = { ...prev }
-      for (const f of items) delete next[f.id]
-      return next
-    })
-    clearSelection()
-    pushToast("Selected documents restored.", "success")
-  }
-
-  function openNewFolder() {
-    setNewFolderName("")
-    setNewFolderOpen(true)
-    setNewOpen(false)
-  }
-
-  function submitNewFolder() {
-    const name = newFolderName.trim()
-    if (!name) return
-    const id = makeId("folder")
-    const newFolder: FolderItem = { id, name, fileCount: 0, sizeLabel: "0 MB" }
-    setFolders((prev) => [newFolder, ...prev])
-    setNewFolderOpen(false)
-    pushToast("Folder created.", "success")
-  }
-
-  function openUploadFile() {
-    setUploadFileOpen(true)
-    setNewOpen(false)
-  }
-
-  function openUploadFolder() {
-    setUploadFolderTargetId(activeFolderId ?? "")
-    setUploadFolderOpen(true)
-    setNewOpen(false)
-  }
-
-  function handleFilePicked(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return
-    const picked = fileList[0]
-    const iso = new Date().toISOString()
-
-    const newFile: FileItem = {
-      id: makeId("file"),
-      type: pickDocTypeFromFilename(picked.name),
-      name: picked.name.replace(/\.[^/.]+$/, ""),
-      createdBy: "admin@paintpro.com",
-      dateISO: iso,
-      dateLabel: "",
-      sizeLabel: safeBytesToMbLabel(picked.size),
-      folderId: activeFolderId ?? undefined,
-    }
-
-    setFilesAll((prev) => [newFile, ...prev])
-    setUploadFileOpen(false)
-    pushToast("File uploaded (dummy).", "success")
-  }
-
-  function handleFolderPicked(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return
-    const targetFolderId = uploadFolderTargetId || activeFolderId || ""
-    const iso = new Date().toISOString()
-
-    const toAdd: FileItem[] = Array.from(fileList).map((picked) => ({
-      id: makeId("file"),
-      type: pickDocTypeFromFilename(picked.name),
-      name: picked.name.replace(/\.[^/.]+$/, ""),
-      createdBy: "admin@paintpro.com",
-      dateISO: iso,
-      dateLabel: "",
-      sizeLabel: safeBytesToMbLabel(picked.size),
-      folderId: targetFolderId || undefined,
-    }))
-
-    setFilesAll((prev) => [...toAdd, ...prev])
-    setUploadFolderOpen(false)
-    pushToast(`Folder uploaded (dummy): ${toAdd.length} files added.`, "success")
-  }
+  const archivedFileCount = useMemo(() => {
+    return projectScopedFiles.filter((file) => file.isArchived).length
+  }, [projectScopedFiles])
 
   return (
-    <div className="p-6 text-gray-900" onClick={closeAll}>
+    <div className="min-h-screen bg-[#f7f8fa] px-4 py-4 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-6">
       <ToastStack toasts={toasts} />
 
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Documents</h1>
-          <div className="mt-1 text-sm text-gray-500">Files, folders, and exports.</div>
+          <h1 className="text-[22px] font-semibold tracking-tight text-gray-950 dark:text-slate-100">
+            Documents
+          </h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-slate-300">
+            View quotations, invoices, receipts, and files linked to your project.
+          </p>
         </div>
-      </div>
 
-      <div className="mt-5" onClick={(e) => e.stopPropagation()}>
-        {activeFolder && (
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <button
-              className="bg-transparent p-0 text-sm font-semibold text-[#00c065] hover:underline"
-              onClick={goBackToRoot}
-              type="button"
-            >
-              Folders
-            </button>
-            <span className="text-gray-400">›</span>
-            <span className="text-sm font-semibold text-gray-900">{activeFolder.name}</span>
-
-            <button className={cn(btnBase, "ml-1 px-3")} onClick={goBackToRoot} type="button">
-              <ChevronLeft className="h-4 w-4 text-gray-500" />
-              Back
-            </button>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative w-full lg:w-[360px] xl:w-[420px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25"
-              placeholder="Search documents, users, dates"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 lg:ml-auto lg:flex-nowrap">
-            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+        <div className="rounded-xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-700/70 dark:bg-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-slate-600 dark:bg-slate-900/40">
               <button
                 type="button"
                 className={cn(
                   "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                  tab === "active" ? "bg-[#00c065]/10 text-[#166534]" : "text-gray-700 hover:bg-gray-50"
+                  tab === "active"
+                    ? "bg-[#00c065]/10 text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300"
+                    : "text-gray-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800",
                 )}
-                onClick={() => {
-                  setTab("active")
-                  setSelectedIds({})
-                }}
+                onClick={() => setTab("active")}
               >
                 Active
               </button>
@@ -819,56 +996,51 @@ export default function AdminDocuments() {
                 type="button"
                 className={cn(
                   "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                  tab === "archived" ? "bg-[#00c065]/10 text-[#166534]" : "text-gray-700 hover:bg-gray-50"
+                  tab === "archived"
+                    ? "bg-[#00c065]/10 text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300"
+                    : "text-gray-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800",
                 )}
-                onClick={() => {
-                  setTab("archived")
-                  setSelectedIds({})
-                }}
+                onClick={() => setTab("archived")}
               >
                 Archived
               </button>
             </div>
 
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button className={btnPrimary} type="button" onClick={() => setNewOpen((v) => !v)}>
-                + New
-              </button>
-
-              {newOpen && (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                  <MenuItemBtn
-                    icon={<Folder className="h-4 w-4 text-gray-500" />}
-                    label="New Folder"
-                    onClick={openNewFolder}
-                  />
-                  <MenuItemBtn
-                    icon={<Upload className="h-4 w-4 text-gray-500" />}
-                    label="File Upload"
-                    onClick={openUploadFile}
-                  />
-                  <MenuItemBtn
-                    icon={<Folder className="h-4 w-4 text-gray-500" />}
-                    label="Folder Upload"
-                    onClick={openUploadFolder}
-                  />
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              className={btnPrimary}
+              onClick={() => {
+                setCreateFolderOpen(true)
+                closeAll()
+              }}
+            >
+              <FolderPlus className="h-4 w-4" />
+              New Folder
+            </button>
 
             <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button className={btnBase} type="button" onClick={() => setFiltersOpen((v) => !v)}>
-                <SlidersHorizontal className="h-4 w-4 text-gray-500" />
+              <button
+                className={btnBase}
+                type="button"
+                onClick={() => {
+                  setFiltersOpen((prev) => !prev)
+                  setSortOpen(false)
+                }}
+              >
+                <SlidersHorizontal className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                 Filters
               </button>
 
               {filtersOpen && (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[288px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                  <div className="px-3 py-2 text-xs font-semibold text-gray-500">Document Type</div>
+                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[270px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-slate-400">
+                    Document Type
+                  </div>
+
                   {filterItems.map((item) => (
                     <label
                       key={item.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50 dark:text-slate-100 dark:hover:bg-slate-700"
                     >
                       <input
                         type="checkbox"
@@ -879,28 +1051,34 @@ export default function AdminDocuments() {
                       <span>{item.label}</span>
                     </label>
                   ))}
-                  <div className="mt-2 border-t border-gray-200 px-3 pb-1 pt-2 text-xs text-gray-500">
-                    Archive is controlled by the Active/Archived tabs.
-                  </div>
                 </div>
               )}
             </div>
 
             <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button className={btnBase} type="button" onClick={() => setSortOpen((v) => !v)}>
+              <button
+                className={btnBase}
+                type="button"
+                onClick={() => {
+                  setSortOpen((prev) => !prev)
+                  setFiltersOpen(false)
+                }}
+              >
                 <span>Sort:</span>
-                <span className="font-semibold text-gray-900">{sortLabel}</span>
-                <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                <span className="font-semibold">{sortLabel}</span>
+                <ArrowUpDown className="h-4 w-4 text-gray-500 dark:text-slate-400" />
               </button>
 
               {sortOpen && (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                  {([
-                    ["date_desc", "Newest"],
-                    ["date_asc", "Oldest"],
-                    ["name_asc", "Name A-Z"],
-                    ["name_desc", "Name Z-A"],
-                  ] as const).map(([key, label]) => (
+                <div className="absolute right-0 top-[calc(100%+10px)] z-50 min-w-[220px] rounded-lg border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  {(
+                    [
+                      ["date_desc", "Newest"],
+                      ["date_asc", "Oldest"],
+                      ["name_asc", "Name A-Z"],
+                      ["name_desc", "Name Z-A"],
+                    ] as const
+                  ).map(([key, label]) => (
                     <button
                       key={key}
                       className={menuItem}
@@ -918,503 +1096,481 @@ export default function AdminDocuments() {
             </div>
           </div>
         </div>
+      </div>
 
-        {(loading || loadError) && (
-          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-              ) : (
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-              )}
-              {loading ? "Loading documents…" : "Could not load documents"}
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className={`${cardShell} ${cardAccent}`}>
+          <div className="p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-slate-400">
+              <CheckCircle2 className="h-4 w-4" />
+              Project Access
             </div>
-            {loadError ? <div className="mt-1 text-sm text-gray-600">{loadError}</div> : null}
+            <div className="mt-2 text-lg font-semibold text-gray-950 dark:text-slate-100">
+              {clientProjectCode || "No project code found"}
+            </div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
+              Only documents linked to this project code are shown.
+            </div>
+          </div>
+        </div>
+
+        <div className={`${cardShell} ${cardAccent}`}>
+          <div className="p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-slate-400">
+              <FileText className="h-4 w-4" />
+              Active Files
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-gray-950 dark:text-slate-100">
+              {activeFileCount}
+            </div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
+              Available files for viewing and download.
+            </div>
+          </div>
+        </div>
+
+        <div className={`${cardShell} ${cardAccent}`}>
+          <div className="p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-slate-400">
+              <FileText className="h-4 w-4" />
+              Quotations
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-gray-950 dark:text-slate-100">
+              {quotationCount}
+            </div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
+              Quotation documents linked to the project.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5" onClick={closeAll}>
+        {activeFolder && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <button
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm font-semibold text-[#00a054] transition-colors hover:bg-[#00c065]/10 dark:text-emerald-300 dark:hover:bg-[#00c065]/15"
+              onClick={goBackToRoot}
+              type="button"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Folders
+            </button>
+            <span className="text-gray-400 dark:text-slate-500">/</span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+              {activeFolder.name}
+            </span>
           </div>
         )}
 
-        {isSearching && (
-          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-gray-900">
-                Search results for <span className="text-gray-700">“{query.trim()}”</span>
-              </div>
-              <button className={btnBase} type="button" onClick={() => setQuery("")}>
-                <X className="h-4 w-4 text-gray-500" />
-                Clear search
-              </button>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="relative w-full lg:w-[380px] xl:w-[460px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-slate-400" />
+            <input
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:placeholder:text-slate-400"
+              placeholder="Search documents"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-slate-400">
+            <span>
+              {scopedFiles.length} result{scopedFiles.length === 1 ? "" : "s"}
+            </span>
+            <span>•</span>
+            <span>{tab === "active" ? "Active" : "Archived"}</span>
+            {archivedFileCount > 0 ? (
+              <>
+                <span>•</span>
+                <span>{archivedFileCount} archived</span>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {(loading || loadError) && (
+          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-slate-100">
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-gray-500 dark:text-slate-400" />
+              ) : (
+                <FileText className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+              )}
+              {loading ? "Loading documents…" : "Could not load documents"}
             </div>
-            <div className="mt-1 text-sm text-gray-500">Folders and recent are hidden while searching.</div>
+            {loadError ? (
+              <div className="mt-1 text-sm text-gray-600 dark:text-slate-300">
+                {loadError}
+              </div>
+            ) : null}
           </div>
         )}
 
         {!activeFolder && !isSearching && (
           <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-xs font-semibold text-gray-500">Folders</div>
-                <div className="text-xs text-gray-500">{visibleFolders.length} folders</div>
-              </div>
-
-              <div className="flex flex-col divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                {visibleFolders.map((folder) => {
-                  const stats = folderStats[folder.id]
-                  const count = stats?.count ?? folder.fileCount
-                  const sizeLabel =
-                    stats?.totalBytesApprox && stats.totalBytesApprox > 0
-                      ? safeBytesToMbLabel(stats.totalBytesApprox)
-                      : folder.sizeLabel
-
-                  const key = `folder:${folder.id}`
-
-                  return (
-                    <div
-                      key={folder.id}
-                      className="flex items-center justify-between gap-3 bg-white px-3 py-3 hover:bg-gray-50"
-                    >
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        onClick={() => openFolder(folder.id)}
-                        disabled={tab === "archived"}
-                      >
-                        <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#00c065]/10">
-                          <Folder className="h-5 w-5 text-[#00a054]" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-gray-900">{folder.name}</div>
-                          <div className="mt-1 text-xs text-gray-500">
-                            {tab === "archived" ? "Archived folder" : folderMeta(count, sizeLabel)}
-                          </div>
-                        </div>
-                      </button>
-
-                      <ActionMenu
-                        isOpen={openMenuKey === key}
-                        onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
-                        onClose={() => setOpenMenuKey(null)}
-                      >
-                        {tab === "active" ? (
-                          <>
-                            <MenuItemBtn
-                              icon={<Folder className="h-4 w-4 text-gray-500" />}
-                              label="Open"
-                              onClick={() => openFolder(folder.id)}
-                            />
-                            <MenuItemBtn
-                              icon={<Pencil className="h-4 w-4 text-gray-500" />}
-                              label="Rename"
-                              onClick={() => openRenameModal("folder", folder.id, folder.name)}
-                            />
-                            <MenuItemBtn
-                              icon={<Archive className="h-4 w-4 text-gray-500" />}
-                              label="Archive"
-                              onClick={() => requestArchiveFolder(folder.id)}
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <MenuItemBtn
-                              icon={<Check className="h-4 w-4 text-gray-500" />}
-                              label="Restore"
-                              onClick={() => requestRestoreFolder(folder.id)}
-                            />
-                            <MenuItemBtn
-                              icon={<Pencil className="h-4 w-4 text-gray-500" />}
-                              label="Rename"
-                              onClick={() => openRenameModal("folder", folder.id, folder.name)}
-                            />
-                          </>
-                        )}
-                      </ActionMenu>
+            <div className={`${cardShell} ${cardAccent}`}>
+              <div className={sectionHeader}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                      Project Folders
                     </div>
-                  )
-                })}
-
-                {visibleFolders.length === 0 && (
-                  <div className="px-3 py-6 text-sm text-gray-500">
-                    {tab === "archived" ? "No archived folders." : "No folders to display."}
+                    <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                      Grouped project document storage.
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
 
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-xs font-semibold text-gray-500">Recent</div>
-                <div className="text-xs text-gray-500">{tab === "archived" ? "—" : `${recentFiles.length} items`}</div>
-              </div>
-
-              {tab === "archived" ? (
-                <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 text-sm text-gray-600">
-                  Recent is available only for Active documents.
+                  <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">
+                    {visibleFolders.length} folder{visibleFolders.length === 1 ? "" : "s"}
+                  </div>
                 </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {recentFiles.map((f) => {
-                    const meta = typeMeta[f.type]
-                    const key = `recent:${f.id}`
+              </div>
+
+              <div className="p-4">
+                <div className="flex min-h-[190px] flex-col gap-2">
+                  {visibleFolders.map((folder) => {
+                    const stats = folderStats[folder.id]
+                    const count = stats?.count ?? folder.fileCount
+                    const sizeLabel =
+                      stats?.totalKb && stats.totalKb > 0
+                        ? stats.totalKb >= 1024
+                          ? `${Math.max(1, Math.round(stats.totalKb / 1024))} MB`
+                          : `${Math.max(1, Math.round(stats.totalKb))} KB`
+                        : folder.sizeLabel
 
                     return (
-                      <div
-                        key={f.id}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm"
+                      <button
+                        key={folder.id}
+                        type="button"
+                        className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-3 text-left transition-colors hover:border-[#00c065]/35 hover:bg-[#00c065]/5 dark:border-slate-700 dark:bg-slate-900/35 dark:hover:border-[#00c065]/35 dark:hover:bg-[#00c065]/10"
+                        onClick={() => openFolder(folder.id)}
                       >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span
-                            className={cn(
-                              "inline-flex h-[22px] min-w-[34px] items-center justify-center rounded-md px-2.5 text-xs font-semibold tracking-wide",
-                              meta.pillClass
-                            )}
-                          >
-                            {meta.pillText}
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#00c065]/10 dark:bg-[#00c065]/15">
+                            <Folder className="h-5 w-5 text-[#00a054] dark:text-emerald-300" />
                           </span>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-gray-900">{f.name}</div>
-                            <div className="mt-1 text-xs text-gray-500">
-                              {formatDateISO(f.dateISO)} • {f.sizeLabel}
-                            </div>
-                          </div>
-                        </div>
 
-                        <ActionMenu
-                          isOpen={openMenuKey === key}
-                          onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
-                          onClose={() => setOpenMenuKey(null)}
-                        >
-                          <MenuItemBtn
-                            icon={<Download className="h-4 w-4 text-gray-500" />}
-                            label="Download"
-                            onClick={() => actionDownloadFile(f)}
-                          />
-                          <MenuItemBtn
-                            icon={<Pencil className="h-4 w-4 text-gray-500" />}
-                            label="Rename"
-                            onClick={() => openRenameModal("file", f.id, f.name)}
-                          />
-                          <MenuItemBtn
-                            icon={<Archive className="h-4 w-4 text-gray-500" />}
-                            label="Archive"
-                            onClick={() => actionArchiveFile(f.id)}
-                          />
-                        </ActionMenu>
-                      </div>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-gray-950 dark:text-slate-100">
+                              {folder.name}
+                            </span>
+                            <span className="mt-1 block text-xs text-gray-500 dark:text-slate-400">
+                              {count} file{count === 1 ? "" : "s"} • {sizeLabel}
+                            </span>
+                          </span>
+                        </span>
+                      </button>
                     )
                   })}
 
-                  {recentFiles.length === 0 && !loading && (
-                    <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-                      No recent documents match your filters.
+                  {visibleFolders.length === 0 && (
+                    <div className="grid min-h-[190px] place-items-center rounded-lg border border-dashed border-gray-200 bg-gray-50/60 p-6 text-center dark:border-slate-700 dark:bg-slate-900/35">
+                      <div>
+                        <Folder className="mx-auto h-7 w-7 text-gray-400 dark:text-slate-500" />
+                        <div className="mt-2 text-sm font-semibold text-gray-950 dark:text-slate-100">
+                          No project folders
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                          Create a folder, then move project documents into it.
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
-              )}
+              </div>
+            </div>
+
+            <div className={`${cardShell} ${cardAccent}`}>
+              <div className={sectionHeader}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                      Recent Files
+                    </div>
+                    <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                      Latest documents available for this project.
+                    </div>
+                  </div>
+
+                  <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">
+                    {tab === "archived"
+                      ? "—"
+                      : `${recentFiles.length} item${recentFiles.length === 1 ? "" : "s"}`}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4">
+                {tab === "archived" ? (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-4 text-sm text-gray-600 dark:border-slate-700 dark:bg-slate-900/35 dark:text-slate-300">
+                    Recent files are available only for active documents.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {recentFiles.map((file) => {
+                      const meta = typeMeta[file.type]
+                      const key = `recent:${file.id}`
+
+                      return (
+                        <button
+                          key={file.id}
+                          type="button"
+                          className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-3 text-left transition-colors hover:border-[#00c065]/35 hover:bg-[#00c065]/5 dark:border-slate-700 dark:bg-slate-900/35 dark:hover:border-[#00c065]/35 dark:hover:bg-[#00c065]/10"
+                          onClick={() => handlePreview(file)}
+                        >
+                          <span className="flex min-w-0 items-center gap-3">
+                            <span
+                              className={cn(
+                                "inline-flex h-[24px] min-w-[38px] items-center justify-center rounded-md px-2.5 text-xs font-semibold tracking-wide",
+                                meta.pillClass,
+                              )}
+                            >
+                              {meta.pillText}
+                            </span>
+
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-gray-950 dark:text-slate-100">
+                                {file.name}
+                              </span>
+                              <span className="mt-1 block text-xs text-gray-500 dark:text-slate-400">
+                                {formatDateISO(file.dateISO)} • {file.sizeLabel}
+                              </span>
+                            </span>
+                          </span>
+
+                          <ActionMenu
+                            isOpen={openMenuKey === key}
+                            onToggle={() =>
+                              setOpenMenuKey((prev) => (prev === key ? null : key))
+                            }
+                            onClose={() => setOpenMenuKey(null)}
+                          >
+                            <MenuItemBtn
+                              icon={
+                                <Eye className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                              }
+                              label="Preview"
+                              onClick={() => handlePreview(file)}
+                            />
+                            <MenuItemBtn
+                              icon={
+                                <FolderInput className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                              }
+                              label="Move to folder"
+                              onClick={() => openMoveModal(file)}
+                            />
+                            <MenuItemBtn
+                              icon={
+                                <ArrowDownToLine className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                              }
+                              label="Download"
+                              onClick={() => handleDownload(file)}
+                            />
+                          </ActionMenu>
+                        </button>
+                      )
+                    })}
+
+                    {recentFiles.length === 0 && !loading && (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-4 text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-900/35 dark:text-slate-400">
+                        No recent documents match your project code or filters.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}
 
-        <section className="mt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="text-xs font-semibold text-gray-500">{isSearching ? "Search Results" : "All Files"}</div>
-              <div className="text-xs text-gray-500">• {scopedFiles.length} results</div>
-              {activeFolder && <div className="text-xs text-gray-500">• {activeFolder.name}</div>}
-              <div className="text-xs font-semibold text-gray-500">• {tab === "active" ? "Active" : "Archived"}</div>
-            </div>
-
-            {selectedCount > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-green-900">{selectedCount} selected</span>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-transparent bg-transparent px-3 text-sm font-semibold text-green-900 hover:bg-[#00c065]/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]"
-                  onClick={clearSelection}
-                  type="button"
-                >
-                  <X className="h-4 w-4" />
-                  Clear
-                </button>
-
-                {tab === "active" ? (
-                  <>
-                    <button className={btnBase} type="button" onClick={bulkDownload}>
-                      <Download className="h-4 w-4 text-gray-500" />
-                      Download
-                    </button>
-                    <button className={btnBase} type="button" onClick={bulkArchive}>
-                      <Archive className="h-4 w-4 text-gray-500" />
-                      Archive
-                    </button>
-                  </>
-                ) : (
-                  <button className={btnDanger} type="button" onClick={bulkRestore}>
-                    <Check className="h-4 w-4 text-red-700" />
-                    Restore
-                  </button>
-                )}
+        <section className={`mt-4 ${cardShell} ${cardAccent}`}>
+          <div className={sectionHeader}>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                  {isSearching ? "Search Results" : "Project Files"}
+                </div>
+                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                  {scopedFiles.length} result{scopedFiles.length === 1 ? "" : "s"} •{" "}
+                  {tab === "active" ? "Active" : "Archived"}
+                  {activeFolder ? ` • ${activeFolder.name}` : ""}
+                </div>
               </div>
-            )}
+            </div>
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="sticky top-0 z-10 grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]">
-              <div className="flex justify-center">
-                <input
-                  type="checkbox"
-                  checked={allCheckedOnScreen}
-                  onChange={(e) => toggleAll(e.target.checked)}
-                  aria-label="Select all"
-                  className="h-4 w-4 accent-[#00c065]"
-                />
-              </div>
-              <div>NAME</div>
-              <div className="max-[920px]:hidden">CREATED BY</div>
-              <div>DATE</div>
-              <div />
-            </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[850px] border-collapse">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50/70 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:border-slate-700/70 dark:bg-slate-900/35 dark:text-slate-400">
+                  <th className="px-4 py-2.5 text-left">Name</th>
+                  <th className="px-3 py-2.5 text-left">Type</th>
+                  <th className="px-3 py-2.5 text-left">Created By</th>
+                  <th className="px-3 py-2.5 text-left">Date</th>
+                  <th className="px-3 py-2.5 text-left">Size</th>
+                  <th className="px-4 py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
 
-            {scopedFiles.map((f) => {
-              const meta = typeMeta[f.type]
-              const checked = Boolean(selectedIds[f.id])
-              const key = `file:${f.id}`
+              <tbody className="divide-y divide-gray-100 dark:divide-slate-700/70">
+                {scopedFiles.map((file) => {
+                  const meta = typeMeta[file.type]
+                  const key = `file:${file.id}`
 
-              return (
-                <div
-                  key={f.id}
-                  className={cn(
-                    "grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 px-3 py-3 text-sm hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px]",
-                    checked && "bg-[#00c065]/10 hover:bg-[#00c065]/10"
-                  )}
-                >
-                  <div className="flex justify-center">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleOne(f.id, e.target.checked)}
-                      aria-label={`Select ${f.name}`}
-                      className="h-4 w-4 accent-[#00c065]"
-                    />
-                  </div>
+                  return (
+                    <tr
+                      key={file.id}
+                      className="cursor-pointer text-sm transition hover:bg-gray-50 dark:hover:bg-slate-700/60"
+                      onClick={() => handlePreview(file)}
+                    >
+                      <td className="px-4 py-3 align-middle">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#00c065]/10 dark:bg-[#00c065]/15">
+                            <FileText className="h-4 w-4 text-[#00a054] dark:text-emerald-300" />
+                          </div>
 
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span
-                        className={cn(
-                          "inline-flex h-[22px] min-w-[34px] items-center justify-center rounded-md px-2.5 text-xs font-semibold tracking-wide",
-                          meta.pillClass
-                        )}
-                      >
-                        {meta.pillText}
-                      </span>
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold text-gray-950 dark:text-slate-100">
+                              {file.name}
+                            </div>
+                            <div className="mt-1 truncate text-xs text-gray-500 dark:text-slate-400">
+                              Click to preview
+                            </div>
+                          </div>
+                        </div>
+                      </td>
 
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold text-gray-900">{f.name}</div>
-                        <div className="mt-1 truncate text-xs text-gray-500">
+                      <td className="px-3 py-3 align-middle">
+                        <span
+                          className={cn(
+                            "inline-flex h-[24px] min-w-[38px] items-center justify-center rounded-md px-2.5 text-xs font-semibold tracking-wide",
+                            meta.pillClass,
+                          )}
+                        >
+                          {meta.pillText}
+                        </span>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
                           {meta.label}
-                          {f.sizeLabel !== "—" ? `  •  ${f.sizeLabel}` : ""}
+                        </div>
+                      </td>
+
+                      <td className="px-3 py-3 align-middle text-gray-700 dark:text-slate-300">
+                        <div className="max-w-[220px] truncate" title={file.createdBy}>
+                          {file.createdBy}
+                        </div>
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-gray-700 dark:text-slate-300">
+                        {formatDateISO(file.dateISO)}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-gray-700 dark:text-slate-300">
+                        {file.sizeLabel}
+                      </td>
+
+                      <td className="px-4 py-3 text-right align-middle">
+                        <ActionMenu
+                          isOpen={openMenuKey === key}
+                          onToggle={() =>
+                            setOpenMenuKey((prev) => (prev === key ? null : key))
+                          }
+                          onClose={() => setOpenMenuKey(null)}
+                        >
+                          <MenuItemBtn
+                            icon={
+                              <Eye className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                            }
+                            label="Preview"
+                            onClick={() => handlePreview(file)}
+                          />
+                          <MenuItemBtn
+                            icon={
+                              <FolderInput className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                            }
+                            label="Move to folder"
+                            onClick={() => openMoveModal(file)}
+                          />
+                          <MenuItemBtn
+                            icon={
+                              <ArrowDownToLine className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                            }
+                            label="Download"
+                            onClick={() => handleDownload(file)}
+                          />
+                        </ActionMenu>
+                      </td>
+                    </tr>
+                  )
+                })}
+
+                {scopedFiles.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12">
+                      <div className="mx-auto max-w-md text-center">
+                        <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50 dark:bg-slate-700">
+                          <FileText className="h-5 w-5 text-gray-400 dark:text-slate-400" />
+                        </div>
+                        <div className="mt-3 text-sm font-semibold text-gray-950 dark:text-slate-100">
+                          No matching documents
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                          Only files linked to your project code are shown here.
                         </div>
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="truncate text-sm text-gray-700 max-[920px]:hidden">{f.createdBy}</div>
-                  <div className="whitespace-nowrap text-sm text-gray-700">{formatDateISO(f.dateISO)}</div>
-
-                  <ActionMenu
-                    isOpen={openMenuKey === key}
-                    onToggle={() => setOpenMenuKey((prev) => (prev === key ? null : key))}
-                    onClose={() => setOpenMenuKey(null)}
-                  >
-                    <MenuItemBtn
-                      icon={<Download className="h-4 w-4 text-gray-500" />}
-                      label="Download"
-                      onClick={() => actionDownloadFile(f)}
-                    />
-                    <MenuItemBtn
-                      icon={<Pencil className="h-4 w-4 text-gray-500" />}
-                      label="Rename"
-                      onClick={() => openRenameModal("file", f.id, f.name)}
-                    />
-                    {tab === "active" ? (
-                      <MenuItemBtn
-                        icon={<Archive className="h-4 w-4 text-gray-500" />}
-                        label="Archive"
-                        onClick={() => actionArchiveFile(f.id)}
-                      />
-                    ) : (
-                      <MenuItemBtn
-                        icon={<Check className="h-4 w-4 text-gray-500" />}
-                        label="Restore"
-                        onClick={() => actionUnarchiveFile(f.id)}
-                      />
-                    )}
-                  </ActionMenu>
-                </div>
-              )
-            })}
-
-            {scopedFiles.length === 0 && !loading && (
-              <div className="px-3 py-10 text-center">
-                <div className="text-sm font-semibold text-gray-900">No matching documents</div>
-                <div className="mt-2 text-sm text-gray-500">Try changing your search, filters, or sort option.</div>
-              </div>
-            )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
       </div>
 
-      {/* Rename */}
+      <CreateFolderModal
+        open={createFolderOpen}
+        value={newFolderName}
+        saving={savingFolder}
+        onChange={setNewFolderName}
+        onClose={() => {
+          setCreateFolderOpen(false)
+          setNewFolderName("")
+        }}
+        onSubmit={handleCreateFolder}
+      />
+
+      <MoveDocumentModal
+        open={moveModalOpen}
+        file={moveTargetFile}
+        folders={visibleFolders}
+        selectedFolderId={selectedMoveFolderId}
+        moving={movingFile}
+        onSelectFolder={setSelectedMoveFolderId}
+        onClose={() => {
+          setMoveModalOpen(false)
+          setMoveTargetFile(null)
+          setSelectedMoveFolderId("")
+        }}
+        onMove={handleMoveDocument}
+      />
+
       <Modal
-        open={renameOpen}
-        title={renameKind === "folder" ? "Rename Folder" : "Rename Document"}
-        onClose={() => setRenameOpen(false)}
+        open={Boolean(previewFile)}
+        title={previewFile?.name ?? "Document Preview"}
+        subtitle={
+          previewFile
+            ? `${typeMeta[previewFile.type].label} • ${formatDateISO(previewFile.dateISO)}`
+            : undefined
+        }
+        onClose={() => setPreviewFile(null)}
       >
-        <div className="space-y-3">
-          <div className="text-sm text-gray-600">Enter a new name.</div>
-          <input className={inputBase} value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
-          <div className="flex justify-end gap-2">
-            <button className={btnBase} type="button" onClick={() => setRenameOpen(false)}>
-              Cancel
-            </button>
-            <button className={btnPrimary} type="button" onClick={submitRename}>
-              Save
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* New folder */}
-      <Modal open={newFolderOpen} title="New Folder" onClose={() => setNewFolderOpen(false)}>
-        <div className="space-y-3">
-          <div className="text-sm text-gray-600">Create a folder to organize documents.</div>
-          <input
-            className={inputBase}
-            placeholder="Folder name"
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
+        {previewFile ? (
+          <DocumentPreview
+            file={previewFile}
+            onDownload={() => handleDownload(previewFile)}
           />
-          <div className="flex justify-end gap-2">
-            <button className={btnBase} type="button" onClick={() => setNewFolderOpen(false)}>
-              Cancel
-            </button>
-            <button className={btnPrimary} type="button" onClick={submitNewFolder}>
-              Create
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* File upload */}
-      <Modal open={uploadFileOpen} title="File Upload" onClose={() => setUploadFileOpen(false)}>
-        <div className="space-y-3">
-          <div className="text-sm text-gray-600">
-            Pick a file to add. It will be added {activeFolder ? `to "${activeFolder.name}"` : "to the root"}.
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={(e) => handleFilePicked(e.currentTarget.files)}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <button className={btnPrimary} type="button" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="h-4 w-4" /> Choose File
-            </button>
-            <button className={btnBase} type="button" onClick={() => setUploadFileOpen(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Folder upload */}
-      <Modal open={uploadFolderOpen} title="Folder Upload" onClose={() => setUploadFolderOpen(false)}>
-        <div className="space-y-3">
-          <div className="text-sm text-gray-600">
-            Select a folder (browser will pick multiple files). Files will be added to the selected folder.
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-gray-500">Target folder</div>
-            <select
-              className={inputBase}
-              value={uploadFolderTargetId}
-              onChange={(e) => setUploadFolderTargetId(e.target.value)}
-            >
-              <option value="">Root (no folder)</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <input
-            ref={folderInputRef}
-            type="file"
-            className="hidden"
-            multiple
-            {...folderPickerProps}
-            onChange={(e) => handleFolderPicked(e.currentTarget.files)}
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button className={btnPrimary} type="button" onClick={() => folderInputRef.current?.click()}>
-              <Folder className="h-4 w-4" /> Choose Folder
-            </button>
-            <button className={btnBase} type="button" onClick={() => setUploadFolderOpen(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Confirm archive folder */}
-      <Modal
-        open={confirmArchiveFolderOpen}
-        title="Archive Folder"
-        onClose={() => setConfirmArchiveFolderOpen(false)}
-      >
-        <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-            <Info className="mt-0.5 h-4 w-4 text-gray-500" />
-            <div className="text-sm text-gray-700">Archiving a folder will also archive all documents inside it.</div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <button className={btnBase} type="button" onClick={() => setConfirmArchiveFolderOpen(false)}>
-              Cancel
-            </button>
-            <button className={btnDanger} type="button" onClick={confirmArchiveFolder}>
-              <Archive className="h-4 w-4 text-red-700" /> Archive Folder
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Confirm restore folder */}
-      <Modal
-        open={confirmRestoreFolderOpen}
-        title="Restore Folder"
-        onClose={() => setConfirmRestoreFolderOpen(false)}
-      >
-        <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-            <Info className="mt-0.5 h-4 w-4 text-gray-500" />
-            <div className="text-sm text-gray-700">
-              Restoring a folder will also restore all archived documents inside it.
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <button className={btnBase} type="button" onClick={() => setConfirmRestoreFolderOpen(false)}>
-              Cancel
-            </button>
-            <button className={btnPrimary} type="button" onClick={confirmRestoreFolder}>
-              <Check className="h-4 w-4" /> Restore Folder
-            </button>
-          </div>
-        </div>
+        ) : null}
       </Modal>
     </div>
   )
