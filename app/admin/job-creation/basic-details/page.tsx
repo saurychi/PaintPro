@@ -53,15 +53,16 @@ type EquipmentOut = {
 };
 
 type DurationOut = {
-  taskName: string;
-  subTaskTitle: string;
+  mainTaskId: string;
+  subTaskId: string;
   baseLaborHours: number;
   requiredEmployeeCount: number;
   adjustedDurationHours: number;
   roundedHours: number;
+  estimatedHours: number;
+  minimumHours: number;
   formula: string;
-  driver: number;
-  driverUnit: "m2" | "m" | "count" | "fixed";
+  scope: Record<string, number>;
   productivityHoursPerEmployee: number;
   teamEfficiencyFactor: number;
 };
@@ -160,8 +161,8 @@ type GetEquipmentApiResponse =
 
 type GetDurationApiResponse =
   | {
-      taskName: string;
-      subTaskTitle: string;
+      mainTaskId: string;
+      subTaskId: string;
       duration: DurationOut;
     }
   | { error: string; details?: string };
@@ -1307,6 +1308,8 @@ export default function BasicDetails() {
               title: subTask.title,
               priority: subTask.priority,
               estimatedHours: subTask.duration?.baseLaborHours ?? 0,
+              requiredEmployeeCount:
+                subTask.duration?.requiredEmployeeCount ?? 1,
             })),
           })),
         },
@@ -1390,9 +1393,9 @@ export default function BasicDetails() {
                     adjustedDurationHours:
                       subTask.duration.adjustedDurationHours,
                     roundedHours: subTask.duration.roundedHours,
+                    estimatedHours: subTask.duration.estimatedHours,
+                    minimumHours: subTask.duration.minimumHours,
                     formula: subTask.duration.formula,
-                    driver: subTask.duration.driver,
-                    driverUnit: subTask.duration.driverUnit,
                     productivityHoursPerEmployee:
                       subTask.duration.productivityHoursPerEmployee,
                     teamEfficiencyFactor: subTask.duration.teamEfficiencyFactor,

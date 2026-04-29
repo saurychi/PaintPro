@@ -9,7 +9,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import AddEquipmentModal, {

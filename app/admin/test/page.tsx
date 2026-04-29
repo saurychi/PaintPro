@@ -64,6 +64,7 @@ type DurationOut = {
   requiredEmployeeCount: number;
   adjustedDurationHours: number;
   roundedHours: number;
+  estimatedHours?: number;
   formula: string;
   driver: number;
   driverUnit: "m2" | "m" | "count" | "fixed";
@@ -1340,6 +1341,8 @@ export default function AdminTestPage() {
                 subTask.duration?.baseLaborHours ??
                 subTask.duration?.adjustedDurationHours ??
                 0,
+              requiredEmployeeCount:
+                subTask.duration?.requiredEmployeeCount ?? 1,
             })),
           })),
         },
@@ -1420,8 +1423,9 @@ export default function AdminTestPage() {
               duration: subTask.duration
                 ? {
                     estimatedHours:
-                      subTask.duration.adjustedDurationHours ??
+                      subTask.duration.estimatedHours ??
                       subTask.duration.roundedHours ??
+                      subTask.duration.adjustedDurationHours ??
                       subTask.duration.baseLaborHours,
                     adjustedDurationHours:
                       subTask.duration.adjustedDurationHours,

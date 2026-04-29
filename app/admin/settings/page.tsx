@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import rawCountries from "@/lib/data/country-by-calling-code.json";
 import SignatureCanvas from "react-signature-canvas";
 import { Upload } from "lucide-react";
+import ProjectTimeReferenceSettings from "@/components/settings/projectTimeReferenceSettings";
 
 const ACCENT = "#00c065";
 
@@ -688,6 +689,19 @@ export default function AdminSettings() {
                       ) : null}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Project Time */}
+              <div className="pt-2">
+                <div className="h-px w-full bg-gray-200" />
+                <div className="mt-5 grid gap-3">
+                  <SectionTitle
+                    title="Project Time"
+                    subtitle="Choose whether project progress uses live time or a simulated reference."
+                  />
+
+                  <ProjectTimeReferenceSettings />
                 </div>
               </div>
 

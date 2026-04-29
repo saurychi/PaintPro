@@ -4,6 +4,11 @@ import {
   getRequiredEmployeeCountFromEstimatedHours,
   suggestEmployeesForTasks,
 } from "@/lib/planning/employeeAssignment";
+import { estimateDurationForSubTask } from "@/lib/planning/durationEstimator";
+import {
+  computeAreasFromDimensions,
+  type ProjectDimensions,
+} from "@/lib/planning/materialEstimator";
 type EmployeeAssignmentScore = {
   employee: EmployeeHint;
   score: number;
@@ -178,10 +183,43 @@ export async function POST(request: Request) {
       typeof projectTaskRelation?.project_id === "string"
         ? projectTaskRelation.project_id
         : "";
+    const mainTaskId =
+      typeof mainTaskRelation?.main_task_id === "string"
+        ? mainTaskRelation.main_task_id
+        : "";
+    const subTaskId =
+      typeof subTaskRelation?.sub_task_id === "string"
+        ? subTaskRelation.sub_task_id
+        : "";
 
     const estimatedHours = Number(projectSubTask?.estimated_hours ?? 0);
-    const requiredEmployeeCount =
+    let requiredEmployeeCount =
       getRequiredEmployeeCountFromEstimatedHours(estimatedHours);
+
+    if (projectId && mainTaskId && subTaskId) {
+      const { data: projectRow, error: projectError } = await supabaseAdmin
+        .from("projects")
+        .select("dimensions")
+        .eq("project_id", projectId)
+        .maybeSingle();
+
+      if (!projectError && projectRow?.dimensions) {
+        try {
+          const durationEstimate = await estimateDurationForSubTask({
+            mainTaskId,
+            subTaskId,
+            areas: computeAreasFromDimensions(
+              projectRow.dimensions as ProjectDimensions,
+            ),
+          });
+
+          requiredEmployeeCount = durationEstimate.requiredEmployeeCount;
+        } catch {
+          // Fall back to the saved estimate if the original formula inputs are
+          // no longer available or the rule has changed.
+        }
+      }
+    }
 
     let previousEmployeeIds: string[] = [];
 

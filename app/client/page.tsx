@@ -8,9 +8,11 @@ import JobProgressCard, {
   type ProcessItem,
 } from "@/components/dashboard/jobProgressCard";
 import DashboardInsightCard from "@/components/dashboard/dashboardInsightCard";
+import NotificationsCard from "@/components/dashboard/notificationsCard";
 import PendingDocumentsCard from "@/components/dashboard/pendingDocumentsCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
+import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -481,6 +483,7 @@ function buildProcessItems(
 
 export default function ClientDashboardPage() {
   const { projectId } = useClientProject();
+  const { referenceIso } = useProjectTimeReference();
 
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [mainTasks, setMainTasks] = useState<Record<string, unknown>[]>([]);
@@ -558,8 +561,10 @@ export default function ClientDashboardPage() {
   }, [project, mainTasks]);
 
   const employeeReviewItems = useMemo(() => {
-    return buildEmployeeReviewItems(mainTasks);
-  }, [mainTasks]);
+    return buildEmployeeReviewItems(mainTasks, {
+      referenceNow: referenceIso,
+    });
+  }, [mainTasks, referenceIso]);
 
   const pendingDocumentProject = useMemo(() => {
     if (!project) return null;
@@ -670,11 +675,19 @@ export default function ClientDashboardPage() {
             />
           </div>
 
-          <div className="grid min-h-0 grid-rows-[minmax(150px,0.38fr)_minmax(0,1fr)] gap-4 overflow-hidden">
+          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-4 overflow-hidden">
             <div className="min-h-0 overflow-hidden">
               <PendingDocumentsCard
                 selectedProject={pendingDocumentProject}
                 loading={loadingDetails}
+              />
+            </div>
+
+            <div className="min-h-0 overflow-hidden">
+              <NotificationsCard
+                limit={4}
+                dataSource="project-chat"
+                messagesPath="/client/messages"
               />
             </div>
 
