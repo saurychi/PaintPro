@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { ChevronRight, Loader2, Plus } from "lucide-react";
+import { ChevronRight, Loader2, Plus, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
@@ -34,10 +34,19 @@ type MaterialOption = {
 };
 
 const ACCENT = "#00c065";
-const ACCENT_HOVER = "#00a054";
 const ACCENT_SOFT = "#e6f9ef";
 const ACCENT_BORDER = "#b7efcf";
-const BORDER = "border-gray-200";
+
+function formatCurrency(value: number | null | undefined) {
+  const safeValue = Number(value ?? 0);
+
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(safeValue);
+}
 
 export default function MaterialsAssignment() {
   const router = useRouter();
@@ -48,13 +57,11 @@ export default function MaterialsAssignment() {
   const [loadingMaterials, setLoadingMaterials] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
-
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
   const [activeMainTaskId, setActiveMainTaskId] = useState<string>("");
   const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
   const [loadingMaterialOptions, setLoadingMaterialOptions] = useState(false);
-
-  const [jobNo, setJobNo] = useState("—");
+  const [jobNo, setJobNo] = useState("N/A");
   const [siteName, setSiteName] = useState("Project details unavailable");
   const [isDirty, setIsDirty] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
@@ -82,10 +89,7 @@ export default function MaterialsAssignment() {
       const next = updater(prev);
       const nextSnapshot = cloneServicesState(next);
 
-      const prevSerialized = JSON.stringify(prevSnapshot);
-      const nextSerialized = JSON.stringify(nextSnapshot);
-
-      if (prevSerialized !== nextSerialized) {
+      if (JSON.stringify(prevSnapshot) !== JSON.stringify(nextSnapshot)) {
         undoStackRef.current.push(prevSnapshot);
         redoStackRef.current = [];
       }
@@ -127,7 +131,7 @@ export default function MaterialsAssignment() {
           throw new Error(data?.error || "Failed to load project materials.");
         }
 
-        setJobNo(data?.project?.project_code || "—");
+        setJobNo(data?.project?.project_code || "N/A");
         setSiteName(data?.project?.title || "Project details unavailable");
 
         const rows = Array.isArray(data?.materials) ? data.materials : [];
@@ -224,14 +228,14 @@ export default function MaterialsAssignment() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const toggleGroup = (groupId: string) => {
+  function toggleGroup(groupId: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
       return next;
     });
-  };
+  }
 
   function handleOpenCreateTaskModal() {
     setCreateTaskModalOpen(true);
@@ -290,6 +294,15 @@ export default function MaterialsAssignment() {
     setActiveMainTaskId("");
   }
 
+  function handleRemoveMaterialFromActiveGroup(materialRowId: string) {
+    if (!activeMainTaskId) {
+      toast.error("No main task selected.");
+      return;
+    }
+
+    handleRemoveMaterialFromGroup(activeMainTaskId, materialRowId);
+  }
+
   function handleAddMaterialToGroup(
     material: MaterialOption,
     quantity: number,
@@ -333,29 +346,28 @@ export default function MaterialsAssignment() {
   }
 
   function handleUpdateMaterialQuantity(
+    groupId: string,
     materialRowId: string,
     quantity: number,
   ) {
-    if (!activeMainTaskId) return;
-
     const safeQuantity = Number(quantity);
-    if (!Number.isFinite(safeQuantity) || safeQuantity <= 0) return;
+    if (!Number.isFinite(safeQuantity)) return;
+
+    const normalizedQuantity = Math.max(0.01, safeQuantity || 0.01);
 
     updateServicesWithHistory((prev) =>
       prev.map((group) => {
-        if (group.id !== activeMainTaskId) return group;
+        if (group.id !== groupId) return group;
 
         return {
           ...group,
           children: group.children.map((item) => {
             if (item.id !== materialRowId) return item;
 
-            const nextEstimatedCost = Number(item.unitCost || 0) * safeQuantity;
-
             return {
               ...item,
-              quantity: safeQuantity,
-              estimatedCost: nextEstimatedCost,
+              quantity: normalizedQuantity,
+              estimatedCost: Number(item.unitCost || 0) * normalizedQuantity,
             };
           }),
         };
@@ -365,15 +377,10 @@ export default function MaterialsAssignment() {
     setIsDirty(true);
   }
 
-  function handleRemoveMaterialFromGroup(materialRowId: string) {
-    if (!activeMainTaskId) {
-      toast.error("No main task selected.");
-      return;
-    }
-
+  function handleRemoveMaterialFromGroup(groupId: string, materialRowId: string) {
     updateServicesWithHistory((prev) =>
       prev.map((group) => {
-        if (group.id !== activeMainTaskId) return group;
+        if (group.id !== groupId) return group;
 
         return {
           ...group,
@@ -528,7 +535,6 @@ export default function MaterialsAssignment() {
   return (
     <div className="w-full h-screen overflow-hidden bg-white">
       <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
-        {/* header */}
         <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
           <span>Project</span>
           <ChevronRight
@@ -581,37 +587,41 @@ export default function MaterialsAssignment() {
                       No materials found for this project.
                     </div>
                   ) : (
-                    services.map((g) => {
-                      const isOpen = expanded.has(g.id);
+                    services.map((group) => {
+                      const isOpen = expanded.has(group.id);
 
                       return (
                         <div
-                          key={g.id}
-                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                          key={group.id}
+                          className="overflow-hidden rounded-lg border border-gray-200 bg-white"
+                        >
                           <div
                             role="button"
                             tabIndex={0}
-                            onClick={() => toggleGroup(g.id)}
+                            onClick={() => toggleGroup(group.id)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                toggleGroup(g.id);
+                                toggleGroup(group.id);
                               }
                             }}
                             className={`w-full cursor-pointer px-4 py-3 text-left transition ${
                               isOpen ? "bg-emerald-50/40" : "bg-white"
-                            }`}>
+                            }`}
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex min-w-0 items-center gap-3">
                                 <div
-                                  className={`h-9 w-1 rounded-full ${isOpen ? "opacity-100" : "opacity-0"}`}
+                                  className={`h-9 w-1 rounded-full ${
+                                    isOpen ? "opacity-100" : "opacity-0"
+                                  }`}
                                   style={{ backgroundColor: ACCENT }}
                                 />
 
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className="truncate text-[13px] font-semibold text-gray-900">
-                                      {g.title}
+                                      {group.title}
                                     </span>
 
                                     {isOpen && (
@@ -622,8 +632,8 @@ export default function MaterialsAssignment() {
                                   </div>
 
                                   <div className="mt-0.5 text-[11px] text-gray-500">
-                                    {g.children.length} item
-                                    {g.children.length === 1 ? "" : "s"}
+                                    {group.children.length} item
+                                    {group.children.length === 1 ? "" : "s"}
                                   </div>
                                 </div>
                               </div>
@@ -633,14 +643,15 @@ export default function MaterialsAssignment() {
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    handleOpenAddMaterialModal(g.id);
+                                    handleOpenAddMaterialModal(group.id);
                                   }}
                                   className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 text-[11px] font-semibold transition hover:brightness-95"
                                   style={{
                                     borderColor: ACCENT_BORDER,
                                     backgroundColor: ACCENT_SOFT,
                                     color: ACCENT,
-                                  }}>
+                                  }}
+                                >
                                   <Plus className="h-3.5 w-3.5" />
                                   Add Material
                                 </button>
@@ -650,16 +661,16 @@ export default function MaterialsAssignment() {
 
                           {isOpen && (
                             <div className="px-5 pb-4">
-                              {g.children.length === 0 ? (
+                              {group.children.length === 0 ? (
                                 <div className="rounded-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-500">
                                   No materials found for this main task.
                                 </div>
                               ) : (
                                 <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
                                   <div className="divide-y divide-gray-200">
-                                    {g.children.map((item) => (
+                                    {group.children.map((item) => (
                                       <div key={item.id} className="px-4 py-3">
-                                        <div className="grid grid-cols-[minmax(0,1fr)_110px_150px] items-center gap-4 text-[13px]">
+                                        <div className="grid grid-cols-1 gap-3 text-[13px] md:grid-cols-[minmax(0,1fr)_130px_120px_150px_40px] md:items-end">
                                           <div className="min-w-0">
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                                               Material
@@ -669,25 +680,60 @@ export default function MaterialsAssignment() {
                                             </div>
                                           </div>
 
-                                          <div className="text-right">
+                                          <div className="md:text-right">
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                                              Quantity
+                                              Unit Cost
                                             </div>
                                             <div className="font-medium text-gray-800">
-                                              {String(item.quantity)}
+                                              {formatCurrency(item.unitCost)}
                                             </div>
                                           </div>
 
-                                          <div className="text-right">
+                                          <div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                              Quantity
+                                            </div>
+                                            <input
+                                              type="number"
+                                              min="0.01"
+                                              step="0.01"
+                                              inputMode="decimal"
+                                              value={item.quantity}
+                                              onChange={(event) =>
+                                                handleUpdateMaterialQuantity(
+                                                  group.id,
+                                                  item.id,
+                                                  Number(event.target.value),
+                                                )
+                                              }
+                                              className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 outline-none transition focus:border-emerald-400"
+                                            />
+                                          </div>
+
+                                          <div className="md:text-right">
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                                               Estimated Cost
                                             </div>
                                             <div className="font-medium text-gray-800">
-                                              ₱
-                                              {Number(
-                                                item.estimatedCost || 0,
-                                              ).toLocaleString()}
+                                              {formatCurrency(item.estimatedCost)}
                                             </div>
+                                          </div>
+
+                                          <div className="flex md:justify-end">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveMaterialFromGroup(
+                                                  group.id,
+                                                  item.id,
+                                                )
+                                              }
+                                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-500 transition hover:bg-red-100 hover:text-red-600 active:scale-95"
+                                              aria-label={`Remove ${item.name}`}
+                                              title="Remove material"
+                                            >
+                                              <X className="h-4 w-4" />
+                                            </button>
                                           </div>
                                         </div>
                                       </div>
@@ -722,7 +768,8 @@ export default function MaterialsAssignment() {
                   type="button"
                   onClick={handleOpenCreateTaskModal}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-[12px] font-semibold transition hover:brightness-95"
-                  style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                  style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
+                >
                   <Plus className="h-4 w-4" />
                   Create Task
                 </button>
@@ -740,7 +787,8 @@ export default function MaterialsAssignment() {
             type="button"
             onClick={handleGoBack}
             disabled={isNavigatingBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70"
+          >
             {isNavigatingBack ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -753,7 +801,8 @@ export default function MaterialsAssignment() {
             onClick={handleNext}
             disabled={isNavigatingNext}
             className="inline-flex h-10 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-white transition duration-150 hover:opacity-85 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70"
-            style={{ backgroundColor: ACCENT }}>
+            style={{ backgroundColor: ACCENT }}
+          >
             {isNavigatingNext ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -786,14 +835,16 @@ export default function MaterialsAssignment() {
                   setPendingAction(null);
                   setIsNavigatingNext(false);
                 }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50"
+              >
                 Cancel
               </button>
 
               <button
                 type="button"
                 onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50"
+              >
                 Don't Save
               </button>
 
@@ -801,7 +852,8 @@ export default function MaterialsAssignment() {
                 type="button"
                 onClick={() => handleConfirmSave(true)}
                 className="inline-flex h-9 items-center justify-center rounded-md px-3 text-[12px] font-semibold text-white hover:brightness-95"
-                style={{ backgroundColor: ACCENT }}>
+                style={{ backgroundColor: ACCENT }}
+              >
                 Save
               </button>
             </div>
@@ -829,8 +881,7 @@ export default function MaterialsAssignment() {
         loadingOptions={loadingMaterialOptions}
         onClose={handleCloseAddMaterialModal}
         onAddMaterial={handleAddMaterialToGroup}
-        onUpdateMaterialQuantity={handleUpdateMaterialQuantity}
-        onRemoveMaterial={handleRemoveMaterialFromGroup}
+        onRemoveMaterial={handleRemoveMaterialFromActiveGroup}
       />
 
       <style jsx global>{`
@@ -851,34 +902,6 @@ export default function MaterialsAssignment() {
           scrollbar-width: thin;
         }
       `}</style>
-    </div>
-  );
-}
-
-function Label({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`text-[13px] font-semibold text-gray-700 ${className}`}>
-      {children}
-    </div>
-  );
-}
-
-function Value({
-  children,
-  className = "",
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`text-[13px] text-gray-400 ${className}`}>
-      {children ?? ""}
     </div>
   );
 }

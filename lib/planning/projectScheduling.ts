@@ -5,10 +5,16 @@ export type SchedulingGeneratedSubTask = {
   priority: number
   duration?: {
     estimatedHours?: number | null
+    adjustedDurationHours?: number | null
+    roundedHours?: number | null
+    baseLaborHours?: number | null
   } | null
   assignedEmployee?: {
     id?: string | null
   } | null
+  employees?: Array<{
+    id?: string | null
+  }> | null
 }
 
 export type SchedulingGeneratedMainTask = {
@@ -58,6 +64,41 @@ function isValidDate(value: unknown) {
 
 function cloneDate(date: Date) {
   return new Date(date.getTime())
+}
+
+function firstAssignedEmployeeId(subTask: SchedulingGeneratedSubTask) {
+  if (typeof subTask.assignedEmployee?.id === "string" && subTask.assignedEmployee.id.trim()) {
+    return subTask.assignedEmployee.id.trim()
+  }
+
+  if (Array.isArray(subTask.employees)) {
+    const first = subTask.employees.find(
+      (employee) => typeof employee?.id === "string" && employee.id.trim()
+    )
+
+    if (typeof first?.id === "string" && first.id.trim()) {
+      return first.id.trim()
+    }
+  }
+
+  return null
+}
+
+function getScheduledHours(subTask: SchedulingGeneratedSubTask) {
+  const candidates = [
+    subTask.duration?.estimatedHours,
+    subTask.duration?.adjustedDurationHours,
+    subTask.duration?.roundedHours,
+    subTask.duration?.baseLaborHours,
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
+      return candidate
+    }
+  }
+
+  return 1
 }
 
 function startOfWorkday(date: Date) {
@@ -191,13 +232,8 @@ export function buildProjectSchedule(
     task.sub_tasks.map((subTask) => ({
       taskName: task.name,
       subTaskTitle: subTask.title,
-      assignedUserId: subTask.assignedEmployee?.id ?? null,
-      estimatedHours:
-        typeof subTask.duration?.estimatedHours === "number" &&
-        Number.isFinite(subTask.duration.estimatedHours) &&
-        subTask.duration.estimatedHours > 0
-          ? subTask.duration.estimatedHours
-          : 1,
+      assignedUserId: firstAssignedEmployeeId(subTask),
+      estimatedHours: getScheduledHours(subTask),
       sortOrder: subTask.priority || 0,
     }))
   )

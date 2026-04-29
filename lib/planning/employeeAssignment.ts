@@ -362,6 +362,8 @@ export function assignStaffPerSubTask(args: {
     assignmentCounts = {},
   } = args
 
+  let previousEmployeeIds: string[] = []
+
   return subTasks.map((subTask) => {
     const requiredEmployeeCount = getRequiredEmployeeCountFromEstimatedHours(
       subTask.estimatedHours
@@ -379,7 +381,20 @@ export function assignStaffPerSubTask(args: {
       assignmentCounts,
     })
 
-    const chosenEmployees = candidates
+    const previousEmployeeIdSet = new Set(previousEmployeeIds)
+    const nonConsecutiveCandidates =
+      previousEmployeeIdSet.size === 0
+        ? candidates
+        : candidates.filter(
+            (candidate) => !previousEmployeeIdSet.has(candidate.employee.id)
+          )
+
+    const candidatePool =
+      nonConsecutiveCandidates.length >= requiredEmployeeCount
+        ? nonConsecutiveCandidates
+        : candidates
+
+    const chosenEmployees = candidatePool
       .slice(0, requiredEmployeeCount)
       .map((candidate) => candidate.employee)
 
@@ -396,19 +411,31 @@ export function assignStaffPerSubTask(args: {
       }
     }
 
+    const reusedPreviousEmployee = chosenEmployees.some((employee) =>
+      previousEmployeeIdSet.has(employee.id)
+    )
+
     for (const employee of chosenEmployees) {
       assignmentCounts[employee.id] = (assignmentCounts[employee.id] ?? 0) + 1
     }
+
+    previousEmployeeIds = chosenEmployees.map((employee) => employee.id)
 
     return {
       taskName,
       subTaskTitle: subTask.title,
       requiredEmployeeCount,
       employees: chosenEmployees,
-      score: candidates[0]?.score ?? 0,
+      score: candidatePool[0]?.score ?? candidates[0]?.score ?? 0,
       reasons: [
         `Required employees: ${requiredEmployeeCount}`,
-        ...new Set(candidates.slice(0, requiredEmployeeCount).flatMap((c) => c.reasons)),
+        ...(previousEmployeeIdSet.size > 0 && !reusedPreviousEmployee
+          ? ["Avoided consecutive employee reuse"]
+          : []),
+        ...(previousEmployeeIdSet.size > 0 && reusedPreviousEmployee
+          ? ["Reused previous subtask employee because alternatives were limited"]
+          : []),
+        ...new Set(candidatePool.slice(0, requiredEmployeeCount).flatMap((c) => c.reasons)),
       ],
     }
   })

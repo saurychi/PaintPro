@@ -325,55 +325,56 @@ export async function GET() {
     }
 
     const records: StaffAttendanceRecord[] = (assignments ?? [])
-      .map((assignment) => {
+      .flatMap<StaffAttendanceRecord>((assignment) => {
         const projectSubTask = projectSubTaskMap.get(assignment.project_sub_task_id);
-        if (!projectSubTask) return null;
+        if (!projectSubTask) return [];
 
         const projectTask = projectTaskMap.get(projectSubTask.project_task_id);
-        if (!projectTask) return null;
+        if (!projectTask) return [];
 
         const project = projectMap.get(projectTask.project_id);
         const projectSchedule = projectScheduleMap.get(projectTask.project_id);
         const subTask = subTaskMap.get(projectSubTask.sub_task_id);
         const mainTask = mainTaskMap.get(projectTask.main_task_id);
 
-        return {
-          id: assignment.project_sub_task_staff_id,
-          projectId: projectTask.project_id,
-          projectCode: project?.project_code ?? "No Code",
-          projectTitle: project?.title ?? "Untitled Project",
-          siteAddress: project?.site_address ?? null,
-          mainTaskName: mainTask?.name ?? "Main Task",
-          subTaskName: subTask?.description ?? "Sub Task",
-          projectStatus: project?.status ?? null,
-          scheduleStatus: projectSchedule?.status ?? null,
-          assignmentStatus: assignment.assignment_status ?? null,
-          taskStatus: projectSubTask.status ?? null,
-          scheduledStartDatetime:
-            projectSchedule?.start_datetime ||
-            project?.scheduled_start_datetime ||
-            null,
-          scheduledEndDatetime:
-            projectSchedule?.end_datetime ||
-            project?.scheduled_end_datetime ||
-            null,
-          actualStartDatetime: null,
-          actualEndDatetime: null,
-          estimatedHours: projectSubTask.estimated_hours ?? null,
-          updatedAt: projectSubTask.updated_at ?? assignment.updated_at ?? null,
-          status: deriveAttendanceStatus({
-            projectStatus: project?.status,
-            scheduleStatus: projectSchedule?.status,
-            assignmentStatus: assignment.assignment_status,
-            taskStatus: projectSubTask.status,
+        return [
+          {
+            id: assignment.project_sub_task_staff_id,
+            projectId: projectTask.project_id,
+            projectCode: project?.project_code ?? "No Code",
+            projectTitle: project?.title ?? "Untitled Project",
+            siteAddress: project?.site_address ?? null,
+            mainTaskName: mainTask?.name ?? "Main Task",
+            subTaskName: subTask?.description ?? "Sub Task",
+            projectStatus: project?.status ?? null,
+            scheduleStatus: projectSchedule?.status ?? null,
+            assignmentStatus: assignment.assignment_status ?? null,
+            taskStatus: projectSubTask.status ?? null,
             scheduledStartDatetime:
               projectSchedule?.start_datetime ||
               project?.scheduled_start_datetime ||
               null,
-          }),
-        } satisfies StaffAttendanceRecord;
-      })
-      .filter((record): record is StaffAttendanceRecord => Boolean(record));
+            scheduledEndDatetime:
+              projectSchedule?.end_datetime ||
+              project?.scheduled_end_datetime ||
+              null,
+            actualStartDatetime: null,
+            actualEndDatetime: null,
+            estimatedHours: projectSubTask.estimated_hours ?? null,
+            updatedAt: projectSubTask.updated_at ?? assignment.updated_at ?? null,
+            status: deriveAttendanceStatus({
+              projectStatus: project?.status,
+              scheduleStatus: projectSchedule?.status,
+              assignmentStatus: assignment.assignment_status,
+              taskStatus: projectSubTask.status,
+              scheduledStartDatetime:
+                projectSchedule?.start_datetime ||
+                project?.scheduled_start_datetime ||
+                null,
+            }),
+          } satisfies StaffAttendanceRecord,
+        ];
+      });
 
     records.sort((left, right) => {
       const leftDate = new Date(

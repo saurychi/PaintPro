@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function asUuidOrNull(value: unknown) {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  return UUID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -20,7 +30,9 @@ export async function POST(request: NextRequest) {
 
       const equipmentsUsed = Array.isArray(item?.equipments)
         ? item.equipments.map((equipment: any) => ({
-            equipment_id: equipment.id,
+            equipment_id: asUuidOrNull(equipment.equipmentId ?? equipment.id),
+            name:
+              typeof equipment.name === "string" ? equipment.name.trim() : "",
             quantity: Number(equipment.quantity ?? 1),
           }))
         : [];

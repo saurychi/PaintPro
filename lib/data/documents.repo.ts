@@ -1,5 +1,3 @@
-import { fakeDelay, toMs } from "./_shared"
-
 export type DocType = "INV" | "PAY" | "RCP" | "QTE"
 export type SortKey = "name_asc" | "name_desc" | "date_desc" | "date_asc"
 
@@ -8,6 +6,7 @@ export type FolderItem = {
   name: string
   fileCount: number
   sizeLabel: string
+  isArchived?: boolean
 }
 
 export type FileItem = {
@@ -19,97 +18,11 @@ export type FileItem = {
   dateISO: string
   sizeLabel: string
   folderId?: string
+  content?: string
+  contentType?: string
+  originalFilename?: string | null
+  isArchived?: boolean
 }
-
-const DUMMY_FOLDERS: FolderItem[] = [
-  { id: "f1", name: "Job Invoices", fileCount: 23, sizeLabel: "137 MB" },
-  { id: "f2", name: "Material Receipts", fileCount: 8, sizeLabel: "55 MB" },
-  { id: "f3", name: "Payroll Records", fileCount: 37, sizeLabel: "92 MB" },
-  { id: "f4", name: "Job Quotations", fileCount: 29, sizeLabel: "104 MB" },
-]
-
-const DUMMY_FILES: FileItem[] = [
-  {
-    id: "r1",
-    type: "INV",
-    name: "Invoice 681E73DA-0017",
-    createdBy: "manhhackhct108@gmail.com",
-    dateLabel: "July 1, 2026",
-    dateISO: "2026-07-01T09:00:00.000Z",
-    sizeLabel: "17 MB",
-    folderId: "f1",
-  },
-  {
-    id: "r2",
-    type: "INV",
-    name: "Invoice 681E73DA-0017",
-    createdBy: "trungkienpsknt@gmail.com",
-    dateLabel: "June 2, 2026",
-    dateISO: "2026-06-02T09:00:00.000Z",
-    sizeLabel: "21 MB",
-    folderId: "f1",
-  },
-  {
-    id: "r3",
-    type: "PAY",
-    name: "Payroll 2025-08",
-    createdBy: "danghoang87@gmail.com",
-    dateLabel: "August 5, 2025",
-    dateISO: "2025-08-05T09:00:00.000Z",
-    sizeLabel: "26 MB",
-    folderId: "f3",
-  },
-  {
-    id: "a5",
-    type: "QTE",
-    name: "Quote - Living Room Repaint",
-    createdBy: "manager@paintpro.com",
-    dateLabel: "Jan 08, 10:12 AM",
-    dateISO: "2026-01-08T02:12:00.000Z",
-    sizeLabel: "—",
-    folderId: "f4",
-  },
-  {
-    id: "a1",
-    type: "INV",
-    name: "Invoice 681E73DA-0017",
-    createdBy: "manhhackhct108@gmail.com",
-    dateLabel: "Dec 30, 09:42 PM",
-    dateISO: "2025-12-30T13:42:00.000Z",
-    sizeLabel: "92 MB",
-    folderId: "f1",
-  },
-  {
-    id: "a2",
-    type: "PAY",
-    name: "Payroll 2025-12",
-    createdBy: "trungkienpsknt@gmail.com",
-    dateLabel: "Dec 29, 09:42 PM",
-    dateISO: "2025-12-29T13:42:00.000Z",
-    sizeLabel: "92 MB",
-    folderId: "f3",
-  },
-  {
-    id: "a3",
-    type: "INV",
-    name: "Invoice 681E73DA-0017",
-    createdBy: "danghoang87@gmail.com",
-    dateLabel: "Dec 28, 11:14 PM",
-    dateISO: "2025-12-28T15:14:00.000Z",
-    sizeLabel: "92 MB",
-    folderId: "f1",
-  },
-  {
-    id: "a4",
-    type: "RCP",
-    name: "Receipt - Materials",
-    createdBy: "ckctm12@gmail.com",
-    dateLabel: "Dec 26, 07:52 AM",
-    dateISO: "2025-12-26T23:52:00.000Z",
-    sizeLabel: "92 MB",
-    folderId: "f2",
-  },
-]
 
 export type ListDocumentsParams = {
   query?: string
@@ -119,62 +32,227 @@ export type ListDocumentsParams = {
   limit?: number
 }
 
-function applyQuery(rows: FileItem[], q: string) {
-  const query = q.trim().toLowerCase()
-  if (!query) return rows
-  return rows.filter((f) =>
-    `${f.name} ${f.createdBy} ${f.dateLabel}`.toLowerCase().includes(query)
-  )
+function formatSizeFromContent(content: string | null | undefined) {
+  const bytes = new Blob([content ?? ""]).size
+  if (bytes <= 0) return "—"
+
+  const kb = bytes / 1024
+  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`
+
+  const mb = kb / 1024
+  return `${Math.max(1, Math.round(mb))} MB`
 }
 
-function applyTypes(rows: FileItem[], types?: Partial<Record<DocType, boolean>>) {
-  if (!types) return rows
-  return rows.filter((f) => types[f.type] !== false)
+function toDateLabel(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(d)
 }
 
-function applyFolder(rows: FileItem[], folderId?: string | null) {
-  if (!folderId) return rows
-  return rows.filter((f) => f.folderId === folderId)
+function mapDocument(row: any): FileItem {
+  return {
+    id: row.document_id,
+    type: row.document_type as DocType,
+    name: row.title,
+    createdBy: row.created_by ?? "Unknown",
+    dateISO: row.created_at,
+    dateLabel: toDateLabel(row.created_at),
+    sizeLabel: formatSizeFromContent(row.content),
+    folderId: row.folder_id ?? undefined,
+    content: row.content ?? "",
+    contentType: row.content_type ?? "text/plain",
+    originalFilename: row.original_filename ?? null,
+    isArchived: Boolean(row.is_archived),
+  }
 }
 
-function applySort(rows: FileItem[], sort: SortKey) {
-  const out = rows.slice()
-  out.sort((a, b) => {
-    if (sort === "name_asc") return a.name.localeCompare(b.name)
-    if (sort === "name_desc") return b.name.localeCompare(a.name)
-    if (sort === "date_asc") return toMs(a.dateISO) - toMs(b.dateISO)
-    return toMs(b.dateISO) - toMs(a.dateISO)
+function mapFolder(row: any): FolderItem {
+  const docs = row.documents ?? []
+
+  const visibleDocs = docs.filter((doc: any) => {
+    return Boolean(doc.is_archived) === Boolean(row.is_archived)
   })
-  return out
+
+  const totalBytes = visibleDocs.reduce((sum: number, doc: any) => {
+    return sum + new Blob([doc.content ?? ""]).size
+  }, 0)
+
+  return {
+    id: row.folder_id,
+    name: row.name,
+    fileCount: visibleDocs.length,
+    sizeLabel:
+      totalBytes <= 0
+        ? "—"
+        : totalBytes < 1024 * 1024
+          ? `${Math.max(1, Math.round(totalBytes / 1024))} KB`
+          : `${Math.max(1, Math.round(totalBytes / 1024 / 1024))} MB`,
+    isArchived: Boolean(row.is_archived),
+  }
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? "Request failed")
+  }
+
+  return data as T
 }
 
 export async function listFolders(): Promise<FolderItem[]> {
-  await fakeDelay(200)
-  return DUMMY_FOLDERS
+  const response = await fetch("/api/documents/folders", {
+    method: "GET",
+    cache: "no-store",
+  })
+
+  const data = await parseResponse<{ folders: any[] }>(response)
+  return (data.folders ?? []).map(mapFolder)
 }
 
 export async function listDocuments(params: ListDocumentsParams): Promise<FileItem[]> {
-  await fakeDelay(250)
+  const searchParams = new URLSearchParams()
 
-  const {
-    query = "",
-    folderId = null,
-    types,
-    sort = "date_desc",
-    limit,
-  } = params
+  if (params.query?.trim()) searchParams.set("query", params.query.trim())
+  if (params.folderId) searchParams.set("folderId", params.folderId)
+  if (params.sort) searchParams.set("sort", params.sort)
 
-  let rows = DUMMY_FILES.slice()
-  rows = applyFolder(rows, folderId)
-  rows = applyTypes(rows, types)
-  rows = applyQuery(rows, query)
-  rows = applySort(rows, sort)
+  const selectedTypes = Object.entries(params.types ?? {})
+    .filter(([, enabled]) => enabled !== false)
+    .map(([key]) => key)
 
-  if (typeof limit === "number") rows = rows.slice(0, limit)
+  if (selectedTypes.length > 0 && selectedTypes.length < 4) {
+    searchParams.set("types", selectedTypes.join(","))
+  }
+
+  const response = await fetch(`/api/documents/files?${searchParams.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+  })
+
+  const data = await parseResponse<{ documents: any[] }>(response)
+  const rows = (data.documents ?? []).map(mapDocument)
+
+  if (typeof params.limit === "number") {
+    return rows.slice(0, params.limit)
+  }
+
   return rows
 }
 
-export async function listRecentDocuments(params: ListDocumentsParams): Promise<FileItem[]> {
-  // For dummy, recent is just sorted by newest with a small limit
-  return listDocuments({ ...params, sort: "date_desc", limit: params.limit ?? 3 })
+export async function createFolder(name: string) {
+  const response = await fetch("/api/documents/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+
+  const data = await parseResponse<{ folder: any }>(response)
+
+  return {
+    id: data.folder.folder_id,
+    name: data.folder.name,
+    fileCount: 0,
+    sizeLabel: "—",
+    isArchived: Boolean(data.folder.is_archived),
+  } satisfies FolderItem
+}
+
+export async function renameFolder(folderId: string, name: string) {
+  const response = await fetch("/api/documents/folders", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "rename", folderId, name }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
+export async function archiveFolder(folderId: string) {
+  const response = await fetch("/api/documents/folders", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "archive", folderId }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
+export async function restoreFolder(folderId: string) {
+  const response = await fetch("/api/documents/folders", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "restore", folderId }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
+export async function createDocument(input: {
+  folderId?: string | null
+  documentType: DocType
+  title: string
+  content: string
+  contentType?: string
+  originalFilename?: string | null
+  createdBy?: string | null
+}) {
+  const response = await fetch("/api/documents/files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+
+  const data = await parseResponse<{ document: any }>(response)
+  return mapDocument(data.document)
+}
+
+export async function renameDocument(documentId: string, title: string) {
+  const response = await fetch("/api/documents/files", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "rename", documentId, title }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
+export async function moveDocument(documentId: string, folderId: string | null) {
+  const response = await fetch("/api/documents/files", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "move",
+      documentId,
+      folderId,
+    }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
+export async function archiveDocument(documentId: string) {
+  const response = await fetch("/api/documents/files", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "archive", documentId }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
+}
+
+export async function restoreDocument(documentId: string) {
+  const response = await fetch("/api/documents/files", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "restore", documentId }),
+  })
+
+  await parseResponse<{ ok: boolean }>(response)
 }

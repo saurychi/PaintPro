@@ -1,18 +1,22 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, Plus, X, Loader2, RefreshCw } from "lucide-react";
+import {
+  ChevronRight,
+  Plus,
+  X,
+  Loader2,
+  RefreshCw,
+  GripVertical,
+} from "lucide-react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
 
 const ACCENT = "#00c065";
-const ACCENT_HOVER = "#00a054";
 const ACCENT_SOFT = "#e6f9ef";
 const ACCENT_BORDER = "#b7efcf";
-const BORDER = "border-gray-200";
-
 
 type Task = {
   id: string;
@@ -20,12 +24,107 @@ type Task = {
   project_task_id?: string;
 };
 
-function makeId(prefix: string) {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? `${prefix}_${crypto.randomUUID()}`
-    : `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+// ── Add Task Modal ────────────────────────────────────────────────────────────
+function AddTaskModal({
+  tasks,
+  loading,
+  refreshing,
+  onAdd,
+  onClose,
+  onCreateNew,
+  onRefresh,
+}: {
+  tasks: Task[];
+  loading: boolean;
+  refreshing: boolean;
+  onAdd: (task: Task) => void;
+  onClose: () => void;
+  onCreateNew: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+      <div className="flex w-full max-w-md flex-col rounded-xl border border-gray-200 bg-white shadow-lg"
+        style={{ maxHeight: "80vh" }}>
+        {/* header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
+          <h3 className="text-sm font-semibold text-gray-900">Add Main Task</h3>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing || loading}
+              title="Refresh list"
+              className="grid h-7 w-7 place-items-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-40 hover:brightness-95"
+              style={{
+                borderColor: ACCENT_BORDER,
+                backgroundColor: ACCENT_SOFT,
+                color: ACCENT,
+              }}>
+              <RefreshCw
+                className={["h-3.5 w-3.5", refreshing ? "animate-spin" : ""].join(" ")}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="grid h-7 w-7 place-items-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* task list */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 green-scrollbar">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            </div>
+          ) : tasks.length === 0 ? (
+            <p className="py-6 text-center text-[12px] text-gray-500">
+              All available tasks have already been added.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 transition hover:bg-gray-50">
+                  <span className="text-[13px] text-gray-800">{task.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => onAdd(task)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition hover:brightness-95"
+                    style={{
+                      borderColor: ACCENT_BORDER,
+                      backgroundColor: ACCENT_SOFT,
+                      color: ACCENT,
+                    }}>
+                    <Plus className="h-3 w-3" />
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* footer */}
+        <div className="shrink-0 border-t border-gray-200 px-4 py-3">
+          <button
+            type="button"
+            onClick={onCreateNew}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 transition hover:bg-gray-50">
+            <Plus className="h-3.5 w-3.5" />
+            Create New Task
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
+// ── Page ─────────────────────────────────────────────────────────────────────
 export default function MainTaskAssignment() {
   const router = useRouter();
   const pathname = usePathname();
@@ -41,7 +140,7 @@ export default function MainTaskAssignment() {
 
   const [selected, setSelected] = useState<Task[]>([]);
 
-  const mainTaskListRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
   const skipPopstateGuardRef = useRef(false);
   const [selectedHistory, setSelectedHistory] = useState<Task[][]>([]);
@@ -55,48 +154,81 @@ export default function MainTaskAssignment() {
   const suppressLeaveGuardRef = useRef(false);
   const [isDirty, setIsDirty] = useState(false);
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
+  const [addTaskModalOpen, setAddTaskModalOpen] = useState(false);
   const [isProcessingNext, setIsProcessingNext] = useState(false);
   const [isSavingFromModal, setIsSavingFromModal] = useState(false);
+
+  // drag-and-drop
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  function handleDragStart(index: number) {
+    setDragIndex(index);
+  }
+
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    if (dragOverIndex !== index) setDragOverIndex(index);
+  }
+
+  function handleDrop(targetIndex: number) {
+    if (dragIndex === null) return;
+    if (dragIndex !== targetIndex) {
+      pushSelectedHistory();
+      setSelected((prev) => {
+        const next = [...prev];
+        const [moved] = next.splice(dragIndex, 1);
+        next.splice(targetIndex, 0, moved);
+        return next;
+      });
+      setIsDirty(true);
+    }
+    setDragIndex(null);
+    setDragOverIndex(null);
+  }
+
+  function handleDragEnd() {
+    setDragIndex(null);
+    setDragOverIndex(null);
+  }
+
+  // ── helpers ────────────────────────────────────────────────────────────────
 
   function pushSelectedHistory() {
     setSelectedHistory((prev) => [...prev, selected]);
   }
 
-  function isSelected(task: Task) {
-    return selected.some((s) => s.id === task.id);
-  }
-
   function addTask(task: Task) {
-    pendingScrollTopRef.current = mainTaskListRef.current?.scrollTop ?? null;
+    pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
     pushSelectedHistory();
-
     setSelected((prev) => {
       if (prev.some((item) => item.id === task.id)) return prev;
-      return [task, ...prev];
+      return [...prev, task];
     });
-
     setIsDirty(true);
   }
 
   function removeSelected(taskId: string) {
-    pendingScrollTopRef.current = mainTaskListRef.current?.scrollTop ?? null;
+    pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
     pushSelectedHistory();
-
     setSelected((prev) => prev.filter((item) => item.id !== taskId));
-
     setIsDirty(true);
   }
 
-  function removeFromList(task: Task) {
-    pendingScrollTopRef.current = mainTaskListRef.current?.scrollTop ?? null;
-    pushSelectedHistory();
+  function handleOpenAddTaskModal() {
+    setAddTaskModalOpen(true);
+  }
 
-    setSelected((prev) => prev.filter((item) => item.id !== task.id));
+  function handleCloseAddTaskModal() {
+    setAddTaskModalOpen(false);
+  }
 
-    setIsDirty(true);
+  function handleAddFromModal(task: Task) {
+    addTask(task);
   }
 
   function handleOpenCreateTaskModal() {
+    setAddTaskModalOpen(false);
     setCreateTaskModalOpen(true);
   }
 
@@ -138,7 +270,7 @@ export default function MainTaskAssignment() {
     pushSelectedHistory();
     setSelected((prev) => {
       if (prev.some((item) => item.id === newTask.id)) return prev;
-      return [newTask, ...prev];
+      return [...prev, newTask];
     });
     setIsDirty(true);
     toast.success(`Task "${newTask.name}" created.`);
@@ -148,16 +280,12 @@ export default function MainTaskAssignment() {
   function undoSelectedTasks() {
     setSelectedHistory((prev) => {
       if (prev.length === 0) return prev;
-
       const nextHistory = [...prev];
       const previousSelected = nextHistory.pop();
-
       if (previousSelected) {
-        pendingScrollTopRef.current =
-          mainTaskListRef.current?.scrollTop ?? null;
+        pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
         setSelected(previousSelected);
       }
-
       return nextHistory;
     });
   }
@@ -172,9 +300,7 @@ export default function MainTaskAssignment() {
       return;
     }
 
-    if (action !== "next") {
-      setIsProcessingNext(false);
-    }
+    if (action !== "next") setIsProcessingNext(false);
 
     setPendingAction(action);
     setShowSaveConfirm(true);
@@ -189,17 +315,11 @@ export default function MainTaskAssignment() {
     try {
       const response = await fetch("/api/planning/saveProjectMainTasks", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          projectId,
-          mainTasks: selected,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, mainTasks: selected }),
       });
 
       let data: any = null;
-
       try {
         data = await response.json();
       } catch {
@@ -210,7 +330,6 @@ export default function MainTaskAssignment() {
         const message =
           [data?.error, data?.details].filter(Boolean).join(": ") ||
           `Failed to save main tasks. (${response.status})`;
-
         toast.error(message);
         return false;
       }
@@ -218,9 +337,7 @@ export default function MainTaskAssignment() {
       setIsDirty(false);
       return true;
     } catch (error: any) {
-      toast.error(
-        error?.message || "Something went wrong while saving main tasks.",
-      );
+      toast.error(error?.message || "Something went wrong while saving main tasks.");
       return false;
     }
   }
@@ -245,7 +362,6 @@ export default function MainTaskAssignment() {
           return;
         }
       }
-
       suppressLeaveGuardRef.current = true;
       allowBrowserBackRef.current = true;
       setIsDirty(false);
@@ -259,29 +375,18 @@ export default function MainTaskAssignment() {
         : `/admin/job-creation/basic-details?projectId=${projectId}`;
 
     if (!shouldSave) {
-      if (action === "next") {
-        setIsProcessingNext(true);
-      } else {
-        setIsProcessingNext(false);
-      }
-
+      if (action === "next") setIsProcessingNext(true);
+      else setIsProcessingNext(false);
       suppressLeaveGuardRef.current = true;
       allowBrowserBackRef.current = true;
       window.location.href = target;
       return;
     }
 
-    if (action === "next") {
-      setIsProcessingNext(true);
-    }
+    if (action === "next") setIsProcessingNext(true);
 
     setIsSavingFromModal(true);
     const saved = await saveMainTaskChanges();
-
-    console.log("Saving done");
-    console.log("saved =", saved);
-    console.log("target =", target);
-
     setIsSavingFromModal(false);
 
     if (!saved) {
@@ -292,8 +397,6 @@ export default function MainTaskAssignment() {
     suppressLeaveGuardRef.current = true;
     setIsDirty(false);
     allowBrowserBackRef.current = true;
-
-    console.log("About to navigate");
     window.location.href = target;
   }
 
@@ -307,37 +410,26 @@ export default function MainTaskAssignment() {
     function handleKeyDown(event: KeyboardEvent) {
       const isUndo =
         (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z";
-
       if (!isUndo) return;
-
       const target = event.target as HTMLElement | null;
       const isTyping =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target?.isContentEditable;
-
       if (isTyping) return;
-
       event.preventDefault();
       undoSelectedTasks();
     }
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   async function loadAllMainTasks(opts?: { silent?: boolean }) {
     try {
-      if (opts?.silent) {
-        setRefreshingTasks(true);
-      } else {
-        setLoadingTasks(true);
-      }
+      if (opts?.silent) setRefreshingTasks(true);
+      else setLoadingTasks(true);
 
-      const response = await fetch("/api/planning/getMainTasks", {
-        method: "GET",
-      });
-
+      const response = await fetch("/api/planning/getMainTasks", { method: "GET" });
       const data = await response.json();
 
       if (!response.ok) {
@@ -349,12 +441,8 @@ export default function MainTaskAssignment() {
       }
 
       const rows = Array.isArray(data?.mainTasks) ? data.mainTasks : [];
-
       const mapped: Task[] = rows
-        .map((item: any) => ({
-          id: item.main_task_id,
-          name: item.name,
-        }))
+        .map((item: any) => ({ id: item.main_task_id, name: item.name }))
         .filter((item: Task) => item.id && item.name);
 
       setAllTasks(mapped);
@@ -366,9 +454,7 @@ export default function MainTaskAssignment() {
     }
   }
 
-  useEffect(() => {
-    loadAllMainTasks();
-  }, []);
+  useEffect(() => { loadAllMainTasks(); }, []);
 
   useEffect(() => {
     async function loadProjectMainTasks() {
@@ -380,12 +466,10 @@ export default function MainTaskAssignment() {
 
       try {
         setLoadingProject(true);
-
         const response = await fetch(
           `/api/planning/getProjectMainTasks?projectId=${projectId}`,
           { method: "GET" },
         );
-
         const data = await response.json();
 
         if (!response.ok) {
@@ -400,9 +484,7 @@ export default function MainTaskAssignment() {
         }
 
         const projectRow = data?.project;
-        const projectTasks = Array.isArray(data?.mainTasks)
-          ? data.mainTasks
-          : [];
+        const projectTasks = Array.isArray(data?.mainTasks) ? data.mainTasks : [];
 
         setJobNo(projectRow?.project_code || "");
         setSiteName(projectRow?.title || "");
@@ -427,22 +509,17 @@ export default function MainTaskAssignment() {
   }, [projectId]);
 
   useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => {
-      if (skipPopstateGuardRef.current) {
-        return;
-      }
-
+    const handlePopState = () => {
+      if (skipPopstateGuardRef.current) return;
       if (allowBrowserBackRef.current) {
         allowBrowserBackRef.current = false;
         return;
       }
-
       if (!isDirty) {
         allowBrowserBackRef.current = true;
         window.history.back();
         return;
       }
-
       window.history.pushState(null, "", window.location.href);
       setPendingAction("browserBack");
       setShowSaveConfirm(true);
@@ -450,39 +527,30 @@ export default function MainTaskAssignment() {
 
     window.history.pushState(null, "", window.location.href);
     window.addEventListener("popstate", handlePopState);
-
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-    };
+    return () => window.removeEventListener("popstate", handlePopState);
   }, [isDirty]);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (suppressLeaveGuardRef.current) return;
       if (!isDirty) return;
-
       event.preventDefault();
       event.returnValue = "";
     };
-
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isDirty]);
 
   useLayoutEffect(() => {
-    if (!mainTaskListRef.current) return;
+    if (!listRef.current) return;
     if (pendingScrollTopRef.current === null) return;
-
-    mainTaskListRef.current.scrollTop = pendingScrollTopRef.current;
+    listRef.current.scrollTop = pendingScrollTopRef.current;
     pendingScrollTopRef.current = null;
   }, [selected]);
 
-  const selectedTaskIds = new Set(selected.map((task) => task.id));
-
-  const groupedTasks = [
-    ...allTasks.filter((task) => selectedTaskIds.has(task.id)),
-    ...allTasks.filter((task) => !selectedTaskIds.has(task.id)),
-  ];
+  // tasks not yet added (available in the modal)
+  const selectedIds = new Set(selected.map((t) => t.id));
+  const availableTasks = allTasks.filter((t) => !selectedIds.has(t.id));
 
   return (
     <div className="w-full h-screen overflow-hidden bg-white">
@@ -490,20 +558,16 @@ export default function MainTaskAssignment() {
         {/* Header */}
         <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
           <span>Project</span>
-          <ChevronRight
-            className="h-5 w-5 text-gray-300 shrink-0"
-            aria-hidden
-          />
+          <ChevronRight className="h-5 w-5 text-gray-300 shrink-0" aria-hidden />
           <span>Main Tasks</span>
         </div>
 
         <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {/* Main section */}
           <section className="min-h-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm flex flex-col">
-            <div
-              className="h-1 w-full shrink-0"
-              style={{ backgroundColor: ACCENT }}
-            />
+            <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
 
+            {/* Section header */}
             <div className="shrink-0 border-b border-gray-200 px-5 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -518,7 +582,7 @@ export default function MainTaskAssignment() {
                     </p>
                   </div>
                   <p className="mt-1 text-sm text-gray-600">
-                    Review, add, and manage the main tasks for this project.
+                    Add and order the main tasks for this project. Drag to reorder.
                   </p>
                 </div>
 
@@ -534,186 +598,126 @@ export default function MainTaskAssignment() {
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 px-6 pt-4 pb-4 overflow-hidden">
-              <div className="grid h-full min-h-0 grid-rows-[35%_minmax(0,65%)] gap-4">
-                <div className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white flex flex-col">
-                  <div className="border-b border-gray-200 px-4 py-3 text-[12px] font-semibold text-gray-700">
+            {/* Added Main Tasks panel */}
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              {/* Panel header */}
+              <div className="shrink-0 flex items-center justify-between border-b border-gray-200 px-5 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-semibold text-gray-700">
                     Added Main Tasks
-                  </div>
-
-                  <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 green-scrollbar">
-                    <div className="flex flex-wrap content-start gap-2">
-                      {selected.length ? (
-                        selected.map((t) => (
-                          <span
-                            key={t.id}
-                            className="inline-flex items-center gap-2 rounded-sm border border-green-200 px-2.5 py-1 text-[12px] font-semibold"
-                            style={{
-                              backgroundColor: ACCENT_SOFT,
-                              color: ACCENT,
-                            }}>
-                            <button
-                              type="button"
-                              onClick={() => removeSelected(t.id)}
-                              className="grid h-4 w-4 place-items-center rounded-sm bg-white/80 hover:bg-white"
-                              aria-label="Remove selected task"
-                              title="Remove">
-                              <X className="h-3 w-3 text-[#4FAE2A]" />
-                            </button>
-                            {t.name}
-                          </span>
-                        ))
-                      ) : (
-                        <div className="text-[12px] text-gray-500">
-                          No tasks added yet.
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  </span>
+                  {selected.length > 0 && (
+                    <span
+                      className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold"
+                      style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                      {selected.length}
+                    </span>
+                  )}
                 </div>
 
-                <div className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white flex flex-col">
-                  <div className="border-b border-gray-200 px-4 py-3">
-                    <div className="flex items-center gap-4">
-                      <div className="grid flex-1 grid-cols-[88px_1fr] gap-4">
-                        <div className="text-[12px] font-semibold text-gray-700">
-                          Actions
-                        </div>
-                        <div className="text-[12px] font-semibold text-gray-700">
-                          Main Tasks
-                        </div>
-                      </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAddTaskModal}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-semibold transition hover:brightness-95"
+                  style={{
+                    borderColor: ACCENT_BORDER,
+                    backgroundColor: ACCENT_SOFT,
+                    color: ACCENT,
+                  }}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </button>
+              </div>
 
-                      <button
-                        type="button"
-                        onClick={() => loadAllMainTasks({ silent: true })}
-                        disabled={refreshingTasks || loadingTasks}
-                        title="Refresh task list"
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-40 hover:brightness-95"
-                        style={{
-                          borderColor: ACCENT_BORDER,
-                          backgroundColor: ACCENT_SOFT,
-                          color: ACCENT,
-                        }}>
-                        <RefreshCw
+              {/* Task list */}
+              <div
+                ref={listRef}
+                className="flex-1 min-h-0 overflow-y-auto px-5 py-3 green-scrollbar">
+                {loadingProject ? (
+                  <div className="flex h-full min-h-[200px] items-center justify-center">
+                    <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                      <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
+                      <span className="text-sm font-medium text-gray-700">
+                        Loading project main tasks...
+                      </span>
+                    </div>
+                  </div>
+                ) : selected.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div
+                      className="mb-3 flex h-10 w-10 items-center justify-center rounded-full"
+                      style={{ backgroundColor: ACCENT_SOFT }}>
+                      <Plus className="h-5 w-5" style={{ color: ACCENT }} />
+                    </div>
+                    <p className="text-[13px] font-medium text-gray-700">
+                      No tasks added yet
+                    </p>
+                    <p className="mt-1 text-[12px] text-gray-500">
+                      Click &quot;Add&quot; above to select main tasks for this project.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {selected.map((task, index) => {
+                      const isDragging = dragIndex === index;
+                      const isOver = dragOverIndex === index && dragIndex !== index;
+
+                      return (
+                        <div
+                          key={task.id}
+                          draggable
+                          onDragStart={() => handleDragStart(index)}
+                          onDragOver={(e) => handleDragOver(e, index)}
+                          onDrop={() => handleDrop(index)}
+                          onDragEnd={handleDragEnd}
                           className={[
-                            "h-3.5 w-3.5",
-                            refreshingTasks ? "animate-spin" : "",
-                          ].join(" ")}
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    ref={mainTaskListRef}
-                    className="flex-1 min-h-0 overflow-y-auto px-4 py-2 green-scrollbar">
-                    {loadingProject ? (
-                      <div className="flex h-full min-h-[260px] items-center justify-center">
-                        <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                          <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                          <span className="text-sm font-medium text-gray-700">
-                            Loading project main tasks...
+                            "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition select-none cursor-grab active:cursor-grabbing",
+                            isDragging
+                              ? "opacity-40 border-dashed"
+                              : isOver
+                              ? "border-green-400 bg-green-50 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50",
+                          ].join(" ")}>
+                          {/* sort order number */}
+                          <span
+                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
+                            style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                            {index + 1}
                           </span>
+
+                          {/* grip handle */}
+                          <GripVertical className="h-4 w-4 shrink-0 text-gray-300" />
+
+                          {/* task name */}
+                          <span className="flex-1 truncate text-[13px] font-medium text-gray-800">
+                            {task.name}
+                          </span>
+
+                          {/* remove button */}
+                          <button
+                            type="button"
+                            onClick={() => removeSelected(task.id)}
+                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-500 transition hover:bg-red-100"
+                            aria-label={`Remove ${task.name}`}>
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="divide-y divide-gray-200">
-                          {loadingTasks ? (
-                            <div className="px-1 py-4 text-[13px] text-gray-500">
-                              Loading available main tasks...
-                            </div>
-                          ) : allTasks.length === 0 ? (
-                            <div className="px-1 py-4 text-[13px] text-gray-500">
-                              No main tasks found.
-                            </div>
-                          ) : (
-                            groupedTasks.map((task) => {
-                              const selectedFlag = isSelected(task);
+                      );
+                    })}
 
-                              return (
-                                <div
-                                  key={task.id}
-                                  className="grid grid-cols-[88px_1fr] gap-4 items-center py-2.5">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      selectedFlag
-                                        ? removeFromList(task)
-                                        : addTask(task)
-                                    }
-                                    className={[
-                                      "h-8 rounded-md border font-medium text-[12px]",
-                                      "inline-flex items-center justify-center gap-1.5 px-2.5 transition",
-                                      selectedFlag
-                                        ? "hover:bg-red-50"
-                                        : "hover:bg-gray-50",
-                                    ].join(" ")}
-                                    style={{
-                                      borderColor: selectedFlag
-                                        ? "#fecaca"
-                                        : "#b7efcf",
-                                      backgroundColor: selectedFlag
-                                        ? "#fef2f2"
-                                        : "#e6f9ef",
-                                      color: selectedFlag
-                                        ? "#dc2626"
-                                        : "#00c065",
-                                    }}>
-                                    {selectedFlag ? (
-                                      <>
-                                        <X className="h-3.5 w-3.5" />
-                                        Remove
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Plus className="h-3.5 w-3.5" />
-                                        Add
-                                      </>
-                                    )}
-                                  </button>
-
-                                  <div className="relative min-h-12">
-                                    <div className="flex min-h-12 items-center px-1 text-[13px] text-gray-800">
-                                      <span className="truncate">
-                                        {task.name}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-
-                        <div className="h-3" />
-                      </>
-                    )}
+                    <div className="h-2" />
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </section>
 
+          {/* Sidebar */}
           <aside className="h-full min-h-0 flex flex-col gap-4">
             <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
               <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">
-                  {jobNo}
-                </div>
+                <div className="text-[16px] font-semibold text-gray-900">{jobNo}</div>
                 <div className="mt-1 text-[12px] text-gray-500">{siteName}</div>
-              </div>
-
-              <div className="border-t border-gray-200 px-4 py-4">
-                <button
-                  type="button"
-                  onClick={handleOpenCreateTaskModal}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-[12px] font-semibold transition hover:brightness-95"
-                  style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
-                  <Plus className="h-4 w-4" />
-                  Create Task
-                </button>
               </div>
             </div>
 
@@ -723,6 +727,7 @@ export default function MainTaskAssignment() {
           </aside>
         </div>
 
+        {/* Footer nav */}
         <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
           <button
             type="button"
@@ -742,13 +747,12 @@ export default function MainTaskAssignment() {
         </div>
       </div>
 
+      {/* Save confirm modal */}
       {showSaveConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
           <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-200 px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Save changes?
-              </h3>
+              <h3 className="text-sm font-semibold text-gray-900">Save changes?</h3>
               <p className="mt-1 text-sm text-gray-600">
                 Do you want to save your main task changes before leaving?
               </p>
@@ -770,7 +774,7 @@ export default function MainTaskAssignment() {
                 type="button"
                 onClick={() => handleConfirmSave(false)}
                 className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
-                Don't Save
+                Don&apos;t Save
               </button>
 
               <button
@@ -793,6 +797,22 @@ export default function MainTaskAssignment() {
         </div>
       ) : null}
 
+      {/* Add Task Modal */}
+      {addTaskModalOpen && (
+        <AddTaskModal
+          tasks={availableTasks}
+          loading={loadingTasks}
+          refreshing={refreshingTasks}
+          onAdd={(task) => {
+            handleAddFromModal(task);
+          }}
+          onClose={handleCloseAddTaskModal}
+          onCreateNew={handleOpenCreateTaskModal}
+          onRefresh={() => loadAllMainTasks({ silent: true })}
+        />
+      )}
+
+      {/* Create Task Modal */}
       <CreateTaskModal
         open={createTaskModalOpen}
         onClose={handleCloseCreateTaskModal}

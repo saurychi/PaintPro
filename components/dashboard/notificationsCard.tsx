@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Loader2, MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { fetchConversations } from "@/lib/messages";
@@ -61,7 +61,7 @@ function mapConversationToNotification(cp: any): NotificationItem {
   };
 }
 
-export default function NotificationsCard({
+function NotificationsCard({
   title = "Latest Messages",
   notifications,
   limit = 5,
@@ -318,3 +318,5 @@ export default function NotificationsCard({
     </section>
   );
 }
+
+export default memo(NotificationsCard);
