@@ -41,7 +41,6 @@ export default function JobQuotation() {
   const [downloading, setDownloading] = useState(false);
   const [savingDocument, setSavingDocument] = useState(false);
   const [notifyingClient, setNotifyingClient] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [project, setProject] = useState<ProjectOverviewResponse["project"] | null>(null);
 
@@ -118,38 +117,6 @@ export default function JobQuotation() {
 
     loadProject();
   }, [projectId]);
-
-  async function toggleStatus() {
-    if (!projectId || updatingStatus) return;
-
-    const nextUiStatus: StatusType =
-      status === "Approved" ? "Not yet Approved" : "Approved";
-
-    const nextProjectStatus =
-      nextUiStatus === "Approved" ? "ready_to_start" : "quotation_pending";
-
-    try {
-      setUpdatingStatus(true);
-
-      await updateProjectStatus(nextProjectStatus);
-
-      setStatus(nextUiStatus);
-      setProject((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: nextProjectStatus,
-            }
-          : prev,
-      );
-
-      toast.success("Quotation status updated.");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to update quotation status.");
-    } finally {
-      setUpdatingStatus(false);
-    }
-  }
 
   async function handleSaveQuotationDocument() {
     if (!projectId || !project || savingDocument) return;
@@ -283,20 +250,16 @@ export default function JobQuotation() {
             <span>Quotation</span>
           </div>
 
-          <button
-            type="button"
-            onClick={toggleStatus}
-            disabled={updatingStatus || !projectId}
-            className="inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+          <div
+            className="inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold"
             style={{
               backgroundColor: statusStyles.bg,
               borderColor: statusStyles.border,
               color: statusStyles.text,
             }}
-            aria-label="Toggle approval status"
           >
-            {updatingStatus ? "Updating..." : status}
-          </button>
+            {status}
+          </div>
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-12 gap-5">

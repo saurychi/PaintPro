@@ -14,12 +14,22 @@ export type CostEstimationMaterial = {
   estimatedCost?: number | null;
 };
 
+export type CostEstimationEquipment = {
+  id: string;
+  equipmentId?: string | null;
+  name: string;
+  quantity: number;
+  unitCost: number;
+  notes?: string | null;
+};
+
 export type CostEstimationSubTask = {
   projectSubTaskId: string;
   subTaskId: string;
   title: string;
   estimatedHours: number;
   assignedStaff: CostEstimationAssignedStaff[];
+  equipment: CostEstimationEquipment[];
   scheduledStartDatetime?: string | null;
   scheduledEndDatetime?: string | null;
 };
