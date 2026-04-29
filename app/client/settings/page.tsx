@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import rawCountries from "@/lib/data/country-by-calling-code.json"
 
 const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
 
 type CountryRaw = { country: string; calling_code: number }
 type CountryOption = { label: string; code: string }
@@ -110,12 +109,6 @@ export default function ClientSettings() {
     role: "client",
   })
 
-  const [toggles, setToggles] = useState({
-    jobUpdates: false,
-    messages: true,
-    autoDownload: true,
-  })
-
   const [phoneEditing, setPhoneEditing] = useState(false)
   const [phoneBusy, setPhoneBusy] = useState(false)
   const [phoneMsg, setPhoneMsg] = useState<string | null>(null)
@@ -169,10 +162,6 @@ export default function ClientSettings() {
 
     boot()
   }, [router])
-
-  const handleToggle = (key: keyof typeof toggles) => {
-    setToggles((prev) => ({ ...prev, [key]: !prev[key] }))
-  }
 
   const startEditPhone = () => {
     setPhoneErr(null)
@@ -365,34 +354,6 @@ export default function ClientSettings() {
                 </div>
               </div>
 
-              <div className="h-px w-full bg-gray-200" />
-
-              {/* Preferences */}
-              <div className="grid gap-3">
-                <SectionTitle title="Preferences" subtitle="Notifications and behavior" />
-
-                <div className="space-y-3">
-                  <ToggleRow
-                    label="Receive notifications from job updates"
-                    description="Get notified when job status, schedule, or tasks are updated."
-                    active={toggles.jobUpdates}
-                    onClick={() => handleToggle("jobUpdates")}
-                  />
-                  <ToggleRow
-                    label="Receive notifications from messages"
-                    description="Get notified when clients or staff send new messages."
-                    active={toggles.messages}
-                    onClick={() => handleToggle("messages")}
-                  />
-                  <ToggleRow
-                    label="Auto download documents (quotes, invoice, etc.)"
-                    description="Automatically download generated documents to this device."
-                    active={toggles.autoDownload}
-                    onClick={() => handleToggle("autoDownload")}
-                  />
-                </div>
-              </div>
-
               {/* Session */}
               <div className="pt-2">
                 <div className="h-px w-full bg-gray-200" />
@@ -423,50 +384,3 @@ function Card({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ToggleRow({
-  label,
-  description,
-  active,
-  onClick,
-}: {
-  label: string
-  description?: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 hover:shadow-md active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25"
-      aria-pressed={active}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900">{label}</p>
-          {description ? <p className="mt-1 text-sm text-gray-600">{description}</p> : null}
-        </div>
-
-        <div className="shrink-0 flex flex-col items-end">
-          <div className="relative h-8 w-16 rounded-lg border border-gray-200 bg-white shadow-sm p-1" aria-hidden="true">
-            <div
-              className="absolute inset-0 rounded-lg transition-opacity"
-              style={{
-                backgroundColor: ACCENT,
-                opacity: active ? 0.12 : 0,
-              }}
-            />
-            <div
-              className="relative h-6 w-1/2 rounded-md border border-gray-200 bg-white shadow-sm transition-transform"
-              style={{
-                transform: active ? "translateX(100%)" : "translateX(0%)",
-                borderColor: active ? ACCENT : undefined,
-              }}
-            />
-          </div>
-          <p className="mt-1 text-[10px] text-gray-500">{active ? "On" : "Off"}</p>
-        </div>
-      </div>
-    </button>
-  )
-}

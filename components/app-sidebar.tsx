@@ -128,6 +128,20 @@ const adminItems: Item[] = [
     title: "Settings",
     url: "/admin/settings",
     icon: Settings,
+    subItems: [
+      {
+        key: "settings-task-management",
+        title: "Task Management",
+        url: "/admin/settings/task-management",
+        matchUrls: ["/admin/settings/task-management"],
+      },
+      {
+        key: "settings-change-estimations",
+        title: "Change Estimations",
+        url: "/admin/settings/change-estimations",
+        matchUrls: ["/admin/settings/change-estimations"],
+      },
+    ],
   },
 ];
 
@@ -304,6 +318,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
     documents:
       pathname.startsWith("/admin/documents") ||
       pathname.startsWith("/client/documents"),
+    settings: pathname.startsWith("/admin/settings/"),
   });
 
   React.useEffect(() => {
@@ -319,6 +334,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
         prev.documents ||
         pathname.startsWith("/admin/documents") ||
         pathname.startsWith("/client/documents"),
+      settings: prev.settings || pathname.startsWith("/admin/settings/"),
     }));
   }, [pathname]);
 
@@ -431,13 +447,13 @@ export function AppSidebar({ role }: AppSidebarProps) {
         type="button"
         onClick={() => setMobileOpen(true)}
         aria-label="Open mobile menu"
-        className="fixed left-4 top-4 z-[60] inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 md:hidden"
+        className="fixed left-4 top-4 z-60 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 md:hidden"
       >
         <Menu className="h-5 w-5" />
       </button>
 
       {mobileOpen ? (
-        <div className="fixed inset-0 z-[70] md:hidden">
+        <div className="fixed inset-0 z-70 md:hidden">
           <button
             type="button"
             aria-label="Close mobile menu overlay"
@@ -835,14 +851,14 @@ export function AppSidebar({ role }: AppSidebarProps) {
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-gradient-to-b from-white via-white/95 to-transparent transition-opacity duration-200",
+                "pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-linear-to-b from-white via-white/95 to-transparent transition-opacity duration-200",
                 desktopScrollFade.showTop ? "opacity-100" : "opacity-0",
               )}
             />
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-gradient-to-t from-white via-white/95 to-transparent transition-opacity duration-200",
+                "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-linear-to-t from-white via-white/95 to-transparent transition-opacity duration-200",
                 desktopScrollFade.showBottom ? "opacity-100" : "opacity-0",
               )}
             />

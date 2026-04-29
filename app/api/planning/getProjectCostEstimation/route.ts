@@ -21,6 +21,7 @@ type ProjectTaskRow = {
   project_task_id: string;
   project_id: string;
   main_task_id: string;
+  sort_order: number | null;
 };
 
 type MainTaskRow = {
@@ -37,6 +38,7 @@ type ProjectSubTaskRow = {
   scheduled_start_datetime: string | null;
   scheduled_end_datetime: string | null;
   sort_order: number | null;
+  equipments_used: unknown;
 };
 
 type SubTaskRow = {
@@ -72,6 +74,12 @@ type UserRow = {
   hourly_wage: number | null;
 };
 
+type EquipmentRow = {
+  equipment_id: string;
+  name: string | null;
+  unit_cost: number | null;
+};
+
 type ClientRow = {
   client_id: string;
   full_name: string | null;
@@ -80,8 +88,15 @@ type ClientRow = {
   address: string | null;
 };
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function isUuid(value: unknown) {
+  return typeof value === "string" && UUID_PATTERN.test(value.trim());
 }
 
 export async function GET(request: Request) {
@@ -144,7 +159,7 @@ export async function GET(request: Request) {
 
     const { data: projectTasks, error: projectTasksError } = await supabaseAdmin
       .from("project_task")
-      .select("project_task_id, project_id, main_task_id")
+      .select("project_task_id, project_id, main_task_id, sort_order")
       .eq("project_id", projectId)
       .returns<ProjectTaskRow[]>();
 
@@ -228,9 +243,10 @@ export async function GET(request: Request) {
       await supabaseAdmin
         .from("project_sub_task")
         .select(
-          "project_sub_task_id, project_task_id, sub_task_id, estimated_hours, scheduled_start_datetime, scheduled_end_datetime, sort_order",
+          "project_sub_task_id, project_task_id, sub_task_id, estimated_hours, scheduled_start_datetime, scheduled_end_datetime, sort_order, equipments_used",
         )
         .in("project_task_id", projectTaskIds)
+        .order("sort_order", { ascending: true })
         .returns<ProjectSubTaskRow[]>();
 
     if (projectSubTasksError) {
@@ -267,6 +283,79 @@ export async function GET(request: Request) {
       }
 
       subTasks = subTasksData ?? [];
+    }
+
+    const equipmentIds = uniqueStrings(
+      (projectSubTasks ?? []).flatMap((row) =>
+        Array.isArray(row.equipments_used)
+          ? row.equipments_used
+              .map((item: any) => item?.equipment_id ?? item?.equipmentId ?? item?.id)
+              .filter(isUuid)
+          : [],
+      ),
+    );
+
+    const equipmentNames = uniqueStrings(
+      (projectSubTasks ?? []).flatMap((row) =>
+        Array.isArray(row.equipments_used)
+          ? row.equipments_used
+              .map((item: any) =>
+                typeof item?.name === "string" ? item.name.trim() : "",
+              )
+              .filter(Boolean)
+          : [],
+      ),
+    );
+
+    let equipmentById = new Map<string, EquipmentRow>();
+    let equipmentByName = new Map<string, EquipmentRow>();
+
+    if (equipmentIds.length > 0) {
+      const { data: equipmentRowsById, error: equipmentByIdError } =
+        await supabaseAdmin
+          .from("equipment")
+          .select("equipment_id, name, unit_cost")
+          .in("equipment_id", equipmentIds)
+          .returns<EquipmentRow[]>();
+
+      if (equipmentByIdError) {
+        return NextResponse.json(
+          {
+            error: "Failed to load equipment catalog.",
+            details: equipmentByIdError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      equipmentById = new Map(
+        (equipmentRowsById ?? []).map((row) => [row.equipment_id, row]),
+      );
+    }
+
+    if (equipmentNames.length > 0) {
+      const { data: equipmentRowsByName, error: equipmentByNameError } =
+        await supabaseAdmin
+          .from("equipment")
+          .select("equipment_id, name, unit_cost")
+          .in("name", equipmentNames)
+          .returns<EquipmentRow[]>();
+
+      if (equipmentByNameError) {
+        return NextResponse.json(
+          {
+            error: "Failed to load equipment catalog.",
+            details: equipmentByNameError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      equipmentByName = new Map(
+        (equipmentRowsByName ?? [])
+          .filter((row) => Boolean(row.name))
+          .map((row) => [String(row.name), row]),
+      );
     }
 
     const projectSubTaskIds = uniqueStrings(
@@ -355,12 +444,37 @@ export async function GET(request: Request) {
       const current = subtasksByProjectTaskId.get(row.project_task_id) ?? [];
       const subTask = subTaskMap.get(row.sub_task_id);
       const assignedUsers = staffByProjectSubTaskId.get(row.project_sub_task_id) ?? [];
+      const usedEquipment = Array.isArray(row.equipments_used)
+        ? row.equipments_used
+        : [];
 
       current.push({
         projectSubTaskId: row.project_sub_task_id,
         subTaskId: row.sub_task_id,
         title: subTask?.description ?? "Sub Task",
         estimatedHours: Number(row.estimated_hours ?? 0),
+        equipment: usedEquipment.map((item: any, index: number) => {
+          const rawEquipmentId =
+            item?.equipment_id ?? item?.equipmentId ?? item?.id ?? "";
+          const equipmentId = isUuid(rawEquipmentId) ? rawEquipmentId : "";
+          const equipmentName =
+            typeof item?.name === "string" ? item.name.trim() : "";
+          const equipment =
+            equipmentById.get(equipmentId) ?? equipmentByName.get(equipmentName);
+          const resolvedName = equipment?.name || equipmentName || "Equipment";
+          const resolvedEquipmentId = equipment?.equipment_id ?? equipmentId ?? "";
+
+          return {
+            id:
+              resolvedEquipmentId ||
+              `${row.project_sub_task_id}-${index}-${resolvedName}`,
+            equipmentId: resolvedEquipmentId || null,
+            name: resolvedName,
+            quantity: Number(item?.quantity ?? 1),
+            unitCost: Number(equipment?.unit_cost ?? 0),
+            notes: typeof item?.notes === "string" ? item.notes : null,
+          };
+        }),
         scheduledStartDatetime: row.scheduled_start_datetime,
         scheduledEndDatetime: row.scheduled_end_datetime,
         assignedStaff: assignedUsers.map((user) => ({
@@ -391,7 +505,7 @@ export async function GET(request: Request) {
             projectTaskId: projectTask.project_task_id,
             mainTaskId: projectTask.main_task_id,
             title: mainTask?.name ?? "Main Task",
-            sortOrder: Number(mainTask?.sort_order ?? 0),
+            sortOrder: Number(projectTask.sort_order ?? mainTask?.sort_order ?? 0),
             materials: materialsByProjectTaskId.get(projectTask.project_task_id) ?? [],
             subtasks: subtasksByProjectTaskId.get(projectTask.project_task_id) ?? [],
           };
