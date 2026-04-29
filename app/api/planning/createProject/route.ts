@@ -1109,6 +1109,7 @@ export async function POST(req: Request) {
         name: user.username || user.email || "Staff",
         hourlyWage: Number(user.hourly_wage ?? 0),
       })),
+      equipment: [],
     });
 
     subtasksByProjectTaskId.set(row.project_task_id, current);
