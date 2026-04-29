@@ -61,7 +61,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { id, name, email, phone } = await req.json()
+    const { id, name, email, phone, status } = await req.json()
 
     if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 })
 
@@ -69,6 +69,7 @@ export async function PATCH(req: Request) {
     if (name !== undefined) updates.username = name
     if (email !== undefined) updates.email = email
     if (phone !== undefined) updates.phone = phone || null
+    if (status !== undefined) updates.status = status
 
     const { data, error } = await supabaseAdmin
       .from("users")
