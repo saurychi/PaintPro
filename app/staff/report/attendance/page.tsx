@@ -207,28 +207,30 @@ export default function StaffAttendanceReportPage() {
   return (
     <StaffPageShell
       title="Attendance"
-      subtitle="Showing your real database-backed task assignments, project schedule windows, and completion state."
-      actions={
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="relative h-[42px] w-[240px] rounded-full border border-gray-200 bg-white min-[921px]:w-[290px]">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              className="h-full w-full border-none bg-transparent px-3.5 pl-[34px] text-sm font-normal text-gray-900 outline-none"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Search project or task..."
-            />
-          </div>
+      subtitle="Track your task assignments, project schedule windows, and completion state."
+      bodyClassName="overflow-y-auto pr-1"
+    >
+      {/* ── Controls ─────────────────────────────────────────────────────── */}
+      <div className="mb-4 flex flex-col items-center gap-3">
+        <div className="relative h-[42px] w-full max-w-md rounded-full border border-gray-200 bg-white">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            className="h-full w-full border-none bg-transparent px-3.5 pl-[34px] text-sm font-normal text-gray-900 outline-none"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search project or task..."
+          />
+        </div>
 
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5">
             <div className="inline-flex items-center gap-2 text-xs font-medium text-gray-500">
               <CalendarDays className="h-3.5 w-3.5" />
               Date range
             </div>
-
             <div className="flex items-center gap-2.5">
               <input
                 className="h-9 rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
@@ -257,7 +259,6 @@ export default function StaffAttendanceReportPage() {
               <Filter className="h-3.5 w-3.5" />
               Status
             </div>
-
             <select
               className="h-9 min-w-[180px] rounded-xl border border-gray-200 bg-white px-2.5 text-sm font-normal text-gray-900 outline-none"
               value={status}
@@ -274,9 +275,7 @@ export default function StaffAttendanceReportPage() {
             </select>
           </div>
         </div>
-      }
-      bodyClassName="overflow-y-auto pr-1"
-    >
+      </div>
       <section className="grid grid-cols-1 gap-3 pb-1 min-[561px]:grid-cols-2 min-[1221px]:grid-cols-4">
         <div
           className={cn(

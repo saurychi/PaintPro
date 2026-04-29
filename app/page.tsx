@@ -113,19 +113,6 @@ export default function Welcome() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 bg-[#f8fbf9] p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-900">
-                      Project visibility
-                    </span>
-                    <span className="text-sm font-semibold text-[#00c065]">
-                      100%
-                    </span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
-                    <div className="h-full w-[100%] rounded-full bg-[#00c065]" />
-                  </div>
-                </div>
               </div>
             </div>
           </div>
