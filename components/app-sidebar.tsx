@@ -30,7 +30,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/supabaseClient";
 
 type SubItem = {
   title: string;
@@ -266,16 +265,25 @@ function isSubRouteActive(pathname: string, subItem: SubItem) {
   });
 }
 
-type AppSidebarProps = {
-  role: Role;
-};
-
-type AppUser = {
+export type SidebarUser = {
   id: string;
   username: string | null;
   email: string | null;
   role: "client" | "staff" | "manager" | "admin" | null;
   profile_image_url: string | null;
+};
+
+const FALLBACK_SIDEBAR_USER: SidebarUser = {
+  id: "",
+  username: null,
+  email: null,
+  role: null,
+  profile_image_url: null,
+};
+
+type AppSidebarProps = {
+  role: Role;
+  user?: SidebarUser | null;
 };
 
 const AVATAR_BG = [
@@ -319,13 +327,13 @@ function roleBadgeClass(r: string | null | undefined) {
   }
 }
 
-export function AppSidebar({ role }: AppSidebarProps) {
+export function AppSidebar({ role, user }: AppSidebarProps) {
   const { open, setOpen } = useSidebar();
   const pathname = usePathname();
   const menuItems = ITEMS_BY_ROLE[role];
   const desktopScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const resolvedUser = user ?? FALLBACK_SIDEBAR_USER;
 
-  const [user, setUser] = React.useState<AppUser | null>(null);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [desktopScrollFade, setDesktopScrollFade] = React.useState({
     showTop: false,
@@ -366,48 +374,6 @@ export function AppSidebar({ role }: AppSidebarProps) {
         pathname.startsWith("/staff/schedule/"),
     }));
   }, [pathname]);
-
-  React.useEffect(() => {
-    let alive = true;
-
-    const load = async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      const authUser = authData?.user;
-
-      if (!authUser) {
-        if (alive) setUser(null);
-        return;
-      }
-
-      const { data: row } = await supabase
-        .from("users")
-        .select("id, username, email, role, profile_image_url")
-        .eq("id", authUser.id)
-        .maybeSingle();
-
-      if (!alive) return;
-
-      setUser({
-        id: authUser.id,
-        username: row?.username ?? authUser.user_metadata?.username ?? null,
-        email: row?.email ?? authUser.email ?? null,
-        role: row?.role ?? authUser.user_metadata?.role ?? null,
-        profile_image_url:
-          row?.profile_image_url ?? authUser.user_metadata?.avatar_url ?? null,
-      });
-    };
-
-    load();
-
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      load();
-    });
-
-    return () => {
-      alive = false;
-      sub.subscription.unsubscribe();
-    };
-  }, []);
 
   const updateDesktopScrollFade = React.useCallback(() => {
     const node = desktopScrollRef.current;
@@ -450,17 +416,18 @@ export function AppSidebar({ role }: AppSidebarProps) {
   }, [updateDesktopScrollFade, open, openMenus, pathname]);
 
   const displayName =
-    user?.username || (user?.email ? user.email.split("@")[0] : "");
-  const letter = firstLetter(displayName || user?.email);
-  const avatarSeed = user?.id || user?.email || displayName || "seed";
+    resolvedUser.username ||
+    (resolvedUser.email ? resolvedUser.email.split("@")[0] : "");
+  const letter = firstLetter(displayName || resolvedUser.email);
+  const avatarSeed = resolvedUser.id || resolvedUser.email || displayName || "seed";
   const avatarClass = stableAvatarClass(avatarSeed);
 
   const effectiveRole =
-    (user?.role === "admin" ||
-    user?.role === "manager" ||
-    user?.role === "staff" ||
-    user?.role === "client"
-      ? user.role
+    (resolvedUser.role === "admin" ||
+    resolvedUser.role === "manager" ||
+    resolvedUser.role === "staff" ||
+    resolvedUser.role === "client"
+      ? resolvedUser.role
       : role) || role;
 
   function toggleMenu(key: string) {
@@ -642,12 +609,12 @@ export function AppSidebar({ role }: AppSidebarProps) {
                 <div
                   className={cn(
                     "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
-                    !user?.profile_image_url && avatarClass,
+                    !resolvedUser.profile_image_url && avatarClass,
                   )}
                 >
-                  {user?.profile_image_url ? (
+                  {resolvedUser.profile_image_url ? (
                     <Image
-                      src={user.profile_image_url}
+                      src={resolvedUser.profile_image_url}
                       alt="Profile"
                       fill
                       className="object-cover"
@@ -665,7 +632,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
                     {displayName || "User"}
                   </div>
                   <div className="truncate text-xs text-gray-500">
-                    {user?.email || ""}
+                    {resolvedUser.email || ""}
                   </div>
                 </div>
               </div>
@@ -906,14 +873,14 @@ export function AppSidebar({ role }: AppSidebarProps) {
               <div
                 className={cn(
                   "relative h-9 w-9 overflow-hidden rounded-full border border-gray-200",
-                  !user?.profile_image_url && avatarClass,
+                  !resolvedUser.profile_image_url && avatarClass,
                 )}
                 aria-label="User avatar"
-                title={displayName || user?.email || "User"}
+                title={displayName || resolvedUser.email || "User"}
               >
-                {user?.profile_image_url ? (
+                {resolvedUser.profile_image_url ? (
                   <Image
-                    src={user.profile_image_url}
+                    src={resolvedUser.profile_image_url}
                     alt="Profile"
                     fill
                     className="object-cover"
@@ -928,12 +895,12 @@ export function AppSidebar({ role }: AppSidebarProps) {
 
               {open && (
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-gray-900">
-                    {displayName || "User"}
-                  </div>
-                  <div className="truncate text-xs text-gray-500">
-                    {user?.email || ""}
-                  </div>
+                <div className="truncate text-sm font-semibold text-gray-900">
+                  {displayName || "User"}
+                </div>
+                <div className="truncate text-xs text-gray-500">
+                  {resolvedUser.email || ""}
+                </div>
 
                   <div className="mt-2">
                     <span

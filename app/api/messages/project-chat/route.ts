@@ -27,6 +27,7 @@ type MessageRow = {
   conversation_id: string
   content: string
   created_at: string
+  sender_id?: string | null
 }
 
 function normalizeRole(role: string | null | undefined) {
@@ -118,45 +119,79 @@ export async function GET() {
 
   const { data: messageData } = await supabaseAdmin
     .from("messages")
-    .select("conversation_id, content, created_at")
+    .select("conversation_id, content, created_at, sender_id")
     .in("conversation_id", conversationIds)
     .order("created_at", { ascending: false })
 
   const latestMessageMap = new Map<string, MessageRow>()
+  const latestSenderByConversation = new Map<string, string>()
   for (const message of (messageData ?? []) as MessageRow[]) {
     if (!latestMessageMap.has(message.conversation_id)) {
       latestMessageMap.set(message.conversation_id, message)
     }
+    if (message.sender_id && !latestSenderByConversation.has(message.conversation_id)) {
+      latestSenderByConversation.set(message.conversation_id, message.sender_id)
+    }
   }
 
-  const participantMap = new Map<string, ParticipantUser>()
+  const preferredParticipantMap = new Map<string, ParticipantUser>()
+  const fallbackParticipantMap = new Map<string, ParticipantUser>()
   for (const participant of (participantData ?? []) as ParticipantRow[]) {
     const user = readSingleRelation(participant.users)
     if (!user) continue
-    if (!isAllowedProjectRecipient(user.id, user.role, assignedUserIds, projectContext?.created_by ?? null)) {
-      continue
+
+    if (!fallbackParticipantMap.has(participant.conversation_id)) {
+      fallbackParticipantMap.set(participant.conversation_id, user)
     }
-    if (!participantMap.has(participant.conversation_id)) {
-      participantMap.set(participant.conversation_id, user)
+
+    if (
+      isAllowedProjectRecipient(
+        user.id,
+        user.role,
+        assignedUserIds,
+        projectContext?.created_by ?? null
+      ) &&
+      !preferredParticipantMap.has(participant.conversation_id)
+    ) {
+      preferredParticipantMap.set(participant.conversation_id, user)
+    }
+  }
+
+  const senderFallbackIds = Array.from(new Set(latestSenderByConversation.values()))
+  const senderFallbackUsers = new Map<string, ParticipantUser>()
+
+  if (senderFallbackIds.length > 0) {
+    const { data: senderUserData } = await supabaseAdmin
+      .from("users")
+      .select("id, username, role, profile_image_url")
+      .in("id", senderFallbackIds)
+
+    for (const user of (senderUserData ?? []) as ParticipantUser[]) {
+      senderFallbackUsers.set(user.id, user)
     }
   }
 
   const conversations = conversationData
     .map((conversation) => {
-      const participant = participantMap.get(conversation.id)
-      if (!participant) return null
-
       const latestMessage = latestMessageMap.get(conversation.id)
+      const senderFallbackId = latestSenderByConversation.get(conversation.id)
+      const senderFallbackUser = senderFallbackId
+        ? senderFallbackUsers.get(senderFallbackId) ?? null
+        : null
+      const participant =
+        preferredParticipantMap.get(conversation.id) ??
+        fallbackParticipantMap.get(conversation.id) ??
+        senderFallbackUser
+
       return {
         id: conversation.id,
-        name: participant.username ?? "Project Team",
-        role: normalizeRole(participant.role),
-        profile_image_url: participant.profile_image_url ?? null,
+        name: participant?.username ?? "Project Team",
+        role: normalizeRole(participant?.role) || "team",
+        profile_image_url: participant?.profile_image_url ?? null,
         lastMessage: latestMessage?.content ?? "Say hello!",
         lastActivity: latestMessage ? new Date(latestMessage.created_at).getTime() : 0,
       }
     })
-    .filter((conversation): conversation is NonNullable<typeof conversation> => Boolean(conversation))
 
   conversations.sort((a, b) => b.lastActivity - a.lastActivity)
 

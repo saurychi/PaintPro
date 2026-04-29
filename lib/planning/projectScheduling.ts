@@ -87,8 +87,8 @@ function firstAssignedEmployeeId(subTask: SchedulingGeneratedSubTask) {
 function getScheduledHours(subTask: SchedulingGeneratedSubTask) {
   const candidates = [
     subTask.duration?.estimatedHours,
-    subTask.duration?.adjustedDurationHours,
     subTask.duration?.roundedHours,
+    subTask.duration?.adjustedDurationHours,
     subTask.duration?.baseLaborHours,
   ]
 

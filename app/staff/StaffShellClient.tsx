@@ -2,15 +2,15 @@
 
 import React from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
 import { cn } from "@/lib/utils"
 
-function StaffShell({ children }: { children: React.ReactNode }) {
+function StaffShell({ children, user }: { children: React.ReactNode; user: SidebarUser }) {
   const { open } = useSidebar()
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
-      <AppSidebar role="staff" />
+      <AppSidebar role="staff" user={user} />
 
       <main
         className={cn(
@@ -26,10 +26,10 @@ function StaffShell({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default function StaffShellClient({ children }: { children: React.ReactNode }) {
+export default function StaffShellClient({ children, user }: { children: React.ReactNode; user: SidebarUser }) {
   return (
     <SidebarProvider>
-      <StaffShell>{children}</StaffShell>
+      <StaffShell user={user}>{children}</StaffShell>
     </SidebarProvider>
   )
 }

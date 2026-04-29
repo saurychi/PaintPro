@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   computeAreasFromDimensions,
-  estimateMaterialsForTask,
+  estimateMaterialsForSubTask,
   type ProjectDimensions,
 } from "@/lib/planning/materialEstimator";
 import { buildProjectSchedule } from "@/lib/planning/projectScheduling";
@@ -844,11 +844,10 @@ export async function POST(req: Request) {
       }
 
       const assignedEmployees = normalizeAssignedEmployees(subTask);
-      const assignedUserId = assignedEmployees[0]?.id ?? null;
       const estimatedHours =
-        subTask.duration?.adjustedDurationHours ??
-        subTask.duration?.roundedHours ??
         subTask.duration?.estimatedHours ??
+        subTask.duration?.roundedHours ??
+        subTask.duration?.adjustedDurationHours ??
         null;
 
       const equipmentPayload = Array.isArray(subTask.equipment)
@@ -930,17 +929,9 @@ export async function POST(req: Request) {
         );
       }
 
-      const estimatedMaterials = estimateMaterialsForTask({
-        task: {
-          name: task.name,
-          sub_tasks: task.sub_tasks.map((item) => ({
-            title: item.title,
-            priority: item.priority,
-          })),
-          materials: task.sub_tasks.flatMap((item) =>
-            item.materials.map((material) => material.name)
-          ),
-        },
+      const estimatedMaterials = await estimateMaterialsForSubTask({
+        mainTaskId: matchedMainTask.main_task_id,
+        subTaskId: matchedSubTask.sub_task_id,
         areas,
         materialCatalog: subTask.materials.map((material) => ({
           name: material.name,
@@ -966,7 +957,8 @@ export async function POST(req: Request) {
           material.name
         );
 
-        const estimatedQuantity = estimatedMaterial?.qty ?? 0;
+        // Fall back to 1 unit when no formula rule is configured for this material
+        const estimatedQuantity = estimatedMaterial?.qty ?? 1;
         const unitCostRow = await supabaseAdmin
           .from("materials")
           .select("unit_cost")

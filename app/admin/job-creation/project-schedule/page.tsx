@@ -346,9 +346,9 @@ export default function ProjectSchedulePage() {
                       title: subTask?.title ?? "Sub Task",
                       status: "pending",
                       estimatedHours: normalizeNumber(
-                        subTask?.duration?.adjustedDurationHours ??
+                        subTask?.duration?.estimatedHours ??
                           subTask?.duration?.roundedHours ??
-                          subTask?.duration?.estimatedHours,
+                          subTask?.duration?.adjustedDurationHours,
                       ),
                       scheduledStartDatetime:
                         subTask?.scheduledStartDatetime ?? null,

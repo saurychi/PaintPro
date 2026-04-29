@@ -1,4 +1,5 @@
 import type { EmployeeHint, WeekdayKey } from "@/lib/planning/aiContext"
+import { getRequiredEmployeeCountFromLaborHours } from "@/lib/planning/workforceMath"
 
 export type ProjectTaskLite = {
   name: string
@@ -9,6 +10,7 @@ export type ProjectSubTaskLite = {
   title: string
   priority?: number
   estimatedHours?: number
+  requiredEmployeeCount?: number
 }
 
 export type EmployeeAssignmentScore = {
@@ -311,38 +313,7 @@ export function suggestEmployeesPerTask(args: {
 export function getRequiredEmployeeCountFromEstimatedHours(
   estimatedHours?: number
 ): number {
-  const baseLaborHours = Math.max(Number(estimatedHours ?? 0), 0.25)
-
-  // 1 employee should ideally carry about 6 productive labor-hours
-  // for one subtask in a workday before another employee is added.
-  const targetHoursPerEmployee = 6
-
-  // As crews grow, not all added workers are perfectly efficient.
-  // This lightly reduces team efficiency for larger crews.
-  const getTeamEfficiencyFactor = (employeeCount: number) => {
-    if (employeeCount <= 1) return 1
-    if (employeeCount === 2) return 0.95
-    if (employeeCount === 3) return 0.9
-    if (employeeCount === 4) return 0.85
-    return 0.8
-  }
-
-  // Start with a raw estimate, then validate it against effective capacity.
-  let employeeCount = Math.max(
-    1,
-    Math.ceil(baseLaborHours / targetHoursPerEmployee)
-  )
-
-  while (true) {
-    const efficiency = getTeamEfficiencyFactor(employeeCount)
-    const effectiveCapacity = employeeCount * targetHoursPerEmployee * efficiency
-
-    if (effectiveCapacity >= baseLaborHours) break
-    employeeCount += 1
-  }
-
-  // Reasonable safety cap for now.
-  return Math.min(employeeCount, 6)
+  return getRequiredEmployeeCountFromLaborHours(Number(estimatedHours ?? 0))
 }
 
 export function assignStaffPerSubTask(args: {
@@ -365,9 +336,12 @@ export function assignStaffPerSubTask(args: {
   let previousEmployeeIds: string[] = []
 
   return subTasks.map((subTask) => {
-    const requiredEmployeeCount = getRequiredEmployeeCountFromEstimatedHours(
-      subTask.estimatedHours
-    )
+    const requiredEmployeeCount =
+      typeof subTask.requiredEmployeeCount === "number" &&
+      Number.isFinite(subTask.requiredEmployeeCount) &&
+      subTask.requiredEmployeeCount > 0
+        ? Math.max(1, Math.ceil(subTask.requiredEmployeeCount))
+        : getRequiredEmployeeCountFromEstimatedHours(subTask.estimatedHours)
 
     const candidates = suggestEmployeesForTasks({
       tasks: [

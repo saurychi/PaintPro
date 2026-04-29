@@ -92,6 +92,24 @@ function normalizeStatus(value?: string | null) {
     .toLowerCase();
 }
 
+function resolveReferenceNowMs(value?: Date | number | string | null) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? Date.now() : value.getTime();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.getTime();
+    }
+  }
+
+  return Date.now();
+}
+
 function getCompletionTimingLabel(args: {
   rawStatus: string;
   scheduledStart: string;
@@ -137,6 +155,7 @@ function getTaskReviewStatus(args: {
   rawStatus: string;
   scheduledEnd: string | null;
   timingLabel: string | null;
+  referenceNowMs: number;
 }) {
   const normalized = normalizeStatus(args.rawStatus);
 
@@ -153,7 +172,7 @@ function getTaskReviewStatus(args: {
 
     if (
       !Number.isNaN(scheduledEndDate.getTime()) &&
-      scheduledEndDate.getTime() < Date.now()
+      scheduledEndDate.getTime() < args.referenceNowMs
     ) {
       return "missed";
     }
@@ -174,7 +193,11 @@ function sortDateValue(value?: string | null) {
 
 export function buildEmployeeReviewItems(
   mainTasks: Record<string, unknown>[],
+  options?: {
+    referenceNow?: Date | number | string | null;
+  },
 ): EmployeeReviewItem[] {
+  const referenceNowMs = resolveReferenceNowMs(options?.referenceNow);
   const employeeMap = new Map<
     string,
     EmployeeReviewItem & { taskIds: Set<string> }
@@ -241,6 +264,7 @@ export function buildEmployeeReviewItems(
           rawStatus,
           scheduledEnd,
           timingLabel,
+          referenceNowMs,
         }),
         scheduledStart,
         scheduledEnd,

@@ -15,6 +15,7 @@ import DashboardInsightCard from "../../components/dashboard/dashboardInsightCar
 import NotificationsCard from "@/components/dashboard/notificationsCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
+import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 
 type RawProject = {
   id: string;
@@ -908,6 +909,8 @@ function buildProcessItems(args: {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { isLoaded: isProjectTimeReferenceReady, referenceIso } =
+    useProjectTimeReference();
 
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -934,6 +937,14 @@ export default function DashboardPage() {
 
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!isProjectTimeReferenceReady) return;
+
+    setSelectedDashboardDate(
+      formatDateInputValue(referenceIso ? new Date(referenceIso) : new Date()),
+    );
+  }, [isProjectTimeReferenceReady, referenceIso]);
 
   useEffect(() => {
     async function loadProjects() {
@@ -1102,8 +1113,10 @@ export default function DashboardPage() {
   }, [overviewProject, selectedProject, mainTasks]);
 
   const employeeReviewItems = useMemo(() => {
-    return buildEmployeeReviewItems(mainTasks);
-  }, [mainTasks]);
+    return buildEmployeeReviewItems(mainTasks, {
+      referenceNow: referenceIso,
+    });
+  }, [mainTasks, referenceIso]);
 
   const toggleProcessRow = useCallback((id: string) => {
     setOpenProcessIds((prev) => {
