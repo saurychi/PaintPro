@@ -50,12 +50,14 @@ export async function POST(request: NextRequest) {
       .insert({
         main_task_id: mainTaskId,
         description: description.trim(),
-        sort_order: sortOrder,
+        default_sort_order: sortOrder,
         default_equipment: defaultEquipmentIds.length > 0 ? defaultEquipmentIds : null,
         default_materials: defaultMaterialIds.length > 0 ? defaultMaterialIds : null,
         is_active: true,
       })
-      .select("sub_task_id, main_task_id, description, sort_order, default_equipment, default_materials")
+      .select(
+        "sub_task_id, main_task_id, description, sort_order:default_sort_order, default_equipment, default_materials",
+      )
       .single();
 
     if (error) {

@@ -25,6 +25,7 @@ type RequestSubTask = {
   title: string
   priority?: number
   estimatedHours?: number
+  requiredEmployeeCount?: number
 }
 
 type RequestTask = {
@@ -135,6 +136,10 @@ function normalizeTasks(value: unknown): RequestTask[] {
               estimatedHours:
                 Number.isFinite(Number(subTask.estimatedHours))
                   ? Number(subTask.estimatedHours)
+                  : undefined,
+              requiredEmployeeCount:
+                Number.isFinite(Number(subTask.requiredEmployeeCount))
+                  ? Number(subTask.requiredEmployeeCount)
                   : undefined,
             }))
             .filter((subTask) => subTask.title)
@@ -319,6 +324,7 @@ export async function POST(req: Request) {
         title: subTask.title,
         priority: subTask.priority,
         estimatedHours: subTask.estimatedHours,
+        requiredEmployeeCount: subTask.requiredEmployeeCount,
       })),
     })),
     employees,

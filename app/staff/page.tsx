@@ -14,6 +14,7 @@ import JobNumberCard from "@/components/jobNumberCard";
 import NotificationsCard from "@/components/dashboard/notificationsCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
+import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 
 type StepVisualStatus = "done" | "active" | "pending";
 
@@ -768,6 +769,8 @@ function buildProcessItems(args: {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { isLoaded: isProjectTimeReferenceReady, referenceIso } =
+    useProjectTimeReference();
 
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -795,6 +798,14 @@ export default function DashboardPage() {
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isProjectTimeReferenceReady) return;
+
+    setSelectedDashboardDate(
+      formatDateInputValue(referenceIso ? new Date(referenceIso) : new Date()),
+    );
+  }, [isProjectTimeReferenceReady, referenceIso]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -972,8 +983,10 @@ export default function DashboardPage() {
   }, [overviewProject, selectedProject, mainTasks]);
 
   const employeeReviewItems = useMemo(() => {
-    return buildEmployeeReviewItems(mainTasks);
-  }, [mainTasks]);
+    return buildEmployeeReviewItems(mainTasks, {
+      referenceNow: referenceIso,
+    });
+  }, [mainTasks, referenceIso]);
 
   function toggleProcessRow(id: string) {
     setOpenProcessIds((prev) => {

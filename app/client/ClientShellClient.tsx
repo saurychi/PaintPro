@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext } from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
 import { cn } from "@/lib/utils"
 
 type Role = "client" | "staff" | "manager" | "admin"
@@ -17,12 +17,20 @@ export function useClientProject() {
   return useContext(ClientProjectContext)
 }
 
-function ClientShell({ children, role }: { children: React.ReactNode; role: Role }) {
+function ClientShell({
+  children,
+  role,
+  user,
+}: {
+  children: React.ReactNode
+  role: Role
+  user: SidebarUser
+}) {
   const { open } = useSidebar()
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
-      <AppSidebar role={role} />
+      <AppSidebar role={role} user={user} />
 
       <main
         className={cn(
@@ -42,15 +50,17 @@ export default function ClientShellClient({
   children,
   role,
   projectId,
+  user,
 }: {
   children: React.ReactNode
   role: Role
   projectId: string | null
+  user: SidebarUser
 }) {
   return (
     <ClientProjectContext.Provider value={{ projectId }}>
       <SidebarProvider>
-        <ClientShell role={role}>{children}</ClientShell>
+        <ClientShell role={role} user={user}>{children}</ClientShell>
       </SidebarProvider>
     </ClientProjectContext.Provider>
   )

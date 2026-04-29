@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Loader2, MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { fetchConversations } from "@/lib/messages";
@@ -19,6 +19,35 @@ type Props = {
   notifications?: NotificationItem[];
   limit?: number;
   onOpenAll?: () => void;
+  messagesPath?: string;
+  dataSource?: "conversations" | "project-chat";
+};
+
+type ProjectChatConversation = {
+  id: string;
+  name: string;
+  role: string;
+  profile_image_url: string | null;
+  lastMessage: string;
+  lastActivity: number;
+};
+
+type ProjectChatResponse = {
+  conversations?: ProjectChatConversation[];
+  error?: string;
+  details?: string;
+};
+
+type ConversationNotificationPayload = {
+  conversation_id: string;
+  users?: {
+    username?: string | null;
+  } | null;
+  latest_message?: {
+    content?: string | null;
+    created_at?: string | null;
+  } | null;
+  last_read_at?: string | null;
 };
 
 type SizeMode = "mini" | "compact" | "normal";
@@ -43,7 +72,9 @@ function formatTime(value?: string | null) {
   });
 }
 
-function mapConversationToNotification(cp: any): NotificationItem {
+function mapConversationToNotification(
+  cp: ConversationNotificationPayload,
+): NotificationItem {
   const lastMessage = cp.latest_message;
   const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0;
   const lastMessageTime = lastMessage?.created_at
@@ -61,11 +92,47 @@ function mapConversationToNotification(cp: any): NotificationItem {
   };
 }
 
-export default function NotificationsCard({
+function mapProjectConversationToNotification(
+  conversation: ProjectChatConversation,
+): NotificationItem {
+  return {
+    id: conversation.id,
+    title: conversation.name || "Project Team",
+    subtitle: conversation.lastMessage || "No recent message.",
+    isUnread: false,
+    createdAt:
+      conversation.lastActivity > 0
+        ? new Date(conversation.lastActivity).toISOString()
+        : null,
+  };
+}
+
+async function fetchProjectChatNotifications() {
+  const response = await fetch("/api/messages/project-chat", {
+    cache: "no-store",
+  });
+
+  const data = (await response.json().catch(() => null)) as
+    | ProjectChatResponse
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      [data?.error, data?.details].filter(Boolean).join(": ") ||
+        "Failed to load project chat notifications.",
+    );
+  }
+
+  return (data?.conversations ?? []).map(mapProjectConversationToNotification);
+}
+
+function NotificationsCard({
   title = "Latest Messages",
   notifications,
   limit = 5,
   onOpenAll,
+  messagesPath = "/admin/messages",
+  dataSource = "conversations",
 }: Props) {
   const router = useRouter();
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -106,7 +173,7 @@ export default function NotificationsCard({
   const isCompact = mode === "compact" || mode === "mini";
 
   useEffect(() => {
-    if (notifications) return;
+    if (notifications || dataSource !== "conversations") return;
 
     async function loadCurrentUser() {
       const {
@@ -117,24 +184,32 @@ export default function NotificationsCard({
     }
 
     loadCurrentUser();
-  }, [notifications]);
+  }, [notifications, dataSource]);
 
   useEffect(() => {
-    if (notifications || !currentUserId) return;
+    if (
+      notifications ||
+      (dataSource === "conversations" && !currentUserId)
+    ) {
+      return;
+    }
 
-    const userId = currentUserId;
     let cancelled = false;
 
     async function loadLatestMessages() {
       setLoading(true);
 
       try {
-        const data = await fetchConversations(userId);
+        const mapped =
+          dataSource === "project-chat"
+            ? await fetchProjectChatNotifications()
+            : (await fetchConversations(currentUserId!)).map(
+                mapConversationToNotification,
+              );
 
         if (cancelled) return;
 
-        const mapped = data
-          .map(mapConversationToNotification)
+        const sorted = mapped
           .sort((a, b) => {
             const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -143,7 +218,7 @@ export default function NotificationsCard({
           })
           .slice(0, limit);
 
-        setLatestMessages(mapped);
+        setLatestMessages(sorted);
       } catch (error) {
         console.error("Failed to load latest message notifications:", error);
 
@@ -162,10 +237,15 @@ export default function NotificationsCard({
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, notifications, limit]);
+  }, [currentUserId, notifications, limit, dataSource]);
 
   useEffect(() => {
-    if (notifications || !currentUserId) return;
+    if (
+      notifications ||
+      (dataSource === "conversations" && !currentUserId)
+    ) {
+      return;
+    }
 
     const channel = supabase
       .channel("dashboard-latest-message-notifications")
@@ -174,10 +254,14 @@ export default function NotificationsCard({
         { event: "INSERT", schema: "public", table: "messages" },
         async () => {
           try {
-            const data = await fetchConversations(currentUserId);
+            const mapped =
+              dataSource === "project-chat"
+                ? await fetchProjectChatNotifications()
+                : (await fetchConversations(currentUserId!)).map(
+                    mapConversationToNotification,
+                  );
 
-            const mapped = data
-              .map(mapConversationToNotification)
+            const sorted = mapped
               .sort((a, b) => {
                 const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
                 const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -186,7 +270,7 @@ export default function NotificationsCard({
               })
               .slice(0, limit);
 
-            setLatestMessages(mapped);
+            setLatestMessages(sorted);
           } catch (error) {
             console.error("Failed to refresh latest messages:", error);
           }
@@ -197,7 +281,7 @@ export default function NotificationsCard({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUserId, notifications, limit]);
+  }, [currentUserId, notifications, limit, dataSource]);
 
   const displayItems = notifications ?? latestMessages;
 
@@ -207,11 +291,11 @@ export default function NotificationsCard({
       return;
     }
 
-    router.push("/admin/messages");
+    router.push(messagesPath);
   }
 
   function handleOpenConversation(id: string) {
-    router.push(`/admin/messages?conversationId=${id}`);
+    router.push(`${messagesPath}?conversationId=${id}`);
   }
 
   return (
@@ -318,3 +402,5 @@ export default function NotificationsCard({
     </section>
   );
 }
+
+export default memo(NotificationsCard);

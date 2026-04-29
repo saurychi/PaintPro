@@ -349,14 +349,12 @@ export default function StaffMessageModal({
                           Boolean(onApplyMeasurements) &&
                           /\d/.test(message.text);
                         const canDelete = isAdmin && Boolean(onDeleteMessage);
-                        const hasActions =
-                          canDelete || canApplyMeasurements;
 
                         return (
                           <div
                             key={message.id}
                             className={[
-                              "group flex w-full items-end gap-1.5",
+                              "flex w-full items-end gap-1.5",
                               isAdmin ? "justify-end" : "justify-start",
                             ].join(" ")}>
                             <div className="max-w-[78%]">
@@ -379,9 +377,30 @@ export default function StaffMessageModal({
                                 ].join(" ")}>
                                 {formatTime(message.createdAt)}
                               </p>
+
+                              {canApplyMeasurements ? (
+                                <div className="mt-1 flex justify-start">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void onApplyMeasurements?.(message);
+                                    }}
+                                    disabled={isApplyingMeasurement}
+                                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70">
+                                    {isApplyingMeasurement ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <ClipboardList className="h-3.5 w-3.5" />
+                                    )}
+                                    {isApplyingMeasurement
+                                      ? "Applying..."
+                                      : "Apply to Basic Details"}
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
 
-                            {hasActions ? (
+                            {canDelete ? (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <button
@@ -389,7 +408,7 @@ export default function StaffMessageModal({
                                     disabled={
                                       isDeleting || isApplyingMeasurement
                                     }
-                                    className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-300 opacity-0 transition hover:bg-gray-100 hover:text-gray-500 group-hover:opacity-100 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-100">
+                                    className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:bg-gray-100 focus-visible:text-gray-600 disabled:cursor-not-allowed disabled:opacity-100">
                                     {isDeleting || isApplyingMeasurement ? (
                                       <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
                                     ) : (
@@ -398,20 +417,9 @@ export default function StaffMessageModal({
                                   </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent
-                                  align={isAdmin ? "start" : "end"}
+                                  align="start"
                                   side="top"
                                   className="min-w-[180px]">
-                                  {canApplyMeasurements ? (
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        void onApplyMeasurements?.(message);
-                                      }}
-                                      disabled={isApplyingMeasurement}
-                                      className="text-[12px]">
-                                      <ClipboardList className="mr-2 h-3.5 w-3.5" />
-                                      Apply to Basic Details
-                                    </DropdownMenuItem>
-                                  ) : null}
                                   {canDelete ? (
                                     <DropdownMenuItem
                                       onSelect={() => {

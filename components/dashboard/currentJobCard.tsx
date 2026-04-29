@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Copy, Plus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,7 +28,7 @@ function getProjectLabel(project: CurrentJobOption) {
   return `${code} • ${project.title || "Untitled Project"}`;
 }
 
-export default function CurrentJobCard({
+function CurrentJobCard({
   statusLabel,
   jobNo,
   siteName,
@@ -163,3 +164,5 @@ export default function CurrentJobCard({
     </section>
   );
 }
+
+export default memo(CurrentJobCard);

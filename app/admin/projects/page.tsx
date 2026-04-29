@@ -15,6 +15,7 @@ import JobProgressCard, {
 } from "@/components/dashboard/jobProgressCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
+import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 
 const ACCENT = "#00c065";
 const GREEN = "#7ED957";
@@ -1109,6 +1110,7 @@ function ProcessFlowSkeleton() {
 }
 
 export default function AdminProjectsPage() {
+  const { referenceIso } = useProjectTimeReference();
 
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -1324,8 +1326,10 @@ export default function AdminProjectsPage() {
   }, [overviewProject, selectedProject, mainTasks]);
 
   const employeeReviewItems = useMemo(() => {
-    return buildEmployeeReviewItems(mainTasks);
-  }, [mainTasks]);
+    return buildEmployeeReviewItems(mainTasks, {
+      referenceNow: referenceIso,
+    });
+  }, [mainTasks, referenceIso]);
 
   const projectCodeValue =
     selectedProject?.projectCode || selectedProject?.project_code || "No Code";
@@ -1394,7 +1398,7 @@ export default function AdminProjectsPage() {
       };
     }
 
-    const now = Date.now();
+    const now = referenceIso ? new Date(referenceIso).getTime() : Date.now();
     const startTime = currentOrNewestSubTask.start
       ? new Date(currentOrNewestSubTask.start).getTime()
       : NaN;
@@ -1426,7 +1430,7 @@ export default function AdminProjectsPage() {
       border: "#BBF7D0",
       color: "#15803D",
     };
-  }, [currentOrNewestSubTask]);
+  }, [currentOrNewestSubTask, referenceIso]);
 
   function toggleProcessRow(id: string) {
     setOpenProcessIds((prev) => {

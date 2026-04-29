@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  PROJECT_TIME_REFERENCE_COOKIE,
+  resolveProjectTimeReferenceDate,
+} from "@/lib/time/projectTimeReference";
 
 type ProjectSubTaskRow = {
   project_sub_task_id: string;
@@ -41,6 +46,13 @@ function canMoveProjectToReview(status: string | null | undefined) {
 
 export async function POST(request: Request) {
   try {
+    const cookieStore = await cookies();
+    const referenceNow =
+      resolveProjectTimeReferenceDate(
+        cookieStore.get(PROJECT_TIME_REFERENCE_COOKIE)?.value ?? null,
+      ) ?? new Date();
+    const timestampIso = referenceNow.toISOString();
+
     const body = await request.json();
     const projectSubTaskId = String(body?.projectSubTaskId ?? "").trim();
     const status = String(body?.status ?? "").trim();
@@ -54,7 +66,7 @@ export async function POST(request: Request) {
 
     const { error } = await supabaseAdmin
       .from("project_sub_task")
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status, updated_at: timestampIso })
       .eq("project_sub_task_id", projectSubTaskId);
 
     if (error) {
@@ -179,7 +191,7 @@ export async function POST(request: Request) {
                   .from("projects")
                   .update({
                     status: nextProjectStatus,
-                    updated_at: new Date().toISOString(),
+                    updated_at: timestampIso,
                   })
                   .eq("project_id", projectTask.project_id);
 

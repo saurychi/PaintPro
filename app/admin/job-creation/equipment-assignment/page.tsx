@@ -9,7 +9,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import AddEquipmentModal, {
@@ -20,6 +20,7 @@ type StepStatus = "done" | "active" | "pending";
 
 type AssignedEquipment = {
   id: string;
+  equipmentId?: string | null;
   name: string;
   quantity: number;
   unitCost?: number | null;
@@ -58,7 +59,6 @@ export default function EquipmentAssignmentPage() {
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
-  const [isSavingFromModal, setIsSavingFromModal] = useState(false);
 
   const allowBrowserBackRef = useRef(false);
   const suppressLeaveGuardRef = useRef(false);
@@ -69,15 +69,15 @@ export default function EquipmentAssignmentPage() {
   const [equipmentModalState, setEquipmentModalState] = useState<{
     open: boolean;
     mainTaskId: string;
+    mainTaskTitle: string;
     subTaskId: string;
     subTaskTitle: string;
-    selectedIds: string[];
   }>({
     open: false,
     mainTaskId: "",
+    mainTaskTitle: "",
     subTaskId: "",
     subTaskTitle: "",
-    selectedIds: [],
   });
 
   useEffect(() => {
@@ -139,6 +139,7 @@ export default function EquipmentAssignmentPage() {
             equipments: Array.isArray(row.equipments)
               ? row.equipments.map((item: any) => ({
                   id: item.id,
+                  equipmentId: item.equipmentId ?? null,
                   name: item.name,
                   quantity: Number(item.quantity ?? 1),
                   unitCost: Number(item.unitCost ?? 0),
@@ -230,6 +231,16 @@ export default function EquipmentAssignmentPage() {
     });
   }
 
+  function clearLeaveButtonLoading() {
+    setIsNavigatingNext(false);
+    setIsNavigatingBack(false);
+  }
+
+  function setLeaveButtonLoading(action: "next" | "back" | "browserBack") {
+    setIsNavigatingNext(action === "next");
+    setIsNavigatingBack(action === "back");
+  }
+
   function requestLeave(action: "next" | "back" | "browserBack") {
     if (!isDirty) {
       if (action === "next") {
@@ -239,6 +250,7 @@ export default function EquipmentAssignmentPage() {
       }
 
       if (action === "back") {
+        setIsNavigatingBack(true);
         void (async () => {
           const ok = await updateProjectStatus("materials_pending");
           if (!ok) {
@@ -261,23 +273,16 @@ export default function EquipmentAssignmentPage() {
       return;
     }
 
-    if (action !== "next") {
-      setIsNavigatingNext(false);
-    }
-
+    clearLeaveButtonLoading();
     setPendingAction(action);
     setShowSaveConfirm(true);
   }
 
   function handleNext() {
-    setIsNavigatingNext(true);
     requestLeave("next");
   }
 
   function handleGoBack() {
-    if (!isDirty) {
-      setIsNavigatingBack(true);
-    }
     requestLeave("back");
   }
 
@@ -290,9 +295,9 @@ export default function EquipmentAssignmentPage() {
 
     if (!action) return;
 
-    if (shouldSave) {
-      setIsSavingFromModal(true);
+    setLeaveButtonLoading(action);
 
+    if (shouldSave) {
       const saveEquipmentResponse = await fetch(
         "/api/planning/saveProjectSubTaskEquipment",
         {
@@ -306,6 +311,8 @@ export default function EquipmentAssignmentPage() {
                 project_sub_task_id: step.id,
                 equipments: step.equipments.map((item) => ({
                   id: item.id,
+                  equipmentId: item.equipmentId ?? null,
+                  name: item.name,
                   quantity: Number(item.quantity ?? 1),
                 })),
               })),
@@ -317,8 +324,7 @@ export default function EquipmentAssignmentPage() {
       const saveEquipmentData = await saveEquipmentResponse.json();
 
       if (!saveEquipmentResponse.ok) {
-        setIsSavingFromModal(false);
-        setIsNavigatingNext(false);
+        clearLeaveButtonLoading();
         toast.error(
           saveEquipmentData?.error || "Failed to save equipment assignment.",
         );
@@ -337,10 +343,9 @@ export default function EquipmentAssignmentPage() {
       });
 
       const data = await response.json();
-      setIsSavingFromModal(false);
 
       if (!response.ok) {
-        setIsNavigatingNext(false);
+        clearLeaveButtonLoading();
         toast.error(data?.error || "Failed to update project status.");
         return;
       }
@@ -356,8 +361,6 @@ export default function EquipmentAssignmentPage() {
       return;
     }
 
-    setIsNavigatingNext(false);
-
     if (action === "back") {
       suppressLeaveGuardRef.current = true;
       allowBrowserBackRef.current = true;
@@ -365,6 +368,8 @@ export default function EquipmentAssignmentPage() {
         `/admin/job-creation/materials-assignment?projectId=${projectId}`;
       return;
     }
+
+    clearLeaveButtonLoading();
 
     if (action === "browserBack") {
       suppressLeaveGuardRef.current = true;
@@ -382,9 +387,9 @@ export default function EquipmentAssignmentPage() {
     setEquipmentModalState({
       open: true,
       mainTaskId,
+      mainTaskTitle: group.title,
       subTaskId,
       subTaskTitle: step.title,
-      selectedIds: step.equipments.map((item) => item.id),
     });
   }
 
@@ -392,23 +397,17 @@ export default function EquipmentAssignmentPage() {
     setEquipmentModalState({
       open: false,
       mainTaskId: "",
+      mainTaskTitle: "",
       subTaskId: "",
       subTaskTitle: "",
-      selectedIds: [],
     });
   }
 
-  function toggleEquipmentSelection(item: EquipmentCatalogItem) {
-    setEquipmentModalState((prev) => ({
-      ...prev,
-      selectedIds: prev.selectedIds.includes(item.id)
-        ? prev.selectedIds.filter((id) => id !== item.id)
-        : [...prev.selectedIds, item.id],
-    }));
-  }
-
-  function saveEquipmentSelection() {
-    const selectedSet = new Set(equipmentModalState.selectedIds);
+  function handleAddEquipmentToSubTask(item: EquipmentCatalogItem) {
+    if (!equipmentModalState.mainTaskId || !equipmentModalState.subTaskId) {
+      toast.error("No sub task selected.");
+      return;
+    }
 
     setServices((prev) =>
       prev.map((group) => {
@@ -418,27 +417,26 @@ export default function EquipmentAssignmentPage() {
           ...group,
           children: group.children.map((step) => {
             if (step.id !== equipmentModalState.subTaskId) return step;
-
-            const existingMap = new Map(
-              step.equipments.map((item) => [item.id, item]),
-            );
-
-            const nextEquipments = equipmentCatalog
-              .filter((item) => selectedSet.has(item.id))
-              .map((item) => {
-                const existing = existingMap.get(item.id);
-
-                return {
-                  id: item.id,
-                  name: item.name,
-                  quantity: existing?.quantity ?? 1,
-                  unitCost: item.unitCost ?? null,
-                };
-              });
+            if (
+              step.equipments.some(
+                (equipment) => (equipment.equipmentId ?? equipment.id) === item.id,
+              )
+            ) {
+              return step;
+            }
 
             return {
               ...step,
-              equipments: nextEquipments,
+              equipments: [
+                ...step.equipments,
+                {
+                  id: item.id,
+                  equipmentId: item.id,
+                  name: item.name,
+                  quantity: 1,
+                  unitCost: item.unitCost ?? null,
+                },
+              ],
             };
           }),
         };
@@ -446,7 +444,19 @@ export default function EquipmentAssignmentPage() {
     );
 
     setIsDirty(true);
-    closeEquipmentModal();
+  }
+
+  function handleRemoveEquipmentFromModal(equipmentId: string) {
+    if (!equipmentModalState.mainTaskId || !equipmentModalState.subTaskId) {
+      toast.error("No sub task selected.");
+      return;
+    }
+
+    removeAssignedEquipment(
+      equipmentModalState.mainTaskId,
+      equipmentModalState.subTaskId,
+      equipmentId,
+    );
   }
 
   function updateEquipmentQuantity(
@@ -686,7 +696,7 @@ export default function EquipmentAssignmentPage() {
                                             {step.equipments.map((equipment, equipmentIndex) => (
                                               <div
                                                 key={`${step.id}-${equipment.id}-${equipmentIndex}`}
-                                                className="grid grid-cols-[minmax(0,1fr)_90px_40px] items-center gap-3 px-3 py-3"
+                                                className="grid grid-cols-[minmax(0,1fr)_112px_40px] items-center gap-3 px-3 py-2.5"
                                               >
                                                 <div className="min-w-0">
                                                   <div className="truncate text-[13px] font-medium text-gray-800">
@@ -694,36 +704,44 @@ export default function EquipmentAssignmentPage() {
                                                   </div>
                                                 </div>
 
-                                                <input
-                                                  type="number"
-                                                  min={1}
-                                                  value={equipment.quantity}
-                                                  onChange={(e) =>
-                                                    updateEquipmentQuantity(
-                                                      group.id,
-                                                      step.id,
-                                                      equipment.id,
-                                                      Number(e.target.value),
-                                                    )
-                                                  }
-                                                  className="h-9 rounded-md border border-gray-200 px-3 text-[12px] text-gray-800 outline-none transition-all duration-150 focus:border-emerald-400 hover:opacity-85 active:scale-[0.98]"
-                                                />
+                                                <div className="flex items-center justify-end gap-2">
+                                                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                    Qty
+                                                  </span>
+                                                  <input
+                                                    type="number"
+                                                    min={1}
+                                                    value={equipment.quantity}
+                                                    onChange={(e) =>
+                                                      updateEquipmentQuantity(
+                                                        group.id,
+                                                        step.id,
+                                                        equipment.id,
+                                                        Number(e.target.value),
+                                                      )
+                                                    }
+                                                    aria-label={`Quantity for ${equipment.name}`}
+                                                    className="h-8 w-16 rounded-md border border-gray-200 px-2 text-[12px] text-gray-800 outline-none transition-all duration-150 focus:border-emerald-400 hover:opacity-85 active:scale-[0.98]"
+                                                  />
+                                                </div>
 
-                                                <button
-                                                  type="button"
-                                                  onClick={() =>
-                                                    removeAssignedEquipment(
-                                                      group.id,
-                                                      step.id,
-                                                      equipment.id,
-                                                    )
-                                                  }
-                                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-500 transform transition-all duration-150 hover:bg-red-100 hover:text-red-600 hover:opacity-85 hover:scale-[0.985] active:scale-95"
-                                                  aria-label={`Remove ${equipment.name}`}
-                                                  title="Remove"
-                                                >
-                                                  <X className="h-4 w-4" />
-                                                </button>
+                                                <div className="flex justify-end">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      removeAssignedEquipment(
+                                                        group.id,
+                                                        step.id,
+                                                        equipment.id,
+                                                      )
+                                                    }
+                                                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-500 transform transition-all duration-150 hover:bg-red-100 hover:text-red-600 hover:opacity-85 hover:scale-[0.985] active:scale-95"
+                                                    aria-label={`Remove ${equipment.name}`}
+                                                    title="Remove"
+                                                  >
+                                                    <X className="h-4 w-4" />
+                                                  </button>
+                                                </div>
                                               </div>
                                             ))}
                                           </div>
@@ -823,7 +841,7 @@ export default function EquipmentAssignmentPage() {
                 onClick={() => {
                   setShowSaveConfirm(false);
                   setPendingAction(null);
-                  setIsNavigatingNext(false);
+                  clearLeaveButtonLoading();
                 }}
                 className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95"
                 >
@@ -841,18 +859,10 @@ export default function EquipmentAssignmentPage() {
               <button
                 type="button"
                 onClick={() => handleConfirmSave(true)}
-                disabled={isSavingFromModal}
                 className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-white transform transition-all duration-150 hover:opacity-85 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
                 style={{ backgroundColor: ACCENT }}
               >
-                {isSavingFromModal ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Save"
-                )}
+                Save
               </button>
             </div>
           </div>
@@ -861,12 +871,23 @@ export default function EquipmentAssignmentPage() {
 
       <AddEquipmentModal
         open={equipmentModalState.open}
+        mainTaskTitle={equipmentModalState.mainTaskTitle}
         subTaskTitle={equipmentModalState.subTaskTitle}
         equipmentItems={equipmentCatalog}
-        selectedIds={equipmentModalState.selectedIds}
-        onToggle={toggleEquipmentSelection}
+        selectedEquipment={
+          services
+            .find((group) => group.id === equipmentModalState.mainTaskId)
+            ?.children.find(
+              (step) => step.id === equipmentModalState.subTaskId,
+            )
+            ?.equipments.map((item) => ({
+              id: item.equipmentId ?? item.id,
+              name: item.name,
+            })) ?? []
+        }
+        onAddEquipment={handleAddEquipmentToSubTask}
+        onRemoveEquipment={handleRemoveEquipmentFromModal}
         onClose={closeEquipmentModal}
-        onSave={saveEquipmentSelection}
       />
     </div>
   );

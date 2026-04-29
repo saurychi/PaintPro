@@ -4,12 +4,26 @@ import {
   getRequiredEmployeeCountFromEstimatedHours,
   suggestEmployeesForTasks,
 } from "@/lib/planning/employeeAssignment";
+import { estimateDurationForSubTask } from "@/lib/planning/durationEstimator";
+import {
+  computeAreasFromDimensions,
+  type ProjectDimensions,
+} from "@/lib/planning/materialEstimator";
 type EmployeeAssignmentScore = {
   employee: EmployeeHint;
   score: number;
 };
 
 import type { EmployeeHint } from "@/lib/planning/aiContext";
+
+function toSortOrder(value: unknown, fallback = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
 
 function toSpecialties(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -89,8 +103,11 @@ export async function POST(request: Request) {
         `
         project_sub_task_id,
         estimated_hours,
+        sort_order,
         project_task:project_task_id (
           project_task_id,
+          project_id,
+          sort_order,
           main_task:main_task_id (
             main_task_id,
             name
@@ -162,10 +179,135 @@ export async function POST(request: Request) {
 
     const mainTaskName = mainTaskRelation?.name || "Main Task";
     const subTaskTitle = subTaskRelation?.description || "Sub Task";
+    const projectId =
+      typeof projectTaskRelation?.project_id === "string"
+        ? projectTaskRelation.project_id
+        : "";
+    const mainTaskId =
+      typeof mainTaskRelation?.main_task_id === "string"
+        ? mainTaskRelation.main_task_id
+        : "";
+    const subTaskId =
+      typeof subTaskRelation?.sub_task_id === "string"
+        ? subTaskRelation.sub_task_id
+        : "";
 
     const estimatedHours = Number(projectSubTask?.estimated_hours ?? 0);
-    const requiredEmployeeCount =
+    let requiredEmployeeCount =
       getRequiredEmployeeCountFromEstimatedHours(estimatedHours);
+
+    if (projectId && mainTaskId && subTaskId) {
+      const { data: projectRow, error: projectError } = await supabaseAdmin
+        .from("projects")
+        .select("dimensions")
+        .eq("project_id", projectId)
+        .maybeSingle();
+
+      if (!projectError && projectRow?.dimensions) {
+        try {
+          const durationEstimate = await estimateDurationForSubTask({
+            mainTaskId,
+            subTaskId,
+            areas: computeAreasFromDimensions(
+              projectRow.dimensions as ProjectDimensions,
+            ),
+          });
+
+          requiredEmployeeCount = durationEstimate.requiredEmployeeCount;
+        } catch {
+          // Fall back to the saved estimate if the original formula inputs are
+          // no longer available or the rule has changed.
+        }
+      }
+    }
+
+    let previousEmployeeIds: string[] = [];
+
+    if (projectId) {
+      const { data: projectTasks, error: projectTasksError } = await supabaseAdmin
+        .from("project_task")
+        .select("project_task_id, sort_order")
+        .eq("project_id", projectId);
+
+      if (projectTasksError) {
+        return NextResponse.json(
+          {
+            error: "Failed to load project task order.",
+            details: projectTasksError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      const projectTaskIds = (projectTasks ?? []).map((row: any) => row.project_task_id);
+      const projectTaskSortOrderMap = new Map(
+        (projectTasks ?? []).map((row: any) => [
+          row.project_task_id,
+          toSortOrder(row.sort_order),
+        ]),
+      );
+
+      if (projectTaskIds.length > 0) {
+        const { data: orderedProjectSubTasks, error: orderedProjectSubTasksError } =
+          await supabaseAdmin
+            .from("project_sub_task")
+            .select("project_sub_task_id, project_task_id, sort_order")
+            .in("project_task_id", projectTaskIds);
+
+        if (orderedProjectSubTasksError) {
+          return NextResponse.json(
+            {
+              error: "Failed to load project subtask order.",
+              details: orderedProjectSubTasksError.message,
+            },
+            { status: 500 },
+          );
+        }
+
+        const orderedRows = [...(orderedProjectSubTasks ?? [])].sort(
+          (a: any, b: any) => {
+            const projectTaskOrder =
+              toSortOrder(projectTaskSortOrderMap.get(a.project_task_id)) -
+              toSortOrder(projectTaskSortOrderMap.get(b.project_task_id));
+
+            if (projectTaskOrder !== 0) return projectTaskOrder;
+
+            return toSortOrder(a.sort_order) - toSortOrder(b.sort_order);
+          },
+        );
+
+        const currentIndex = orderedRows.findIndex(
+          (row: any) => row.project_sub_task_id === projectSubTaskId,
+        );
+
+        if (currentIndex > 0) {
+          const previousProjectSubTaskId =
+            orderedRows[currentIndex - 1]?.project_sub_task_id ?? "";
+
+          if (previousProjectSubTaskId) {
+            const { data: previousAssignments, error: previousAssignmentsError } =
+              await supabaseAdmin
+                .from("project_sub_task_staff")
+                .select("user_id")
+                .eq("project_sub_task_id", previousProjectSubTaskId);
+
+            if (previousAssignmentsError) {
+              return NextResponse.json(
+                {
+                  error: "Failed to load previous subtask assignments.",
+                  details: previousAssignmentsError.message,
+                },
+                { status: 500 },
+              );
+            }
+
+            previousEmployeeIds = uniqueStrings(
+              (previousAssignments ?? []).map((row: any) => String(row.user_id || "")),
+            );
+          }
+        }
+      }
+    }
 
     const candidates = suggestEmployeesForTasks({
       tasks: [
@@ -178,10 +320,20 @@ export async function POST(request: Request) {
       assignmentCounts: {},
     });
 
-    const selectedEmployees = pickWeightedEmployees(
-      candidates,
-      requiredEmployeeCount,
-    );
+    const previousEmployeeIdSet = new Set(previousEmployeeIds);
+    const nonConsecutiveCandidates =
+      previousEmployeeIdSet.size === 0
+        ? candidates
+        : candidates.filter(
+            (candidate) => !previousEmployeeIdSet.has(candidate.employee.id),
+          );
+
+    const candidatePool =
+      nonConsecutiveCandidates.length >= requiredEmployeeCount
+        ? nonConsecutiveCandidates
+        : candidates;
+
+    const selectedEmployees = pickWeightedEmployees(candidatePool, requiredEmployeeCount);
 
     const { error: deleteError } = await supabaseAdmin
       .from("project_sub_task_staff")

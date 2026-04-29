@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   computeAreasFromDimensions,
-  estimateMaterialsForTask,
+  estimateMaterialsForSubTask,
   type ProjectDimensions,
 } from "@/lib/planning/materialEstimator";
 import { buildProjectSchedule } from "@/lib/planning/projectScheduling";
@@ -116,17 +116,19 @@ type MainTaskRow = {
   main_task_id: string;
   name: string | null;
   sort_order: number | null;
-  base_price: number | null;
 };
 
 type ProjectTaskRow = {
   project_task_id: string;
   main_task_id?: string | null;
+  sort_order?: number | null;
 };
 
 type SubTaskRow = {
   sub_task_id: string;
+  main_task_id: string | null;
   description: string | null;
+  sort_order: number | null;
 };
 
 type MaterialRow = {
@@ -701,7 +703,7 @@ export async function POST(req: Request) {
 
   const { data: catalogMainTasks, error: catalogMainTaskError } = await supabaseAdmin
     .from("main_task")
-    .select("main_task_id, name, sort_order, base_price");
+    .select("main_task_id, name, sort_order:default_sort_order");
 
   if (catalogMainTaskError) {
     return NextResponse.json(
@@ -717,7 +719,7 @@ export async function POST(req: Request) {
 
   const { data: catalogSubTasks, error: catalogSubTaskError } = await supabaseAdmin
     .from("sub_task")
-    .select("sub_task_id, main_task_id, description");
+    .select("sub_task_id, main_task_id, description, sort_order:default_sort_order");
 
   if (catalogSubTaskError) {
     return NextResponse.json(
@@ -759,7 +761,7 @@ export async function POST(req: Request) {
   );
 
   const subTaskMap = new Map<string, SubTaskRow>(
-    ((catalogSubTasks ?? []) as Array<SubTaskRow & { main_task_id: string | null }>)
+    ((catalogSubTasks ?? []) as SubTaskRow[])
       .filter((row) => row.sub_task_id && row.main_task_id && row.description)
       .map((row) => [
         `${row.main_task_id}::${norm(String(row.description))}`,
@@ -801,8 +803,9 @@ export async function POST(req: Request) {
       .insert({
         project_id: insertedProject.project_id,
         main_task_id: matchedMainTask.main_task_id,
+        sort_order: Number(matchedMainTask.sort_order ?? 0),
       })
-      .select("project_task_id, main_task_id")
+      .select("project_task_id, main_task_id, sort_order")
       .single<ProjectTaskRow>();
 
     const insertedMaterialNames = new Set<string>();
@@ -841,11 +844,10 @@ export async function POST(req: Request) {
       }
 
       const assignedEmployees = normalizeAssignedEmployees(subTask);
-      const assignedUserId = assignedEmployees[0]?.id ?? null;
       const estimatedHours =
-        subTask.duration?.adjustedDurationHours ??
-        subTask.duration?.roundedHours ??
         subTask.duration?.estimatedHours ??
+        subTask.duration?.roundedHours ??
+        subTask.duration?.adjustedDurationHours ??
         null;
 
       const equipmentPayload = Array.isArray(subTask.equipment)
@@ -863,7 +865,7 @@ export async function POST(req: Request) {
             scheduled_start_datetime: subTask.scheduledStartDatetime ?? null,
             scheduled_end_datetime: subTask.scheduledEndDatetime ?? null,
             status: "pending",
-            sort_order: subTask.priority || 0,
+            sort_order: Number(matchedSubTask.sort_order ?? 0),
             notes: null,
           })
           .select(
@@ -927,17 +929,9 @@ export async function POST(req: Request) {
         );
       }
 
-      const estimatedMaterials = estimateMaterialsForTask({
-        task: {
-          name: task.name,
-          sub_tasks: task.sub_tasks.map((item) => ({
-            title: item.title,
-            priority: item.priority,
-          })),
-          materials: task.sub_tasks.flatMap((item) =>
-            item.materials.map((material) => material.name)
-          ),
-        },
+      const estimatedMaterials = await estimateMaterialsForSubTask({
+        mainTaskId: matchedMainTask.main_task_id,
+        subTaskId: matchedSubTask.sub_task_id,
         areas,
         materialCatalog: subTask.materials.map((material) => ({
           name: material.name,
@@ -963,7 +957,8 @@ export async function POST(req: Request) {
           material.name
         );
 
-        const estimatedQuantity = estimatedMaterial?.qty ?? 0;
+        // Fall back to 1 unit when no formula rule is configured for this material
+        const estimatedQuantity = estimatedMaterial?.qty ?? 1;
         const unitCostRow = await supabaseAdmin
           .from("materials")
           .select("unit_cost")
@@ -1055,7 +1050,7 @@ export async function POST(req: Request) {
   );
 
   const subTaskCatalogMap = new Map(
-    ((catalogSubTasks ?? []) as Array<SubTaskRow & { main_task_id: string | null }>).map(
+    ((catalogSubTasks ?? []) as SubTaskRow[]).map(
       (row) => [row.sub_task_id, row]
     )
   );
@@ -1114,6 +1109,7 @@ export async function POST(req: Request) {
         name: user.username || user.email || "Staff",
         hourlyWage: Number(user.hourly_wage ?? 0),
       })),
+      equipment: [],
     });
 
     subtasksByProjectTaskId.set(row.project_task_id, current);
@@ -1137,7 +1133,6 @@ export async function POST(req: Request) {
         mainTaskId: projectTask.main_task_id,
         title: mainTask?.name ?? "Main Task",
         sortOrder: Number(mainTask?.sort_order ?? 0),
-        basePrice: Number(mainTask?.base_price ?? 0),
         materials: materialsByProjectTaskId.get(projectTask.project_task_id) ?? [],
         subtasks: subtasksByProjectTaskId.get(projectTask.project_task_id) ?? [],
       };
