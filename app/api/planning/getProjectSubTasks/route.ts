@@ -88,13 +88,13 @@ export async function GET(request: NextRequest) {
           main_task:main_task_id!inner (
             main_task_id,
             name,
-            sort_order
+            sort_order:default_sort_order
           )
         ),
         sub_task:sub_task_id!inner (
           sub_task_id,
           description,
-          sort_order
+          sort_order:default_sort_order
         )
       `)
       .in("project_task_id", projectTaskIds)

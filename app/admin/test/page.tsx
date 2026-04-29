@@ -492,10 +492,22 @@ function makeRowFromPreset(
   };
 }
 
+function makeRecommendedSurfaceRow(
+  presets: SurfaceScalePresets,
+  presetKey: ScalePresetKey,
+): MeasurementRow {
+  return makeRowFromPreset(presets, presetKey, "medium", {
+    estimatedValue: 0,
+    isMeasurementPending: true,
+  });
+}
+
 function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
   const scaled: Record<string, ProjectScaledField> = {};
 
   for (const row of rows) {
+    if (row.isMeasurementPending) continue;
+
     const currentValue = Number.isFinite(row.estimatedValue)
       ? row.estimatedValue
       : 0;
@@ -773,7 +785,6 @@ export default function AdminTestPage() {
         return {
           id: row.id,
           label: preset.label,
-          value: `${row.estimatedValue} ${unitLabel(preset.unit)}`,
         };
       })
       .filter(
@@ -782,7 +793,6 @@ export default function AdminTestPage() {
         ): chip is {
           id: string;
           label: string;
-          value: string;
         } => Boolean(chip),
       );
   }, [measurementRows, surfacePresets]);
@@ -854,9 +864,10 @@ export default function AdminTestPage() {
       return {
         ...row,
         sizeBand: nextBand,
-        estimatedValue: row.isManualOverride
+        estimatedValue: row.isManualOverride && !row.isMeasurementPending
           ? row.estimatedValue
           : preset.bands[nextBand].suggested,
+        isMeasurementPending: false,
       };
     });
   }
@@ -872,16 +883,30 @@ export default function AdminTestPage() {
       sizeBand: "medium",
       estimatedValue: preset.bands.medium.suggested,
       isManualOverride: false,
+      isMeasurementPending: false,
     }));
   }
 
   function handleManualValueChange(id: string, rawValue: string) {
-    const nextValue = Number(rawValue);
+    const trimmedValue = rawValue.trim();
+
+    if (!trimmedValue) {
+      updateRow(id, (row) => ({
+        ...row,
+        estimatedValue: 0,
+        isManualOverride: true,
+        isMeasurementPending: true,
+      }));
+      return;
+    }
+
+    const nextValue = Number(trimmedValue);
 
     updateRow(id, (row) => ({
       ...row,
       estimatedValue: Number.isFinite(nextValue) ? nextValue : 0,
       isManualOverride: true,
+      isMeasurementPending: !Number.isFinite(nextValue),
     }));
   }
 
@@ -1118,13 +1143,15 @@ export default function AdminTestPage() {
 
         for (const key of recommendedKeys) {
           if (existingKeys.has(key)) continue;
-          nextRows.push(makeRowFromPreset(surfacePresets, key, "medium"));
+          nextRows.push(makeRecommendedSurfaceRow(surfacePresets, key));
         }
 
         return nextRows;
       });
 
-      toast.success("Recommended surfaces added to the measurement picker.");
+      toast.success("Recommended surfaces added.", {
+        description: "Measurements were left blank so you can fill them in later.",
+      });
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to recommend surfaces.",
@@ -1691,7 +1718,7 @@ export default function AdminTestPage() {
                   <span
                     key={chip.id}
                     className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700">
-                    {chip.label}: {chip.value}
+                    {chip.label}
                   </span>
                 ))}
                 {measurementRows.length > 4 ? (

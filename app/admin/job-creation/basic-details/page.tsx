@@ -302,10 +302,22 @@ function makeRowFromPreset(
   };
 }
 
+function makeRecommendedSurfaceRow(
+  presets: SurfaceScalePresets,
+  presetKey: ScalePresetKey,
+): MeasurementRow {
+  return makeRowFromPreset(presets, presetKey, "medium", {
+    estimatedValue: 0,
+    isMeasurementPending: true,
+  });
+}
+
 function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
   const scaled: Record<string, ProjectScaledField> = {};
 
   for (const row of rows) {
+    if (row.isMeasurementPending) continue;
+
     const currentValue = Number.isFinite(row.estimatedValue)
       ? row.estimatedValue
       : 0;
@@ -651,7 +663,6 @@ export default function BasicDetails() {
         return {
           id: row.id,
           label: preset.label,
-          value: `${row.estimatedValue} ${unitLabel(preset.unit)}`,
         };
       })
       .filter(
@@ -660,7 +671,6 @@ export default function BasicDetails() {
         ): chip is {
           id: string;
           label: string;
-          value: string;
         } => Boolean(chip),
       );
   }, [measurementRows, surfacePresets]);
@@ -820,9 +830,10 @@ export default function BasicDetails() {
       return {
         ...row,
         sizeBand: nextBand,
-        estimatedValue: row.isManualOverride
+        estimatedValue: row.isManualOverride && !row.isMeasurementPending
           ? row.estimatedValue
           : preset.bands[nextBand].suggested,
+        isMeasurementPending: false,
       };
     });
   }
@@ -838,15 +849,29 @@ export default function BasicDetails() {
       sizeBand: "medium",
       estimatedValue: preset.bands.medium.suggested,
       isManualOverride: false,
+      isMeasurementPending: false,
     }));
   }
 
   function handleManualValueChange(id: string, rawValue: string) {
-    const nextValue = Number(rawValue);
+    const trimmedValue = rawValue.trim();
+
+    if (!trimmedValue) {
+      updateRow(id, (row) => ({
+        ...row,
+        estimatedValue: 0,
+        isManualOverride: true,
+        isMeasurementPending: true,
+      }));
+      return;
+    }
+
+    const nextValue = Number(trimmedValue);
     updateRow(id, (row) => ({
       ...row,
       estimatedValue: Number.isFinite(nextValue) ? nextValue : 0,
       isManualOverride: true,
+      isMeasurementPending: !Number.isFinite(nextValue),
     }));
   }
 
@@ -882,6 +907,7 @@ export default function BasicDetails() {
             ...nextRows[existingIndex],
             estimatedValue: measurement.estimatedValue,
             isManualOverride: true,
+            isMeasurementPending: false,
           };
           continue;
         }
@@ -890,6 +916,7 @@ export default function BasicDetails() {
           makeRowFromPreset(surfacePresets, measurement.presetKey, "medium", {
             estimatedValue: measurement.estimatedValue,
             isManualOverride: true,
+            isMeasurementPending: false,
           }),
         );
       }
@@ -1110,9 +1137,7 @@ export default function BasicDetails() {
 
       if (surfaceKeys.length > 0) {
         setMeasurementRows(
-          surfaceKeys.map((key) =>
-            makeRowFromPreset(surfacePresets, key, "medium"),
-          ),
+          surfaceKeys.map((key) => makeRecommendedSurfaceRow(surfacePresets, key)),
         );
       }
 
@@ -2359,7 +2384,7 @@ export default function BasicDetails() {
                               <span
                                 key={chip.id}
                                 className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
-                                {chip.label}: {chip.value}
+                                {chip.label}
                               </span>
                             ))}
                             {measurementRows.length > 6 ? (

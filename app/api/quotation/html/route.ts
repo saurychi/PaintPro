@@ -23,7 +23,6 @@ type CostEstimationResponse = {
     mainTaskId: string;
     title: string;
     sortOrder: number;
-    basePrice: number;
     materialTotal: number;
     laborTotal: number;
     totalCost: number;
@@ -53,7 +52,6 @@ type CostEstimationResponse = {
     }>;
   }>;
   summary: {
-    basePriceTotal: number;
     materialTotal: number;
     laborTotal: number;
     totalCost: number;
@@ -540,7 +538,6 @@ export async function GET(request: Request) {
           <thead>
             <tr>
               <th>Main Task</th>
-              <th class="text-right">Base Price</th>
               <th class="text-right">Materials</th>
               <th class="text-right">Labor</th>
               <th class="text-right">Total</th>
@@ -552,7 +549,6 @@ export async function GET(request: Request) {
                 (task) => `
                   <tr>
                     <td>${escapeHtml(task.title)}</td>
-                    <td class="text-right">${escapeHtml(formatCurrency(task.basePrice))}</td>
                     <td class="text-right">${escapeHtml(formatCurrency(task.materialTotal))}</td>
                     <td class="text-right">${escapeHtml(formatCurrency(task.laborTotal))}</td>
                     <td class="text-right">${escapeHtml(formatCurrency(task.totalCost))}</td>
@@ -566,10 +562,6 @@ export async function GET(request: Request) {
 
       <div class="section">
         <div class="summary-box">
-          <div class="summary-row">
-            <span>Main Task Base Total</span>
-            <span>${escapeHtml(formatCurrency(summary.basePriceTotal))}</span>
-          </div>
           <div class="summary-row">
             <span>Materials Total</span>
             <span>${escapeHtml(formatCurrency(summary.materialTotal))}</span>
