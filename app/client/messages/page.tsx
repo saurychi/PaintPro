@@ -2,11 +2,20 @@
 
 import Image from "next/image"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Search, MessageSquare, Loader2, MoreHorizontal } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { supabase } from "@/lib/supabaseClient"
 
 const ACCENT = "#00c065"
+
+function roleKey(role: string | null | undefined) {
+  return String(role || "").trim().toLowerCase()
+}
+
+function roleLabel(role: string) {
+  if (!role || role === "all") return "All"
+  return role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+}
 
 type MessageRow = {
   id: string
@@ -73,7 +82,11 @@ export default function ClientMessages() {
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState("all")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState(false)
+  const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false)
+  const [recipientLoadError, setRecipientLoadError] = useState<string | null>(null)
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -343,21 +356,44 @@ export default function ClientMessages() {
     }
   }
 
-  const handleOpenNewChat = async () => {
-    setIsNewChatOpen(true)
+  const loadAvailableRecipients = useCallback(async (force = false) => {
+    if (hasLoadedRecipients && !force) return
+
+    setIsLoadingRecipients(true)
+    setRecipientLoadError(null)
 
     try {
       const response = await fetch("/api/messages/project-chat/users", { cache: "no-store" })
-      const data = (await response.json().catch(() => null)) as AvailableUser[] | { error?: string; details?: string } | null
+      const data = (await response.json().catch(() => null)) as
+        | AvailableUser[]
+        | { error?: string; details?: string }
+        | null
 
       if (!response.ok) {
         throw new Error(readError(Array.isArray(data) ? null : data, "Failed to load users."))
       }
 
       setAvailableUsers(Array.isArray(data) ? data : [])
-    } catch (error) {
+      setHasLoadedRecipients(true)
+    } catch (error: unknown) {
       console.error("Error loading users:", error)
       setAvailableUsers([])
+      setHasLoadedRecipients(false)
+      setRecipientLoadError(
+        error instanceof Error ? error.message : "Failed to load users."
+      )
+    } finally {
+      setIsLoadingRecipients(false)
+    }
+  }, [hasLoadedRecipients])
+
+  const handleOpenNewChat = () => {
+    setIsNewChatOpen(true)
+    setUserSearchQuery("")
+    setSelectedRoleFilter("all")
+
+    if (!isLoadingRecipients && (!hasLoadedRecipients || recipientLoadError)) {
+      void loadAvailableRecipients(Boolean(recipientLoadError))
     }
   }
 
@@ -379,6 +415,7 @@ export default function ClientMessages() {
       await loadConversations(data.conversationId, activeChatId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
+      setSelectedRoleFilter("all")
     } catch (error) {
       console.error("Error starting conversation:", error)
     } finally {
@@ -386,14 +423,37 @@ export default function ClientMessages() {
     }
   }
 
-  const filteredUsers = availableUsers.filter((user) => {
+  const availableRoleFilters = useMemo(
+    () => [
+      "all",
+      ...Array.from(
+        new Set(
+          availableUsers
+            .map((user) => roleKey(user.role))
+            .filter(Boolean)
+        )
+      ).sort(),
+    ],
+    [availableUsers]
+  )
+
+  const filteredUsers = useMemo(() => {
     const query = userSearchQuery.toLowerCase()
-    return (
-      user.username.toLowerCase().includes(query) ||
-      user.role.toLowerCase().includes(query) ||
-      (user.assignedTasks ?? "").toLowerCase().includes(query)
-    )
-  })
+
+    return availableUsers.filter((user) => {
+      const normalizedRole = roleKey(user.role)
+      const matchesRole = selectedRoleFilter === "all" || normalizedRole === selectedRoleFilter
+
+      return (
+        matchesRole &&
+        (
+          user.username.toLowerCase().includes(query) ||
+          normalizedRole.includes(query) ||
+          (user.assignedTasks ?? "").toLowerCase().includes(query)
+        )
+      )
+    })
+  }, [availableUsers, selectedRoleFilter, userSearchQuery])
 
   const activeChat = useMemo(
     () => conversations.find((conversation) => conversation.id === activeChatId) || null,
@@ -432,9 +492,11 @@ export default function ClientMessages() {
               <p className="text-sm font-semibold text-gray-900">Conversations</p>
               <button
                 onClick={handleOpenNewChat}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold shadow-sm hover:bg-gray-50 transition-colors"
+                aria-label="Start new message"
+                title="Start new message"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
               >
-                New
+                <UserPlus className="h-4 w-4" />
               </button>
             </div>
 
@@ -647,7 +709,8 @@ export default function ClientMessages() {
 
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
         <DialogContent className="max-w-md bg-white border-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] p-0">
-          <DialogHeader className="p-6 pb-4 border-b border-gray-100">
+          <div className="h-1.5 w-full bg-[#00c065]" />
+          <DialogHeader className="bg-emerald-50/70 p-6 pb-4 border-b border-emerald-100">
             <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
 
             <div className="relative mt-4">
@@ -657,13 +720,48 @@ export default function ClientMessages() {
                 placeholder="Search by name, role, or task..."
                 value={userSearchQuery}
                 onChange={(event) => setUserSearchQuery(event.target.value)}
+                disabled={isLoadingRecipients}
                 className="w-full pl-9 pr-4 py-2 bg-gray-50 border-0 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00c065]/20"
               />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {availableRoleFilters.map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => setSelectedRoleFilter(role)}
+                  disabled={isLoadingRecipients}
+                  className={[
+                    "rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                    selectedRoleFilter === role
+                      ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065]"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
+                  ].join(" ")}
+                >
+                  {roleLabel(role)}
+                </button>
+              ))}
             </div>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-            {filteredUsers.length === 0 ? (
+            {isLoadingRecipients ? (
+              <div className="flex min-h-[220px] items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-[#00c065]" />
+              </div>
+            ) : recipientLoadError ? (
+              <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="text-sm text-red-600">{recipientLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadAvailableRecipients(true)}
+                  className="rounded-lg border border-[#00c065]/30 bg-emerald-50 px-3 py-2 text-xs font-semibold text-[#00c065] transition-colors hover:bg-emerald-100"
+                >
+                  Try Again
+                </button>
+              </div>
+            ) : filteredUsers.length === 0 ? (
               <p className="text-center text-gray-400 text-sm py-8">No users found.</p>
             ) : (
               <div className="space-y-1">

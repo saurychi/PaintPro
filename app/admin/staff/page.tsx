@@ -59,6 +59,16 @@ type EmployeeInput = {
   photoUrl: string
 }
 
+type StaffApiUser = {
+  id: string
+  username: string | null
+  email: string | null
+  phone: string | null
+  profile_image_url: string | null
+  status: string | null
+  specialty: string | null
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string | null) {
@@ -145,10 +155,10 @@ export default function Staff() {
     setIsLoading(true)
     try {
       const res = await fetch("/api/admin/staff")
-      const json = await res.json()
+      const json = (await res.json()) as { staff?: StaffApiUser[] }
       if (json.staff) {
         setEmployees(
-          json.staff.map((u: any) => ({
+          json.staff.map((u) => ({
             id: u.id,
             name: u.username || "",
             email: u.email || "",
@@ -335,18 +345,7 @@ export default function Staff() {
     }
   }
 
-  const handleCloseAddModal = useCallback(() => setIsAddModalOpen(false), [])
-  const handleCloseEditModal = useCallback(() => setEditTarget(null), [])
 
-  const editModalData = useMemo(() => {
-    if (!editTarget) return undefined
-    return {
-      name: editTarget.name,
-      email: editTarget.email,
-      phone: editTarget.phone || "",
-      photoUrl: editTarget.photoUrl || "/paint_pro_logo.png",
-    }
-  }, [editTarget])
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -765,7 +764,7 @@ export default function Staff() {
             </div>
             <p className="mb-5 mt-2 text-sm text-gray-600">
               <strong>{archiveTarget.name}</strong> will be removed from the active staff list. You can view them
-              by enabling "Archived" in the filter.
+              by enabling &quot;Archived&quot; in the filter.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -1021,4 +1020,4 @@ const StaffModal = memo(function StaffModal({
       </div>
     </div>
   )
-}
+})

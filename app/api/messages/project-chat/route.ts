@@ -3,128 +3,251 @@ import { cookies } from "next/headers"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
 const CLIENT_COOKIE = "paintpro_client_project_id"
+const ALLOWED_PROJECT_ROLES = new Set(["staff", "manager"])
+
+type ProjectContext = {
+  client_id: string | null
+  created_by: string | null
+}
+
+type ParticipantUser = {
+  id: string
+  username: string | null
+  role: string | null
+  profile_image_url: string | null
+}
+
+type ParticipantRow = {
+  conversation_id: string
+  user_id: string
+  users: ParticipantUser | ParticipantUser[] | null
+}
+
+type MessageRow = {
+  conversation_id: string
+  content: string
+  created_at: string
+}
+
+function normalizeRole(role: string | null | undefined) {
+  return String(role ?? "").trim().toLowerCase()
+}
+
+function readSingleRelation<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
+}
 
 async function getProjectId(): Promise<string | null> {
   const cookieStore = await cookies()
   return cookieStore.get(CLIENT_COOKIE)?.value ?? null
 }
 
-async function getClientId(projectId: string): Promise<string | null> {
+async function getProjectContext(projectId: string) {
   const { data } = await supabaseAdmin
     .from("projects")
-    .select("client_id")
+    .select("client_id, created_by")
     .eq("project_id", projectId)
     .maybeSingle()
-  return (data as any)?.client_id ?? null
+
+  return (data as ProjectContext | null) ?? null
+}
+
+async function getAssignedUserIds(projectId: string) {
+  const { data: taskData } = await supabaseAdmin
+    .from("project_task")
+    .select("project_task_id")
+    .eq("project_id", projectId)
+
+  const taskIds = (taskData ?? []).map((task) => task.project_task_id)
+  if (taskIds.length === 0) return new Set<string>()
+
+  const { data: subTaskData } = await supabaseAdmin
+    .from("project_sub_task")
+    .select("project_sub_task_id")
+    .in("project_task_id", taskIds)
+
+  const subTaskIds = (subTaskData ?? []).map((subTask) => subTask.project_sub_task_id)
+  if (subTaskIds.length === 0) return new Set<string>()
+
+  const { data: assignmentData } = await supabaseAdmin
+    .from("project_sub_task_staff")
+    .select("user_id")
+    .in("project_sub_task_id", subTaskIds)
+
+  return new Set((assignmentData ?? []).map((assignment) => assignment.user_id))
+}
+
+function isAllowedProjectRecipient(
+  userId: string,
+  role: string | null | undefined,
+  assignedUserIds: Set<string>,
+  projectManagerId: string | null
+) {
+  const normalizedRole = normalizeRole(role)
+  if (!ALLOWED_PROJECT_ROLES.has(normalizedRole)) return false
+
+  return assignedUserIds.has(userId) || (userId === projectManagerId && normalizedRole === "manager")
 }
 
 // GET /api/messages/project-chat — list all conversations for this project
 export async function GET() {
   const projectId = await getProjectId()
-  if (!projectId) return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
+  if (!projectId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
+  }
 
-  const clientId = await getClientId(projectId)
+  const projectContext = await getProjectContext(projectId)
+  const assignedUserIds = await getAssignedUserIds(projectId)
 
-  const { data: convos } = await supabaseAdmin
+  const { data: conversationData } = await supabaseAdmin
     .from("conversations")
     .select("id")
     .eq("project_id", projectId)
 
-  if (!convos || convos.length === 0) return NextResponse.json({ conversations: [], clientId })
+  if (!conversationData || conversationData.length === 0) {
+    return NextResponse.json({ conversations: [], clientId: projectContext?.client_id ?? null })
+  }
 
-  const convoIds = convos.map((c) => c.id)
+  const conversationIds = conversationData.map((conversation) => conversation.id)
 
-  const { data: participants } = await supabaseAdmin
+  const { data: participantData } = await supabaseAdmin
     .from("conversation_participants")
     .select("conversation_id, user_id, users(id, username, role, profile_image_url)")
-    .in("conversation_id", convoIds)
+    .in("conversation_id", conversationIds)
 
-  const { data: allMessages } = await supabaseAdmin
+  const { data: messageData } = await supabaseAdmin
     .from("messages")
     .select("conversation_id, content, created_at")
-    .in("conversation_id", convoIds)
+    .in("conversation_id", conversationIds)
     .order("created_at", { ascending: false })
 
-  const latestMsgMap: Record<string, any> = {}
-  for (const msg of allMessages ?? []) {
-    if (!latestMsgMap[msg.conversation_id]) latestMsgMap[msg.conversation_id] = msg
-  }
-
-  const participantMap: Record<string, any> = {}
-  for (const p of participants ?? []) {
-    if (!participantMap[p.conversation_id]) participantMap[p.conversation_id] = p
-  }
-
-  const conversations = convos.map((c) => {
-    const p = participantMap[c.id]
-    const latestMsg = latestMsgMap[c.id]
-    const staffUser = (p as any)?.users
-    return {
-      id: c.id,
-      name: staffUser?.username ?? "Project Team",
-      role: staffUser?.role ?? "",
-      profile_image_url: staffUser?.profile_image_url ?? null,
-      lastMessage: latestMsg?.content ?? "Say hello!",
-      lastActivity: latestMsg ? new Date(latestMsg.created_at).getTime() : 0,
+  const latestMessageMap = new Map<string, MessageRow>()
+  for (const message of (messageData ?? []) as MessageRow[]) {
+    if (!latestMessageMap.has(message.conversation_id)) {
+      latestMessageMap.set(message.conversation_id, message)
     }
-  })
+  }
+
+  const participantMap = new Map<string, ParticipantUser>()
+  for (const participant of (participantData ?? []) as ParticipantRow[]) {
+    const user = readSingleRelation(participant.users)
+    if (!user) continue
+    if (!isAllowedProjectRecipient(user.id, user.role, assignedUserIds, projectContext?.created_by ?? null)) {
+      continue
+    }
+    if (!participantMap.has(participant.conversation_id)) {
+      participantMap.set(participant.conversation_id, user)
+    }
+  }
+
+  const conversations = conversationData
+    .map((conversation) => {
+      const participant = participantMap.get(conversation.id)
+      if (!participant) return null
+
+      const latestMessage = latestMessageMap.get(conversation.id)
+      return {
+        id: conversation.id,
+        name: participant.username ?? "Project Team",
+        role: normalizeRole(participant.role),
+        profile_image_url: participant.profile_image_url ?? null,
+        lastMessage: latestMessage?.content ?? "Say hello!",
+        lastActivity: latestMessage ? new Date(latestMessage.created_at).getTime() : 0,
+      }
+    })
+    .filter((conversation): conversation is NonNullable<typeof conversation> => Boolean(conversation))
 
   conversations.sort((a, b) => b.lastActivity - a.lastActivity)
-  return NextResponse.json({ conversations, clientId })
+
+  return NextResponse.json({
+    conversations,
+    clientId: projectContext?.client_id ?? null,
+  })
 }
 
-// POST /api/messages/project-chat — start (or reuse) a conversation with a staff user
+// POST /api/messages/project-chat — start (or reuse) a conversation with an assigned staff/manager user
 export async function POST(request: NextRequest) {
   const projectId = await getProjectId()
-  if (!projectId) return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
+  if (!projectId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
+  }
 
   const body = await request.json()
   const targetUserId = String(body?.targetUserId ?? "").trim()
-  if (!targetUserId) return NextResponse.json({ error: "Missing targetUserId." }, { status: 400 })
+  if (!targetUserId) {
+    return NextResponse.json({ error: "Missing targetUserId." }, { status: 400 })
+  }
 
-  // Reuse existing conversation with this staff member if one exists
-  const { data: existingConvos } = await supabaseAdmin
+  const projectContext = await getProjectContext(projectId)
+  const assignedUserIds = await getAssignedUserIds(projectId)
+
+  const { data: targetUser } = await supabaseAdmin
+    .from("users")
+    .select("id, role")
+    .eq("id", targetUserId)
+    .maybeSingle()
+
+  if (!targetUser) {
+    return NextResponse.json({ error: "Recipient not found." }, { status: 404 })
+  }
+
+  if (
+    !isAllowedProjectRecipient(
+      targetUser.id,
+      targetUser.role,
+      assignedUserIds,
+      projectContext?.created_by ?? null
+    )
+  ) {
+    return NextResponse.json(
+      { error: "This recipient is not assigned to the current project." },
+      { status: 403 }
+    )
+  }
+
+  const { data: existingConversationData } = await supabaseAdmin
     .from("conversations")
     .select("id")
     .eq("project_id", projectId)
 
-  const existingIds = (existingConvos ?? []).map((c) => c.id)
+  const existingConversationIds = (existingConversationData ?? []).map((conversation) => conversation.id)
 
-  if (existingIds.length > 0) {
-    const { data: shared } = await supabaseAdmin
+  if (existingConversationIds.length > 0) {
+    const { data: sharedConversationData } = await supabaseAdmin
       .from("conversation_participants")
       .select("conversation_id")
       .eq("user_id", targetUserId)
-      .in("conversation_id", existingIds)
+      .in("conversation_id", existingConversationIds)
 
-    if (shared && shared.length > 0) {
-      return NextResponse.json({ conversationId: shared[0].conversation_id })
+    if (sharedConversationData && sharedConversationData.length > 0) {
+      return NextResponse.json({ conversationId: sharedConversationData[0].conversation_id })
     }
   }
 
-  const { data: conv, error: convError } = await supabaseAdmin
+  const { data: conversation, error: conversationError } = await supabaseAdmin
     .from("conversations")
     .insert([{ project_id: projectId, updated_at: new Date().toISOString() }])
     .select("id")
     .single()
 
-  if (convError || !conv) {
+  if (conversationError || !conversation) {
     return NextResponse.json(
-      { error: "Failed to create conversation.", details: convError?.message },
+      { error: "Failed to create conversation.", details: conversationError?.message },
       { status: 500 }
     )
   }
 
-  const { error: partError } = await supabaseAdmin
+  const { error: participantError } = await supabaseAdmin
     .from("conversation_participants")
-    .insert([{ conversation_id: conv.id, user_id: targetUserId }])
+    .insert([{ conversation_id: conversation.id, user_id: targetUserId }])
 
-  if (partError) {
+  if (participantError) {
     return NextResponse.json(
-      { error: "Failed to add participant.", details: partError?.message },
+      { error: "Failed to add participant.", details: participantError?.message },
       { status: 500 }
     )
   }
 
-  return NextResponse.json({ conversationId: conv.id })
+  return NextResponse.json({ conversationId: conversation.id })
 }
