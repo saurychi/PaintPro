@@ -11,7 +11,7 @@ const STATUS_ROUTES: Record<string, string> = {
   schedule_pending: "/admin/job-creation/project-schedule",
   employee_assignment_pending: "/admin/job-creation/employee-assignment",
   cost_estimation_pending: "/admin/job-creation/cost-estimation",
-  overrview_pending: "/admin/job-creation/overview",
+  overview_pending: "/admin/job-creation/overview",
   quotation_pending: "/admin/job-creation/quotation-generation",
 };
 
@@ -34,18 +34,24 @@ export default function JobCreationStatusGuard({
   useEffect(() => {
     if (!projectId) return;
 
-    async function checkAndRedirect() {
+    let cancelled = false;
+
+    async function loadProjectStatus() {
       const res = await fetch(
         `/api/planning/getProjectStatus?projectId=${projectId}`,
         { cache: "no-store" },
       );
 
-      if (!res.ok) return;
+      if (!res.ok || cancelled) return "";
 
       const data = await res.json();
-      const status: string = data?.status || "";
+      return String(data?.status || "");
+    }
 
-      if (!status) return;
+    async function checkAndRedirect() {
+      const status = await loadProjectStatus();
+
+      if (!status || cancelled) return;
 
       if (POST_CREATION_STATUSES.has(status)) {
         window.location.replace("/admin");
@@ -53,12 +59,33 @@ export default function JobCreationStatusGuard({
       }
 
       const expectedPath = STATUS_ROUTES[status];
-      if (expectedPath && pathname !== expectedPath) {
-        window.location.replace(`${expectedPath}?projectId=${projectId}`);
+      if (!expectedPath || pathname === expectedPath) return;
+
+      // A quick re-check prevents brief stale status reads from bouncing
+      // the user back to the previous step right after clicking Next.
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+      if (cancelled) return;
+
+      const confirmedStatus = await loadProjectStatus();
+      if (!confirmedStatus || cancelled) return;
+
+      if (POST_CREATION_STATUSES.has(confirmedStatus)) {
+        window.location.replace("/admin");
+        return;
+      }
+
+      const confirmedPath = STATUS_ROUTES[confirmedStatus];
+      if (confirmedPath && pathname !== confirmedPath) {
+        window.location.replace(`${confirmedPath}?projectId=${projectId}`);
       }
     }
 
     checkAndRedirect();
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, pathname]);
 
   return <>{children}</>;
