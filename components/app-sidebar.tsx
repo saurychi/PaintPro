@@ -700,7 +700,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
         </SidebarHeader>
 
         {/* IMPORTANT: make SidebarContent a full-height flex column so collapsed does not overlap */}
-        <SidebarContent className="flex h-full min-h-0 flex-col overflow-hidden px-2 py-4">
+        <SidebarContent className="flex h-full min-h-0 flex-col overflow-hidden px-2 pb-4">
           <div className="relative min-h-0 flex-1">
             <div
               ref={desktopScrollRef}
@@ -713,7 +713,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
               )}>
               <SidebarMenu
                 className={cn(
-                  "space-y-1 flex",
+                  "flex space-y-1 pt-4 pb-4",
                   open ? "w-full flex-col" : "items-center",
                 )}>
                 {menuItems.map((item) => {
@@ -865,7 +865,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
           </div>
 
           {/* Divider only, no extra container */}
-          <div className="shrink-0 px-2 pt-4">
+          <div className="shrink-0 px-2">
             <div className="h-px w-full bg-gray-200/60" />
 
             <div
