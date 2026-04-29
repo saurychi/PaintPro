@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 import rawCountries from "@/lib/data/country-by-calling-code.json"
 
 const ACCENT = "#00c065"
@@ -94,6 +95,8 @@ const btnDanger =
 
 export default function ClientSettings() {
   const router = useRouter()
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
 
   const countries: CountryOption[] = useMemo(() => {
     const codes = Array.from(
@@ -373,6 +376,33 @@ export default function ClientSettings() {
                       {phoneErr ? <p className="text-sm font-semibold text-red-600">{phoneErr}</p> : null}
                       {phoneMsg ? <p className="text-sm font-semibold text-emerald-700">{phoneMsg}</p> : null}
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Appearance */}
+              <div className="pt-2">
+                <div className="h-px w-full bg-gray-200" />
+                <div className="mt-5 grid gap-3">
+                  <SectionTitle
+                    title="Appearance"
+                    subtitle="Control the look and feel of the interface."
+                  />
+
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Dark mode</p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Switch between light and dark interface.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTheme(isDark ? "light" : "dark")}
+                      className={btnNeutral}
+                    >
+                      {isDark ? "Light mode" : "Dark mode"}
+                    </button>
                   </div>
                 </div>
               </div>
