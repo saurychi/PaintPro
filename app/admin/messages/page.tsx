@@ -1,21 +1,63 @@
 "use client"
 
-import React, { useMemo, useState, useEffect, useRef } from "react"
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import {
   fetchConversations,
   fetchMessages,
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
-  updateMessage,
-  deleteMessage,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare, Loader2, MoreHorizontal } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
+
+function roleKey(role: string | null | undefined) {
+  return String(role || "").trim().toLowerCase()
+}
+
+function roleLabel(role: string) {
+  if (!role || role === "all") return "All"
+  return role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+type ConversationSummary = {
+  id: string
+  name: string
+  role: string
+  profile_image_url: string | null
+  lastMessage: string
+  unread: boolean
+  lastActivity: number
+}
+
+type AvailableUser = {
+  id: string
+  username: string
+  role: string
+  profile_image_url: string | null
+  kind?: "user" | "client"
+  clientId?: string
+  projectId?: string
+  assignedTasks?: string
+}
+
+type ConversationPayload = {
+  conversation_id: string
+  users?: {
+    username?: string | null
+    role?: string | null
+    profile_image_url?: string | null
+  } | null
+  latest_message?: {
+    content?: string | null
+    created_at: string
+  } | null
+  last_read_at?: string | null
+}
 
 export default function AdminMessages() {
   // UI State
@@ -26,14 +68,18 @@ export default function AdminMessages() {
   
   // Data State
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [conversations, setConversations] = useState<any[]>([]) 
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]) 
   const [chatHistory, setChatHistory] = useState<Message[]>([])
 
   // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
-  const [availableUsers, setAvailableUsers] = useState<any[]>([])
+  const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState("all")
   const [isCreatingChat, setIsCreatingChat] = useState(false)
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState(false)
+  const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false)
+  const [recipientLoadError, setRecipientLoadError] = useState<string | null>(null)
 
   // Message actions state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
@@ -73,9 +119,9 @@ export default function AdminMessages() {
   }, [chatHistory])
 
   // 3. Helper function to load/refresh conversations
-  const loadConversations = async (userId: string, selectChatId?: string) => {
-    const data = await fetchConversations(userId)
-    const mappedConvos = data.map((cp: any) => {
+  const loadConversations = useCallback(async (userId: string, selectChatId?: string) => {
+    const data = await fetchConversations(userId) as ConversationPayload[]
+    const mappedConvos = data.map((cp) => {
       // Calculate unread status by comparing timestamps
       const lastMsg = cp.latest_message
       const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
@@ -87,7 +133,7 @@ export default function AdminMessages() {
         name: cp.users?.username || "Unknown User",
         role: cp.users?.role || "Client",
         profile_image_url: cp.users?.profile_image_url || null,
-        lastMessage: lastMsg ? lastMsg.content : "Say hello!", 
+        lastMessage: lastMsg?.content || "Say hello!", 
         unread: isUnread,
         lastActivity: lastMsgTime // <-- NEW: Store time for sorting
       }
@@ -100,11 +146,11 @@ export default function AdminMessages() {
     
     if (selectChatId) {
       setActiveChatId(selectChatId)
-    } else if (mappedConvos.length > 0 && !activeChatId) {
-      setActiveChatId(mappedConvos[0].id)
+    } else if (mappedConvos.length > 0) {
+      setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
     }
     setIsLoading(false)
-  }
+  }, [])
 
   // 4. Initial Load — pick up pendingConvId from staff Message button if present
   useEffect(() => {
@@ -112,7 +158,7 @@ export default function AdminMessages() {
     const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined
     if (pendingConvId) localStorage.removeItem("pendingConvId")
     loadConversations(currentUserId, pendingConvId)
-  }, [currentUserId])
+  }, [currentUserId, loadConversations])
 
   // 5. When user CLICKS a chat, Mark as Read in DB
   useEffect(() => {
@@ -245,28 +291,57 @@ export default function AdminMessages() {
   }
 
   // Modal Handlers
-  const handleOpenNewChat = async () => {
-    setIsNewChatOpen(true)
-    if (currentUserId) {
-      const users = await fetchAvailableUsers(currentUserId)
+  const loadAvailableRecipients = useCallback(async (force = false) => {
+    if (!currentUserId || (hasLoadedRecipients && !force)) return
+
+    setIsLoadingRecipients(true)
+    setRecipientLoadError(null)
+
+    try {
+      const users = await fetchAvailableUsers(currentUserId) as AvailableUser[]
       setAvailableUsers(users)
+      setHasLoadedRecipients(true)
+    } catch (error: unknown) {
+      console.error("Error loading recipients:", error)
+      setAvailableUsers([])
+      setHasLoadedRecipients(false)
+      setRecipientLoadError(
+        error instanceof Error ? error.message : "Failed to load recipients."
+      )
+    } finally {
+      setIsLoadingRecipients(false)
+    }
+  }, [currentUserId, hasLoadedRecipients])
+
+  const handleOpenNewChat = () => {
+    setIsNewChatOpen(true)
+    setUserSearchQuery("")
+    setSelectedRoleFilter("all")
+
+    if (!isLoadingRecipients && (!hasLoadedRecipients || recipientLoadError)) {
+      void loadAvailableRecipients(Boolean(recipientLoadError))
     }
   }
 
-  const handleStartConversation = async (targetUserId: string) => {
+  const handleStartConversation = async (recipient: AvailableUser) => {
     if (!currentUserId) return
     setIsCreatingChat(true)
     try {
       const res = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId }),
+        body: JSON.stringify(
+          recipient.kind === "client"
+            ? { targetClientId: recipient.clientId, projectId: recipient.projectId }
+            : { targetUserId: recipient.id }
+        ),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || "Failed to start conversation.")
       await loadConversations(currentUserId, data.conversationId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
+      setSelectedRoleFilter("all")
     } catch (error) {
       console.error("Error starting conversation:", error)
     } finally {
@@ -274,10 +349,34 @@ export default function AdminMessages() {
     }
   }
 
-  const filteredUsers = availableUsers.filter((u) => 
-    u.username.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
-    u.role.toLowerCase().includes(userSearchQuery.toLowerCase())
+  const availableRoleFilters = useMemo(
+    () => [
+      "all",
+      ...Array.from(
+        new Set(
+          availableUsers
+            .map((u) => roleKey(u.role))
+            .filter(Boolean)
+        )
+      ).sort(),
+    ],
+    [availableUsers]
   )
+
+  const filteredUsers = useMemo(() => {
+    const query = userSearchQuery.toLowerCase()
+
+    return availableUsers.filter((u) => {
+      const normalizedRole = roleKey(u.role)
+      const matchesSearch =
+        u.username.toLowerCase().includes(query) ||
+        normalizedRole.includes(query) ||
+        (u.assignedTasks ?? "").toLowerCase().includes(query)
+      const matchesRole = selectedRoleFilter === "all" || normalizedRole === selectedRoleFilter
+
+      return matchesSearch && matchesRole
+    })
+  }, [availableUsers, selectedRoleFilter, userSearchQuery])
 
   const activeChat = useMemo(
     () => conversations.find((c) => c.id === activeChatId) || null,
@@ -318,9 +417,11 @@ export default function AdminMessages() {
               <p className="text-sm font-semibold text-gray-900">Conversations</p>
               <button 
                 onClick={handleOpenNewChat}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold shadow-sm hover:bg-gray-50 transition-colors"
+                aria-label="Start new message"
+                title="Start new message"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
               >
-                New
+                <UserPlus className="h-4 w-4" />
               </button>
             </div>
 
@@ -498,30 +599,66 @@ export default function AdminMessages() {
       {/* --- NEW CHAT MODAL --- */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
         <DialogContent className="max-w-md bg-white border-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] p-0">
-          <DialogHeader className="p-6 pb-4 border-b border-gray-100">
+          <div className="h-1.5 w-full bg-[#00c065]" />
+          <DialogHeader className="bg-emerald-50/70 p-6 pb-4 border-b border-emerald-100">
             <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
             
             <div className="relative mt-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by name or role..."
+                placeholder="Search by name, role, or task..."
                 value={userSearchQuery}
                 onChange={(e) => setUserSearchQuery(e.target.value)}
+                disabled={isLoadingRecipients}
                 className="w-full pl-9 pr-4 py-2 bg-gray-50 border-0 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00c065]/20"
               />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {availableRoleFilters.map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => setSelectedRoleFilter(role)}
+                  disabled={isLoadingRecipients}
+                  className={[
+                    "rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                    selectedRoleFilter === role
+                      ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065]"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
+                  ].join(" ")}
+                >
+                  {roleLabel(role)}
+                </button>
+              ))}
             </div>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-            {filteredUsers.length === 0 ? (
+            {isLoadingRecipients ? (
+              <div className="flex min-h-[220px] items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-[#00c065]" />
+              </div>
+            ) : recipientLoadError ? (
+              <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="text-sm text-red-600">{recipientLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadAvailableRecipients(true)}
+                  className="rounded-lg border border-[#00c065]/30 bg-emerald-50 px-3 py-2 text-xs font-semibold text-[#00c065] transition-colors hover:bg-emerald-100"
+                >
+                  Try Again
+                </button>
+              </div>
+            ) : filteredUsers.length === 0 ? (
               <p className="text-center text-gray-400 text-sm py-8">No users found.</p>
             ) : (
               <div className="space-y-1">
                 {filteredUsers.map((user) => (
                   <button
                     key={user.id}
-                    onClick={() => handleStartConversation(user.id)}
+                    onClick={() => handleStartConversation(user)}
                     disabled={isCreatingChat}
                     className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
                   >
@@ -537,6 +674,9 @@ export default function AdminMessages() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{user.username}</p>
                       <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                      {user.assignedTasks ? (
+                        <p className="mt-0.5 text-[11px] text-gray-400 line-clamp-2">{user.assignedTasks}</p>
+                      ) : null}
                     </div>
                   </button>
                 ))}
