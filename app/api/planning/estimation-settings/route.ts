@@ -51,7 +51,13 @@ type SubTaskRow = {
 };
 
 function normalizeScope(value: string | null): EstimationFormulaScope {
-  return isEstimationFormulaScope(value ?? "") ? value : "duration";
+  const normalizedValue = value ?? "";
+
+  if (!isEstimationFormulaScope(normalizedValue)) {
+    return "duration";
+  }
+
+  return normalizedValue;
 }
 
 function mapFormulaVariableRow(row: FormulaVariableRow): EstimationFormulaVariable {
