@@ -200,7 +200,7 @@ const staffItems: Item[] = [
     url: "/staff/messages",
     icon: MessageSquare,
   },
-  { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
+  // { key: "profile", title: "Profile", url: "/staff/profile", icon: Users },
   {
     key: "settings",
     title: "Settings",
