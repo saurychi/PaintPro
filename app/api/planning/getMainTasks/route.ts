@@ -5,9 +5,9 @@ export async function GET() {
   try {
     const { data, error } = await supabaseAdmin
       .from("main_task")
-      .select("main_task_id, name, sort_order, is_active")
+      .select("main_task_id, name, sort_order:default_sort_order, is_active")
       .eq("is_active", true)
-      .order("sort_order", { ascending: true })
+      .order("default_sort_order", { ascending: true })
       .order("name", { ascending: true })
 
     if (error) {

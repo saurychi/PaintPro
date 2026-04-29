@@ -40,11 +40,10 @@ export async function POST(request: NextRequest) {
       .from("main_task")
       .insert({
         name,
-        sort_order: sortOrder,
+        default_sort_order: sortOrder,
         is_active: true,
-        base_price: 0,
       })
-      .select("main_task_id, name, sort_order")
+      .select("main_task_id, name, sort_order:default_sort_order")
       .single();
 
     if (mainTaskError || !mainTask) {
@@ -82,12 +81,14 @@ export async function POST(request: NextRequest) {
         .insert({
           main_task_id: mainTask.main_task_id,
           description,
-          sort_order: subSortOrder,
+          default_sort_order: subSortOrder,
           default_equipment: equipmentIds.length > 0 ? equipmentIds : null,
           default_materials: materialIds.length > 0 ? materialIds : null,
           is_active: true,
         })
-        .select("sub_task_id, main_task_id, description, sort_order")
+        .select(
+          "sub_task_id, main_task_id, description, sort_order:default_sort_order",
+        )
         .single();
 
       if (subTaskError) {

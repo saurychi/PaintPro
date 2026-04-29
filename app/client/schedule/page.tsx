@@ -4,7 +4,10 @@ import React, { useEffect, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
+import type {
+  EventClickArg,
+  EventContentArg,
+} from "@fullcalendar/core";
 import { Loader2, CalendarDays, BriefcaseBusiness } from "lucide-react";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
@@ -64,7 +67,7 @@ function toFCEvent(project: ScheduleProject): FCEvent | null {
   const colors = STATUS_COLORS[status];
   const startDateStr = project.scheduledStartDatetime.slice(0, 10);
 
-  const event: any = {
+  const event: FCEvent = {
     id: project.id,
     title: project.title,
     start: startDateStr,
@@ -91,6 +94,10 @@ function toFCEvent(project: ScheduleProject): FCEvent | null {
   }
 
   return event;
+}
+
+function isFCEvent(event: FCEvent | null): event is FCEvent {
+  return Boolean(event);
 }
 
 function renderEventContent(info: EventContentArg) {
@@ -136,7 +143,7 @@ export default function ClientSchedule() {
         setFcEvents(
           nextProjects
             .map((project) => toFCEvent(project))
-            .filter(Boolean) as FCEvent[],
+            .filter(isFCEvent),
         );
       } catch (error) {
         console.error("Failed to load schedule projects:", error);

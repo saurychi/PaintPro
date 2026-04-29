@@ -233,8 +233,8 @@ export async function POST(req: Request) {
 
   const { data: mainTaskRows, error: mainTaskError } = await supabaseAdmin
   .from("main_task")
-  .select("main_task_id, name, sort_order, is_active")
-  .order("sort_order", { ascending: true })
+  .select("main_task_id, name, sort_order:default_sort_order, is_active")
+  .order("default_sort_order", { ascending: true })
 
   if (mainTaskError) {
     return NextResponse.json(
@@ -248,8 +248,10 @@ export async function POST(req: Request) {
 
   const { data: subTaskRows, error: subTaskError } = await supabaseAdmin
     .from("sub_task")
-    .select("sub_task_id, main_task_id, description, sort_order, is_active")
-    .order("sort_order", { ascending: true })
+    .select(
+      "sub_task_id, main_task_id, description, sort_order:default_sort_order, is_active",
+    )
+    .order("default_sort_order", { ascending: true })
 
   if (subTaskError) {
     return NextResponse.json(

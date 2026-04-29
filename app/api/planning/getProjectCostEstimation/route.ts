@@ -27,7 +27,6 @@ type MainTaskRow = {
   main_task_id: string;
   name: string | null;
   sort_order: number | null;
-  base_price: number | null;
 };
 
 type ProjectSubTaskRow = {
@@ -169,7 +168,7 @@ export async function GET(request: Request) {
 
     const { data: mainTasks, error: mainTasksError } = await supabaseAdmin
       .from("main_task")
-      .select("main_task_id, name, sort_order, base_price")
+      .select("main_task_id, name, sort_order:default_sort_order")
       .in("main_task_id", mainTaskIds)
       .returns<MainTaskRow[]>();
 
@@ -393,7 +392,6 @@ export async function GET(request: Request) {
             mainTaskId: projectTask.main_task_id,
             title: mainTask?.name ?? "Main Task",
             sortOrder: Number(mainTask?.sort_order ?? 0),
-            basePrice: Number(mainTask?.base_price ?? 0),
             materials: materialsByProjectTaskId.get(projectTask.project_task_id) ?? [],
             subtasks: subtasksByProjectTaskId.get(projectTask.project_task_id) ?? [],
           };

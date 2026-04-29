@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
         main_task:main_task_id (
           main_task_id,
           name,
-          sort_order
+          sort_order:default_sort_order
         )
       `)
       .eq("project_id", projectId);
@@ -47,9 +47,11 @@ export async function GET(request: NextRequest) {
 
     const { data: subTasks, error: subTasksError } = await supabaseAdmin
       .from("sub_task")
-      .select("sub_task_id, main_task_id, description, sort_order")
+      .select(
+        "sub_task_id, main_task_id, description, sort_order:default_sort_order",
+      )
       .in("main_task_id", mainTaskIds)
-      .order("sort_order", { ascending: true });
+      .order("default_sort_order", { ascending: true });
 
     if (subTasksError) {
       return NextResponse.json(

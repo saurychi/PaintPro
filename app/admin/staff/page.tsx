@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Archive, Filter, Loader2, MessageSquare, MoreVertical, Search } from "lucide-react"
@@ -246,7 +246,7 @@ export default function Staff() {
 
   // ── Edit employee ─────────────────────────────────────────────────────────
 
-  const handleEdit = async (payload: EmployeeInput) => {
+  const handleEdit = useCallback(async (payload: EmployeeInput) => {
     if (!editTarget) return
     try {
       const res = await fetch("/api/staff", {
@@ -267,7 +267,7 @@ export default function Staff() {
       console.error("Failed to update staff:", e)
     }
     setEditTarget(null)
-  }
+  }, [editTarget])
 
   // ── Archive — pre-check for active assignments ────────────────────────────
 
@@ -334,6 +334,19 @@ export default function Staff() {
       setMessagingId(null)
     }
   }
+
+  const handleCloseAddModal = useCallback(() => setIsAddModalOpen(false), [])
+  const handleCloseEditModal = useCallback(() => setEditTarget(null), [])
+
+  const editModalData = useMemo(() => {
+    if (!editTarget) return undefined
+    return {
+      name: editTarget.name,
+      email: editTarget.email,
+      phone: editTarget.phone || "",
+      photoUrl: editTarget.photoUrl || "/paint_pro_logo.png",
+    }
+  }, [editTarget])
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -914,7 +927,7 @@ function PerformanceCards({ data }: { data: PerformanceData | null }) {
 
 // ─── Staff Modal (Edit only) ──────────────────────────────────────────────────
 
-function StaffModal({
+const StaffModal = memo(function StaffModal({
   mode,
   initialData,
   onClose,

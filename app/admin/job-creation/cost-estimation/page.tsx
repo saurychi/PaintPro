@@ -21,7 +21,6 @@ type CostEstimationResponse = {
     mainTaskId: string;
     title: string;
     sortOrder: number;
-    basePrice: number;
     materialTotal: number;
     laborTotal: number;
     totalCost: number;
@@ -51,7 +50,6 @@ type CostEstimationResponse = {
     }>;
   }>;
   summary: {
-    basePriceTotal: number;
     materialTotal: number;
     laborTotal: number;
     totalCost: number;
@@ -317,10 +315,6 @@ export default function CostEstimationPage() {
 
     return [
       {
-        label: "Base Price Total",
-        value: formatCurrency(data.summary.basePriceTotal),
-      },
-      {
         label: "Materials Total",
         value: formatCurrency(data.summary.materialTotal),
       },
@@ -441,7 +435,6 @@ export default function CostEstimationPage() {
                                       {task.title}
                                     </div>
                                     <div className="mt-1 text-[12px] text-gray-500">
-                                      Base: {formatCurrency(task.basePrice)} •
                                       Materials:{" "}
                                       {formatCurrency(task.materialTotal)} •
                                       Labor: {formatCurrency(task.laborTotal)}

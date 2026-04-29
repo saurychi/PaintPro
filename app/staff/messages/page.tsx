@@ -117,7 +117,7 @@ export default function AdminMessages() {
         name: cp.users?.username || "Unknown User",
         role: cp.users?.role || "Client",
         profile_image_url: cp.users?.profile_image_url || null,
-        lastMessage: lastMsg ? lastMsg.content : "Say hello!",
+        lastMessage: lastMsg?.content || "Say hello!",
         unread: isUnread,
         lastActivity: lastMsgTime // <-- NEW: Store time for sorting
       }
