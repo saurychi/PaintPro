@@ -68,7 +68,8 @@ export async function GET(request: Request) {
 
     const filename = `${safeFilename(document.title || "document")}.pdf`
 
-    return new NextResponse(pdfBuffer, {
+    // Convert Buffer to Uint8Array for NextResponse
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
