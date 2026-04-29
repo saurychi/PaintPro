@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import rawCountries from "@/lib/data/country-by-calling-code.json"
 
 const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
 
 type CountryRaw = { country: string; calling_code: number }
 type CountryOption = { label: string; code: string }
@@ -17,6 +16,14 @@ type DbUser = {
   email: string | null
   phone: string | null
   role: "client" | "staff" | "manager" | "admin"
+}
+
+type ClientSettingsResponse = {
+  accessMode: "auth" | "project"
+  canEditPhone: boolean
+  profile: DbUser
+  error?: string
+  details?: string
 }
 
 function rolePill(role: DbUser["role"]) {
@@ -101,6 +108,8 @@ export default function ClientSettings() {
 
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [accessMode, setAccessMode] = useState<"auth" | "project">("auth")
+  const [canEditPhone, setCanEditPhone] = useState(true)
 
   const [profile, setProfile] = useState<DbUser>({
     id: "",
@@ -108,12 +117,6 @@ export default function ClientSettings() {
     email: null,
     phone: null,
     role: "client",
-  })
-
-  const [toggles, setToggles] = useState({
-    jobUpdates: false,
-    messages: true,
-    autoDownload: true,
   })
 
   const [phoneEditing, setPhoneEditing] = useState(false)
@@ -131,37 +134,28 @@ export default function ClientSettings() {
       setLoading(true)
       setLoadErr(null)
 
-      const { data, error: sessErr } = await supabase.auth.getSession()
-      if (sessErr) console.error(sessErr)
-
-      const session = data.session
-      if (!session) {
-        router.replace("/auth/signin")
-        return
-      }
-
       try {
-        const { data: row, error } = await supabase
-          .from("users")
-          .select("id, username, email, phone, role")
-          .eq("id", session.user.id)
-          .maybeSingle<DbUser>()
+        const response = await fetch("/api/client/settings", { cache: "no-store" })
+        const data = (await response.json().catch(() => null)) as ClientSettingsResponse | null
 
-        if (error) throw error
-        if (!row) {
-          await supabase.auth.signOut()
-          router.replace("/auth/invite?reason=not_invited")
+        if (response.status === 401) {
+          router.replace("/auth/signin")
           return
         }
 
-        const mergedEmail = row.email ?? (session.user.email || null)
-        const merged: DbUser = { ...row, email: mergedEmail }
+        if (!response.ok || !data?.profile) {
+          throw new Error(
+            [data?.error, data?.details].filter(Boolean).join(" ") || "Failed to load profile."
+          )
+        }
 
-        setProfile(merged)
-        setPhoneDraft(parsePhone(merged.phone))
-      } catch (e: any) {
-        console.error(e)
-        setLoadErr(e?.message || "Failed to load profile.")
+        setAccessMode(data.accessMode)
+        setCanEditPhone(data.canEditPhone)
+        setProfile(data.profile)
+        setPhoneDraft(parsePhone(data.profile.phone))
+      } catch (error: unknown) {
+        console.error(error)
+        setLoadErr(error instanceof Error ? error.message : "Failed to load profile.")
       } finally {
         setLoading(false)
       }
@@ -170,11 +164,8 @@ export default function ClientSettings() {
     boot()
   }, [router])
 
-  const handleToggle = (key: keyof typeof toggles) => {
-    setToggles((prev) => ({ ...prev, [key]: !prev[key] }))
-  }
-
   const startEditPhone = () => {
+    if (!canEditPhone) return
     setPhoneErr(null)
     setPhoneMsg(null)
     setPhoneDraft(parsePhone(profile.phone))
@@ -196,28 +187,35 @@ export default function ClientSettings() {
 
     try {
       setPhoneBusy(true)
+      const response = await fetch("/api/client/settings", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone: phoneFull }),
+      })
 
-      const { data, error: sessErr } = await supabase.auth.getSession()
-      if (sessErr) throw sessErr
-      const session = data.session
-      if (!session) {
+      const data = (await response.json().catch(() => null)) as
+        | { error?: string; details?: string }
+        | null
+
+      if (response.status === 401) {
         router.replace("/auth/signin")
         return
       }
 
-      const { error } = await supabase
-        .from("users")
-        .update({ phone: phoneFull, updated_at: new Date().toISOString() })
-        .eq("id", session.user.id)
-
-      if (error) throw error
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(" ") || "Failed to save phone."
+        )
+      }
 
       setProfile((p) => ({ ...p, phone: phoneFull }))
       setPhoneEditing(false)
       setPhoneMsg("Saved.")
-    } catch (e: any) {
-      console.error(e)
-      setPhoneErr(e?.message || "Failed to save phone.")
+    } catch (error: unknown) {
+      console.error(error)
+      setPhoneErr(error instanceof Error ? error.message : "Failed to save phone.")
     } finally {
       setPhoneBusy(false)
     }
@@ -225,7 +223,17 @@ export default function ClientSettings() {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut()
+      await Promise.allSettled([
+        supabase.auth.signOut(),
+        fetch("/api/auth/client-access", { method: "DELETE" }),
+      ])
+
+      try {
+        localStorage.removeItem("paintpro_client_access")
+        sessionStorage.removeItem("paintpro_client_access")
+      } catch {}
+
+      document.cookie = "paintpro_client_access=; Max-Age=0; Path=/; SameSite=Strict"
       router.replace("/auth/signin?choose=1")
     } catch (error) {
       console.error("Error signing out:", error)
@@ -270,7 +278,7 @@ export default function ClientSettings() {
               <div className="grid gap-4">
                 <SectionTitle
                   title="Profile"
-                  subtitle="Account details"
+                  subtitle={accessMode === "project" ? "Project access details" : "Account details"}
                   right={
                     <span
                       className={[
@@ -310,11 +318,7 @@ export default function ClientSettings() {
                         <p className="mt-1 text-sm text-gray-600">Used for contact and job updates</p>
                       </div>
 
-                      {!phoneEditing ? (
-                        <button type="button" onClick={startEditPhone} className={btnNeutral}>
-                          Edit
-                        </button>
-                      ) : (
+                      {phoneEditing ? (
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -328,6 +332,14 @@ export default function ClientSettings() {
                             {phoneBusy ? "Saving..." : "Save"}
                           </button>
                         </div>
+                      ) : canEditPhone ? (
+                        <button type="button" onClick={startEditPhone} className={btnNeutral}>
+                          Edit
+                        </button>
+                      ) : (
+                        <span className="text-xs font-semibold text-gray-500">
+                          Phone editing is unavailable for this access mode.
+                        </span>
                       )}
                     </div>
 
@@ -336,7 +348,7 @@ export default function ClientSettings() {
                         <select
                           value={phoneDraft.countryCode}
                           onChange={(e) => setPhoneDraft((p) => ({ ...p, countryCode: e.target.value }))}
-                          disabled={!phoneEditing}
+                          disabled={!phoneEditing || !canEditPhone}
                           className={`${phoneSelectClass} ${!phoneEditing ? "bg-gray-50 text-gray-900" : ""} disabled:cursor-not-allowed`}
                         >
                           {countries.map((c) => (
@@ -349,7 +361,7 @@ export default function ClientSettings() {
                         <input
                           value={phoneDraft.local}
                           onChange={(e) => setPhoneDraft((p) => ({ ...p, local: e.target.value }))}
-                          disabled={!phoneEditing}
+                          disabled={!phoneEditing || !canEditPhone}
                           inputMode="tel"
                           autoComplete="tel-national"
                           maxLength={20}
@@ -365,39 +377,18 @@ export default function ClientSettings() {
                 </div>
               </div>
 
-              <div className="h-px w-full bg-gray-200" />
-
-              {/* Preferences */}
-              <div className="grid gap-3">
-                <SectionTitle title="Preferences" subtitle="Notifications and behavior" />
-
-                <div className="space-y-3">
-                  <ToggleRow
-                    label="Receive notifications from job updates"
-                    description="Get notified when job status, schedule, or tasks are updated."
-                    active={toggles.jobUpdates}
-                    onClick={() => handleToggle("jobUpdates")}
-                  />
-                  <ToggleRow
-                    label="Receive notifications from messages"
-                    description="Get notified when clients or staff send new messages."
-                    active={toggles.messages}
-                    onClick={() => handleToggle("messages")}
-                  />
-                  <ToggleRow
-                    label="Auto download documents (quotes, invoice, etc.)"
-                    description="Automatically download generated documents to this device."
-                    active={toggles.autoDownload}
-                    onClick={() => handleToggle("autoDownload")}
-                  />
-                </div>
-              </div>
-
               {/* Session */}
               <div className="pt-2">
                 <div className="h-px w-full bg-gray-200" />
                 <div className="mt-5 grid gap-3">
-                  <SectionTitle title="Session" subtitle="Sign out of your account on this device." />
+                  <SectionTitle
+                    title="Session"
+                    subtitle={
+                      accessMode === "project"
+                        ? "Remove this project access from this device."
+                        : "Sign out of your account on this device."
+                    }
+                  />
 
                   <div>
                     <button type="button" onClick={handleLogout} className={btnDanger}>
@@ -423,50 +414,3 @@ function Card({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ToggleRow({
-  label,
-  description,
-  active,
-  onClick,
-}: {
-  label: string
-  description?: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 ease-out hover:bg-gray-50 hover:shadow-md active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25"
-      aria-pressed={active}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900">{label}</p>
-          {description ? <p className="mt-1 text-sm text-gray-600">{description}</p> : null}
-        </div>
-
-        <div className="shrink-0 flex flex-col items-end">
-          <div className="relative h-8 w-16 rounded-lg border border-gray-200 bg-white shadow-sm p-1" aria-hidden="true">
-            <div
-              className="absolute inset-0 rounded-lg transition-opacity"
-              style={{
-                backgroundColor: ACCENT,
-                opacity: active ? 0.12 : 0,
-              }}
-            />
-            <div
-              className="relative h-6 w-1/2 rounded-md border border-gray-200 bg-white shadow-sm transition-transform"
-              style={{
-                transform: active ? "translateX(100%)" : "translateX(0%)",
-                borderColor: active ? ACCENT : undefined,
-              }}
-            />
-          </div>
-          <p className="mt-1 text-[10px] text-gray-500">{active ? "On" : "Off"}</p>
-        </div>
-      </div>
-    </button>
-  )
-}
