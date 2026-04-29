@@ -12,6 +12,7 @@ type ProjectRow = {
 type ProjectTaskRow = {
   project_task_id: string;
   main_task_id: string;
+  sort_order: number | null;
 };
 
 type MainTaskRow = {
@@ -95,7 +96,7 @@ export async function GET(request: Request) {
 
     const { data: projectTasks, error: projectTasksError } = await supabaseAdmin
       .from("project_task")
-      .select("project_task_id, main_task_id")
+      .select("project_task_id, main_task_id, sort_order")
       .eq("project_id", projectId)
       .returns<ProjectTaskRow[]>();
 
@@ -297,7 +298,7 @@ export async function GET(request: Request) {
           project_task_id: row.project_task_id,
           main_task_id: projectTask?.main_task_id ?? null,
           main_task_name: mainTask?.name ?? null,
-          main_task_sort_order: mainTask?.sort_order ?? 0,
+          main_task_sort_order: projectTask?.sort_order ?? mainTask?.sort_order ?? 0,
           sub_task_id: row.sub_task_id,
           sub_task: subTask
             ? {

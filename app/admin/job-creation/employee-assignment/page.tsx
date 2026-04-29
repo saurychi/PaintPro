@@ -145,12 +145,7 @@ function buildGroupsFromRows(rows: any[]): ServiceGroup[] {
     });
   }
 
-  return Array.from(groupedMap.values()).map((group) => ({
-    ...group,
-    children: [...group.children].sort((a, b) =>
-      a.title.localeCompare(b.title),
-    ),
-  }));
+  return Array.from(groupedMap.values());
 }
 
 function buildGroupsFromDraft(draft: any): ServiceGroup[] {
@@ -684,57 +679,57 @@ export default function EmployeeAssignmentPage() {
                               ) : (
                                 <div className="divide-y divide-gray-200">
                                   {group.children.map((step) => (
-                                    <div key={step.id} className="py-3">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <div className="text-[13px] font-semibold text-gray-900">
-                                            {step.title}
-                                          </div>
-                                          <div className="mt-1 text-[12px] text-gray-500">
-                                            {step.employees.length} assigned
-                                            employee
-                                            {step.employees.length === 1
-                                              ? ""
-                                              : "s"}
-                                          </div>
-                                        </div>
-
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            openEmployeePicker(step)
-                                          }
-                                          className="inline-flex h-8 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
-                                          Change Employees
-                                        </button>
-                                      </div>
-
-                                      {step.employees.length === 0 ? (
-                                        <div className="mt-3 rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-[12px] text-gray-500">
-                                          No employee assigned to this sub task
-                                          yet.
-                                        </div>
-                                      ) : (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                          {step.employees.map((employee) => (
-                                            <div
-                                              key={`${step.id}-${employee.id}`}
-                                              className="inline-flex items-start gap-2 rounded-md border border-gray-200 bg-white px-3 py-2">
-                                              <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-
-                                              <div className="min-w-0">
-                                                <div className="text-[12px] font-medium text-gray-900">
-                                                  {employee.name}
-                                                </div>
-
-                                                <div className="mt-1 text-[11px] text-gray-500">
-                                                  Assigned staff
-                                                </div>
-                                              </div>
+                                    <div key={step.id} className="py-2.5">
+                                      <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[minmax(200px,260px)_minmax(0,1fr)_auto] lg:items-start">
+                                        <div className="min-w-0 pt-1">
+                                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <div className="truncate text-[13px] font-semibold text-gray-900">
+                                              {step.title}
                                             </div>
-                                          ))}
+                                            <span className="text-[11px] text-gray-500">
+                                              {step.employees.length} assigned
+                                              employee
+                                              {step.employees.length === 1
+                                                ? ""
+                                                : "s"}
+                                            </span>
+                                          </div>
                                         </div>
-                                      )}
+
+                                        <div className="min-w-0">
+                                          {step.employees.length === 0 ? (
+                                            <div className="inline-flex min-h-9 items-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 text-[12px] text-gray-500">
+                                              No employee assigned yet.
+                                            </div>
+                                          ) : (
+                                            <div className="flex flex-wrap items-start gap-2">
+                                              {step.employees.map((employee) => (
+                                                <div
+                                                  key={`${step.id}-${employee.id}`}
+                                                  className="inline-flex h-9 max-w-full min-w-0 items-center gap-2 rounded-md border border-gray-200 bg-white px-3">
+                                                  <UserRound className="h-4 w-4 shrink-0 text-gray-400" />
+                                                  <span
+                                                    className="min-w-0 truncate text-[12px] font-medium text-gray-900"
+                                                    title={employee.name}>
+                                                    {employee.name}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        <div className="lg:justify-self-end">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              openEmployeePicker(step)
+                                            }
+                                            className="inline-flex h-8 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                            Change Employees
+                                          </button>
+                                        </div>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown) {
+  return typeof value === "string" && UUID_PATTERN.test(value.trim());
+}
+
 export async function GET(request: NextRequest) {
   try {
     const projectId = request.nextUrl.searchParams.get("projectId");
@@ -43,6 +50,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const equipmentIds = Array.from(
+      new Set(
+        (rows ?? []).flatMap((row: any) =>
+          Array.isArray(row.equipments_used)
+            ? row.equipments_used
+                .map(
+                  (item: any) =>
+                    item?.equipment_id ?? item?.equipmentId ?? item?.id,
+                )
+                .filter(isUuid)
+            : [],
+        ),
+      ),
+    );
+
     const equipmentNames = Array.from(
       new Set(
         (rows ?? []).flatMap((row: any) =>
@@ -55,30 +77,66 @@ export async function GET(request: NextRequest) {
       ),
     );
 
-    let equipmentMap = new Map<string, any>();
+    let equipmentById = new Map<string, any>();
+    let equipmentByName = new Map<string, any>();
 
-    if (equipmentNames.length > 0) {
-      const { data: equipmentRows, error: equipmentError } = await supabaseAdmin
-        .from("equipment")
-        .select(`
-          equipment_id,
-          name,
-          unit_cost,
-          condition,
-          location,
-          status
-        `)
-        .in("name", equipmentNames);
+    if (equipmentIds.length > 0) {
+      const { data: equipmentRowsById, error: equipmentByIdError } =
+        await supabaseAdmin
+          .from("equipment")
+          .select(`
+            equipment_id,
+            name,
+            unit_cost,
+            condition,
+            location,
+            status
+          `)
+          .in("equipment_id", equipmentIds);
 
-      if (equipmentError) {
+      if (equipmentByIdError) {
         return NextResponse.json(
-          { error: equipmentError.message || "Failed to resolve equipment details." },
+          {
+            error:
+              equipmentByIdError.message ||
+              "Failed to resolve equipment details.",
+          },
           { status: 500 },
         );
       }
 
-      equipmentMap = new Map(
-        (equipmentRows ?? []).map((item: any) => [item.name, item]),
+      equipmentById = new Map(
+        (equipmentRowsById ?? []).map((item: any) => [item.equipment_id, item]),
+      );
+    }
+
+    if (equipmentNames.length > 0) {
+      const { data: equipmentRowsByName, error: equipmentByNameError } =
+        await supabaseAdmin
+          .from("equipment")
+          .select(`
+            equipment_id,
+            name,
+            unit_cost,
+            condition,
+            location,
+            status
+          `)
+          .in("name", equipmentNames);
+
+      if (equipmentByNameError) {
+        return NextResponse.json(
+          {
+            error:
+              equipmentByNameError.message ||
+              "Failed to resolve equipment details.",
+          },
+          { status: 500 },
+        );
+      }
+
+      equipmentByName = new Map(
+        (equipmentRowsByName ?? []).map((item: any) => [item.name, item]),
       );
     }
 
@@ -93,13 +151,24 @@ export async function GET(request: NextRequest) {
         sub_task: row.sub_task,
         project_task: row.project_task,
         equipments: used.map((item: any, index: number) => {
-          const equipmentName = item?.name ?? "Unknown Equipment";
-          const equipment = equipmentMap.get(equipmentName);
+          const rawEquipmentId =
+            item?.equipment_id ?? item?.equipmentId ?? item?.id ?? "";
+          const equipmentId = isUuid(rawEquipmentId) ? rawEquipmentId : "";
+          const equipmentName = item?.name ?? "";
+          const equipment =
+            equipmentById.get(equipmentId) ?? equipmentByName.get(equipmentName);
+          const resolvedName =
+            equipment?.name || equipmentName || "Unknown Equipment";
+          const resolvedEquipmentId = equipment?.equipment_id || equipmentId || "";
+          const rowId =
+            resolvedEquipmentId ||
+            `${row.project_sub_task_id}-${index}-${resolvedName}`;
 
           return {
-            id: equipment?.equipment_id ?? `${row.project_sub_task_id}-${index}-${equipmentName}`,
+            id: rowId,
+            equipmentId: resolvedEquipmentId,
             quantity: Number(item.quantity ?? 1),
-            name: equipment?.name ?? equipmentName,
+            name: resolvedName,
             unitCost: Number(equipment?.unit_cost ?? 0),
             condition: equipment?.condition ?? "",
             location: equipment?.location ?? "",
