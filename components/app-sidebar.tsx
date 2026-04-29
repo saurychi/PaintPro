@@ -76,6 +76,14 @@ const adminItems: Item[] = [
     title: "Schedule",
     url: "/admin/schedule",
     icon: CalendarDays,
+    subItems: [
+      {
+        key: "admin-schedule-requests",
+        title: "Requests",
+        url: "/admin/schedule/requests",
+        matchUrls: ["/admin/schedule/requests"],
+      },
+    ],
   },
   {
     key: "report",
@@ -157,6 +165,14 @@ const staffItems: Item[] = [
     title: "Schedule",
     url: "/staff/schedule",
     icon: CalendarDays,
+    subItems: [
+      {
+        key: "staff-schedule-requests",
+        title: "Requests",
+        url: "/staff/schedule/requests",
+        matchUrls: ["/staff/schedule/requests"],
+      },
+    ],
   },
   {
     key: "report",
@@ -325,6 +341,9 @@ export function AppSidebar({ role }: AppSidebarProps) {
       pathname.startsWith("/admin/documents") ||
       pathname.startsWith("/client/documents"),
     settings: pathname.startsWith("/admin/settings/"),
+    schedule:
+      pathname.startsWith("/admin/schedule/") ||
+      pathname.startsWith("/staff/schedule/"),
   });
 
   React.useEffect(() => {
@@ -341,6 +360,10 @@ export function AppSidebar({ role }: AppSidebarProps) {
         pathname.startsWith("/admin/documents") ||
         pathname.startsWith("/client/documents"),
       settings: prev.settings || pathname.startsWith("/admin/settings/"),
+      schedule:
+        prev.schedule ||
+        pathname.startsWith("/admin/schedule/") ||
+        pathname.startsWith("/staff/schedule/"),
     }));
   }, [pathname]);
 
