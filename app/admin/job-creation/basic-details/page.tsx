@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  ChevronDown,
   ChevronRight,
   RefreshCw,
   Settings2,
@@ -33,7 +34,6 @@ import {
   type ProjectScaledField,
 } from "@/lib/planning/materialEstimator";
 import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
-import { PhoneCountryPicker } from "@/components/PhoneCountryPicker";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
 
 const ACCENT = "#00c065";
@@ -48,8 +48,12 @@ type MaterialOut = {
 };
 
 type EquipmentOut = {
+  equipment_id?: string;
+  equipmentId?: string;
+  id?: string;
   name: string;
   notes?: string;
+  quantity?: number;
 };
 
 type DurationOut = {
@@ -500,7 +504,11 @@ export default function BasicDetails() {
       if (draft.selectedPhoneCountry)
         setSelectedPhoneCountry(draft.selectedPhoneCountry);
       if (draft.description) setDescription(draft.description);
-      if (draft.selectedClientId) setSelectedClientId(draft.selectedClientId);
+      if (draft.selectedClientId) {
+        setSelectedClientId(draft.selectedClientId);
+      } else {
+        clearSelectedClientForm();
+      }
       if (draft.assignmentDay) setAssignmentDay(draft.assignmentDay);
       if (
         Array.isArray(draft.measurementRows) &&
@@ -742,10 +750,6 @@ export default function BasicDetails() {
     return real?.id ?? surfaceMsgEmployeeId;
   }, [surfaceMsgEmployeeId, surfaceMsgConversations]);
 
-  const hasProjectNameInputs = Boolean(
-    description.trim() && clientName.trim() && address.trim(),
-  );
-
   const [availableDateEvents, setAvailableDateEvents] = useState<
     Array<{
       title: string;
@@ -761,8 +765,12 @@ export default function BasicDetails() {
     const missingFields: string[] = [];
 
     if (!description.trim()) missingFields.push("description");
-    if (!clientName.trim()) missingFields.push("client name");
-    if (!address.trim()) missingFields.push("site address");
+    if (!selectedClientId) {
+      missingFields.push("client");
+    } else {
+      if (!clientName.trim()) missingFields.push("selected client name");
+      if (!address.trim()) missingFields.push("selected client address");
+    }
 
     if (missingFields.length > 0) {
       toast.error(`Please fill out: ${missingFields.join(", ")}`);
@@ -926,31 +934,6 @@ export default function BasicDetails() {
     });
   }
 
-  function handlePhoneCountryChange(callingCode: string) {
-    setSelectedPhoneCountry(callingCode);
-
-    const trimmedPhone = clientPhone.trim();
-
-    if (!trimmedPhone) {
-      setClientPhone(callingCode);
-      return;
-    }
-
-    const matchedExistingCode = phoneCountryOptions.find((item) =>
-      trimmedPhone.startsWith(item.calling_code),
-    );
-
-    if (matchedExistingCode) {
-      setClientPhone(
-        `${callingCode}${trimmedPhone.slice(matchedExistingCode.calling_code.length)}`,
-      );
-      return;
-    }
-
-    const normalizedPhone = trimmedPhone.replace(/^\+/, "");
-    setClientPhone(`${callingCode}${normalizedPhone}`);
-  }
-
   function handleNewClientPhoneCountryChange(callingCode: string) {
     setNewClientPhoneCountry(callingCode);
 
@@ -993,6 +976,15 @@ export default function BasicDetails() {
     return extractedCountry || "+63";
   }
 
+  function clearSelectedClientForm() {
+    setSelectedClientId("");
+    setClientName("");
+    setClientEmail("");
+    setClientPhone("+63");
+    setSelectedPhoneCountry("+63");
+    setAddress("");
+  }
+
   function applyClientToForm(client: ClientOption) {
     setSelectedClientId(client.client_id);
     setClientName(client.full_name ?? "");
@@ -1003,6 +995,11 @@ export default function BasicDetails() {
   }
 
   function handleClientSelect(clientId: string) {
+    if (!clientId) {
+      clearSelectedClientForm();
+      return;
+    }
+
     const client = clients.find((item) => item.client_id === clientId);
     if (!client) return;
     applyClientToForm(client);
@@ -1489,20 +1486,32 @@ export default function BasicDetails() {
       toast.error("Please select a scheduled start date.");
       return;
     }
+    if (!selectedClientId) {
+      toast.error("Please choose an existing client or create a new one.");
+      return;
+    }
     if (!siteAddress) {
-      toast.error("Please enter the site address.");
+      toast.error(
+        "The selected client has no address. Update the client record or choose another client.",
+      );
       return;
     }
     if (!cName) {
-      toast.error("Please enter the client name.");
+      toast.error(
+        "The selected client has no name. Update the client record or choose another client.",
+      );
       return;
     }
     if (!cEmail || !/^\S+@\S+\.\S+$/.test(cEmail)) {
-      toast.error("Please enter a valid client email.");
+      toast.error(
+        "The selected client has an invalid email. Update the client record or choose another client.",
+      );
       return;
     }
     if (!cPhone) {
-      toast.error("Please enter the client phone.");
+      toast.error(
+        "The selected client has no phone number. Update the client record or choose another client.",
+      );
       return;
     }
     if (!description.trim()) {
@@ -1693,6 +1702,17 @@ export default function BasicDetails() {
   }, []);
 
   useEffect(() => {
+    if (!selectedClientId) return;
+
+    const selectedClient = clients.find(
+      (client) => client.client_id === selectedClientId,
+    );
+
+    if (!selectedClient) return;
+    applyClientToForm(selectedClient);
+  }, [clients, selectedClientId]);
+
+  useEffect(() => {
     async function loadUnavailableScheduleDates() {
       try {
         const response = await fetch("/api/schedule/getUnavailableDates", {
@@ -1768,13 +1788,8 @@ export default function BasicDetails() {
     setProjectName("");
     setScheduledStart("");
     setScheduledEnd("");
-    setAddress("");
-    setClientName("");
-    setClientEmail("");
-    setClientPhone("+63");
-    setSelectedPhoneCountry("+63");
+    clearSelectedClientForm();
     setDescription("");
-    setSelectedClientId("");
     setAssignmentDay("monday");
     setMeasurementRows([]);
     setPreviewTasks([]);
@@ -2197,11 +2212,11 @@ export default function BasicDetails() {
                       </label>
                       <textarea
                         value={address}
-                        onChange={(e) => setAddress(e.target.value)}
+                        readOnly
+                        disabled
                         placeholder="Enter site address"
                         rows={2}
-                        className={`mt-1.5 min-h-[72px] w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}
+                        className={`mt-1.5 min-h-[72px] w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none disabled:cursor-default disabled:opacity-100 disabled:text-gray-900`}
                       />
                     </div>
 
@@ -2256,16 +2271,16 @@ export default function BasicDetails() {
 
                       <div className="mt-1.5 grid grid-cols-[104px_minmax(0,1fr)] gap-2">
                         <div className="min-w-0">
-                          <PhoneCountryPicker
-                            value={selectedPhoneCountry}
-                            options={phoneCountryOptions}
-                            onChange={handlePhoneCountryChange}
-                          />
+                          <div className="flex h-[42px] w-full items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-normal text-gray-900 shadow-none">
+                            <span className="truncate">
+                              {selectedPhoneCountry}
+                            </span>
+                            <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+                          </div>
                         </div>
 
                         <div
-                          className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm focus-within:ring-2`}
-                          style={{ ["--tw-ring-color" as any]: ACCENT }}>
+                          className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm`}>
                           <span className="shrink-0 px-3 text-sm text-gray-500">
                             {selectedPhoneCountry}
                           </span>
@@ -2278,13 +2293,10 @@ export default function BasicDetails() {
                                 ? clientPhone.slice(selectedPhoneCountry.length)
                                 : clientPhone
                             }
-                            onChange={(e) =>
-                              setClientPhone(
-                                `${selectedPhoneCountry}${e.target.value.replace(/^\+/, "")}`,
-                              )
-                            }
+                            readOnly
+                            disabled
                             placeholder="000-000-0000"
-                            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none"
+                            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none disabled:cursor-default disabled:opacity-100 disabled:text-gray-900"
                           />
                         </div>
                       </div>

@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isUuid(value: unknown) {
-  return typeof value === "string" && UUID_PATTERN.test(value.trim());
-}
+import {
+  collectEquipmentUsageIds,
+  collectLegacyEquipmentNames,
+  parseEquipmentUsage,
+} from "@/lib/planning/equipmentUsage";
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,31 +48,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const equipmentIds = Array.from(
-      new Set(
-        (rows ?? []).flatMap((row: any) =>
-          Array.isArray(row.equipments_used)
-            ? row.equipments_used
-                .map(
-                  (item: any) =>
-                    item?.equipment_id ?? item?.equipmentId ?? item?.id,
-                )
-                .filter(isUuid)
-            : [],
-        ),
-      ),
+    const equipmentIds = collectEquipmentUsageIds(
+      (rows ?? []).map((row: any) => row.equipments_used),
     );
 
-    const equipmentNames = Array.from(
-      new Set(
-        (rows ?? []).flatMap((row: any) =>
-          Array.isArray(row.equipments_used)
-            ? row.equipments_used
-                .map((item: any) => item?.name)
-                .filter(Boolean)
-            : [],
-        ),
-      ),
+    const equipmentNames = collectLegacyEquipmentNames(
+      (rows ?? []).map((row: any) => row.equipments_used),
     );
 
     let equipmentById = new Map<string, any>();
@@ -141,7 +120,7 @@ export async function GET(request: NextRequest) {
     }
 
     const projectSubTaskEquipment = (rows ?? []).map((row: any) => {
-      const used = Array.isArray(row.equipments_used) ? row.equipments_used : [];
+      const used = parseEquipmentUsage(row.equipments_used);
 
       return {
         project_sub_task_id: row.project_sub_task_id,
@@ -150,16 +129,14 @@ export async function GET(request: NextRequest) {
         assigned_user: row.assigned_user ?? null,
         sub_task: row.sub_task,
         project_task: row.project_task,
-        equipments: used.map((item: any, index: number) => {
-          const rawEquipmentId =
-            item?.equipment_id ?? item?.equipmentId ?? item?.id ?? "";
-          const equipmentId = isUuid(rawEquipmentId) ? rawEquipmentId : "";
-          const equipmentName = item?.name ?? "";
+        equipments: used.map((item, index: number) => {
           const equipment =
-            equipmentById.get(equipmentId) ?? equipmentByName.get(equipmentName);
+            equipmentById.get(item.equipmentId) ??
+            equipmentByName.get(item.legacyName);
           const resolvedName =
-            equipment?.name || equipmentName || "Unknown Equipment";
-          const resolvedEquipmentId = equipment?.equipment_id || equipmentId || "";
+            equipment?.name || item.legacyName || "Unknown Equipment";
+          const resolvedEquipmentId =
+            equipment?.equipment_id || item.equipmentId || "";
           const rowId =
             resolvedEquipmentId ||
             `${row.project_sub_task_id}-${index}-${resolvedName}`;
@@ -167,13 +144,13 @@ export async function GET(request: NextRequest) {
           return {
             id: rowId,
             equipmentId: resolvedEquipmentId,
-            quantity: Number(item.quantity ?? 1),
+            quantity: item.quantity,
             name: resolvedName,
             unitCost: Number(equipment?.unit_cost ?? 0),
             condition: equipment?.condition ?? "",
             location: equipment?.location ?? "",
             status: equipment?.status ?? "",
-            notes: item?.notes ?? null,
+            notes: item.notes,
           };
         }),
       };

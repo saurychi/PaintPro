@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  collectEquipmentUsageIds,
+  collectLegacyEquipmentNames,
+  parseEquipmentUsage,
+} from "@/lib/planning/equipmentUsage";
 
 type ProjectRow = {
   project_id: string;
@@ -58,6 +63,11 @@ type MaterialRow = {
   name: string | null;
   unit: string | null;
   unit_cost: number | null;
+};
+
+type EquipmentRow = {
+  equipment_id: string;
+  name: string | null;
 };
 
 type ProjectSubTaskStaffRow = {
@@ -129,19 +139,21 @@ function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function parseEquipment(value: unknown): ParsedEquipment[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
+function parseEquipment(
+  value: unknown,
+  equipmentById: Map<string, EquipmentRow>,
+  equipmentByName: Map<string, EquipmentRow>,
+): ParsedEquipment[] {
+  return parseEquipmentUsage(value)
     .map((item) => {
-      const record =
-        item && typeof item === "object"
-          ? (item as Record<string, unknown>)
-          : null;
+      const equipment =
+        equipmentById.get(item.equipmentId) ??
+        equipmentByName.get(item.legacyName);
+      const resolvedName = equipment?.name ?? item.legacyName;
 
       return {
-        name: typeof record?.name === "string" ? record.name : "",
-        notes: typeof record?.notes === "string" ? record.notes : null,
+        name: resolvedName || "",
+        notes: item.notes,
       };
     })
     .filter((item) => item.name);
@@ -381,6 +393,65 @@ export async function GET(request: Request) {
       materials = materialsData ?? [];
     }
 
+    const equipmentIds = collectEquipmentUsageIds(
+      (projectSubTasks ?? []).map((row) => row.equipments_used),
+    );
+
+    const equipmentNames = collectLegacyEquipmentNames(
+      (projectSubTasks ?? []).map((row) => row.equipments_used),
+    );
+
+    let equipmentById = new Map<string, EquipmentRow>();
+    let equipmentByName = new Map<string, EquipmentRow>();
+
+    if (equipmentIds.length > 0) {
+      const { data: equipmentRowsById, error: equipmentByIdError } =
+        await supabaseAdmin
+          .from("equipment")
+          .select("equipment_id, name")
+          .in("equipment_id", equipmentIds)
+          .returns<EquipmentRow[]>();
+
+      if (equipmentByIdError) {
+        return NextResponse.json(
+          {
+            error: "Failed to load equipment catalog.",
+            details: equipmentByIdError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      equipmentById = new Map(
+        (equipmentRowsById ?? []).map((row) => [row.equipment_id, row]),
+      );
+    }
+
+    if (equipmentNames.length > 0) {
+      const { data: equipmentRowsByName, error: equipmentByNameError } =
+        await supabaseAdmin
+          .from("equipment")
+          .select("equipment_id, name")
+          .in("name", equipmentNames)
+          .returns<EquipmentRow[]>();
+
+      if (equipmentByNameError) {
+        return NextResponse.json(
+          {
+            error: "Failed to load equipment catalog.",
+            details: equipmentByNameError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      equipmentByName = new Map(
+        (equipmentRowsByName ?? [])
+          .filter((row) => Boolean(row.name))
+          .map((row) => [String(row.name), row]),
+      );
+    }
+
     const projectSubTaskIds = uniqueStrings(
       (projectSubTasks ?? []).map((row) => row.project_sub_task_id),
     );
@@ -503,7 +574,11 @@ export async function GET(request: Request) {
         updated_at: row.updated_at,
         status: row.status,
         sort_order: row.sort_order,
-        equipments_used: parseEquipment(row.equipments_used),
+        equipments_used: parseEquipment(
+          row.equipments_used,
+          equipmentById,
+          equipmentByName,
+        ),
         assigned_staff: projectSubTaskStaffMap.get(row.project_sub_task_id) ?? [],
       });
 
