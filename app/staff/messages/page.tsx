@@ -384,7 +384,7 @@ export default function AdminMessages() {
     return (
       <StaffPageShell
         title="Messages"
-        subtitle="Stay connected with teammates and clients using the same polished staff workspace framing."
+        subtitle="Send and receive messages with your manager and teammates in real time."
         bodyClassName="overflow-hidden"
       >
         <div className="flex h-full gap-6 overflow-hidden">
@@ -405,7 +405,7 @@ export default function AdminMessages() {
   return (
     <StaffPageShell
       title="Messages"
-      subtitle="Stay connected with teammates and clients using the same polished staff workspace framing."
+      subtitle="Send and receive messages with your manager and teammates in real time."
       bodyClassName="overflow-hidden"
     >
       <div className="flex h-full gap-6 overflow-hidden">

@@ -31,7 +31,7 @@ export default function StaffReportPage() {
   return (
     <StaffPageShell
       title="Report"
-      subtitle="Jump into attendance and payroll views from one shared staff reporting hub."
+      subtitle="Monitor your attendance, task history, and payroll from one reporting hub."
       bodyClassName="overflow-y-auto pr-1"
     >
       <div className="grid grid-cols-1 gap-3 pb-1 min-[901px]:grid-cols-2">

@@ -7,6 +7,7 @@ import interactionPlugin from "@fullcalendar/interaction";
 import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
 import { Loader2, CalendarDays, BriefcaseBusiness, AlertCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import StaffPageShell from "@/components/staff/StaffPageShell";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -218,7 +219,11 @@ export default function StaffSchedule() {
   };
 
   return (
-    <>
+    <StaffPageShell
+      title="Schedule"
+      subtitle="View your assigned projects and mark unavailability on your personal calendar."
+      bodyClassName="overflow-hidden"
+    >
       <style>{`
         .fc {
           --fc-border-color: #f3f4f6;
@@ -309,10 +314,7 @@ export default function StaffSchedule() {
         }
       `}</style>
 
-      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden">
-        <h1 className="text-2xl font-semibold text-gray-900">Schedule</h1>
-
-        <div className="mt-6 min-h-0 h-[calc(100%-3rem)]">
+      <div className="h-full min-h-0">
           <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
             <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
 
@@ -615,7 +617,6 @@ export default function StaffSchedule() {
             </div>
           </div>
         )}
-      </div>
-    </>
+    </StaffPageShell>
   );
 }
