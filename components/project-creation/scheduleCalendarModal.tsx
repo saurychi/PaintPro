@@ -1,40 +1,37 @@
-"use client"
+"use client";
 
-import FullCalendar from "@fullcalendar/react"
-import dayGridPlugin from "@fullcalendar/daygrid"
-import interactionPlugin from "@fullcalendar/interaction"
-import { CalendarDays, Circle, X } from "lucide-react"
-
-const ACCENT = "#00c065"
-const ACCENT_HOVER = "#00a054"
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import interactionPlugin from "@fullcalendar/interaction";
+import { CalendarDays, Circle, X } from "lucide-react";
 
 type CalendarBackgroundEvent = {
-  title: string
-  date: string
-  display: "background"
-  className: string
-}
+  title: string;
+  date: string;
+  display: "background";
+  className: string;
+};
 
 type ScheduleCalendarModalProps = {
-  open: boolean
-  selectedDate: string
-  availableDateEvents: CalendarBackgroundEvent[]
-  onClose: () => void
-  onSelectDate: (date: string) => void
-}
+  open: boolean;
+  selectedDate: string;
+  availableDateEvents: CalendarBackgroundEvent[];
+  onClose: () => void;
+  onSelectDate: (date: string) => void;
+};
 
 function formatSelectedDate(date: string) {
-  if (!date) return "No date selected"
+  if (!date) return "No date selected";
 
-  const parsed = new Date(date)
-  if (Number.isNaN(parsed.getTime())) return "No date selected"
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return "No date selected";
 
   return parsed.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
-  })
+  });
 }
 
 export default function ScheduleCalendarModal({
@@ -44,15 +41,15 @@ export default function ScheduleCalendarModal({
   onClose,
   onSelectDate,
 }: ScheduleCalendarModalProps) {
-  if (!open) return null
+  if (!open) return null;
 
   const availableCount = availableDateEvents.filter(
-    (event) => event.className === "fc-available-day"
-  ).length
+    (event) => event.className === "fc-available-day",
+  ).length;
 
   const unavailableCount = availableDateEvents.filter(
-    (event) => event.className === "fc-unavailable-day"
-  ).length
+    (event) => event.className === "fc-unavailable-day",
+  ).length;
 
   return (
     <>
@@ -67,71 +64,55 @@ export default function ScheduleCalendarModal({
         }
 
         .schedule-calendar-modal .fc .fc-toolbar.fc-header-toolbar {
-          margin-bottom: 0.75rem;
-          padding: 0.15rem 0;
+          margin-bottom: 0.55rem;
+          padding: 0;
         }
 
         .schedule-calendar-modal .fc .fc-toolbar-title {
-          font-size: clamp(1rem, 1.8vw, 1.35rem);
+          font-size: 0.95rem;
           font-weight: 700;
           color: #111827;
-          letter-spacing: -0.02em;
+          letter-spacing: -0.01em;
         }
 
         .schedule-calendar-modal .fc .fc-button {
+          height: 34px !important;
+          min-width: 34px !important;
+          border-radius: 0.5rem !important;
+          border: 1px solid #e5e7eb !important;
           background: #ffffff !important;
-          border: 1px solid #d1d5db !important;
           color: #374151 !important;
-          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06) !important;
-          border-radius: 1rem !important;
-          height: 44px !important;
-          min-width: 44px !important;
-          padding: 0 0.9rem !important;
-          font-size: 0.82rem !important;
+          box-shadow: none !important;
+          padding: 0 0.65rem !important;
+          font-size: 0.72rem !important;
           font-weight: 600 !important;
           transition: all 0.15s ease !important;
         }
 
         .schedule-calendar-modal .fc .fc-prev-button,
         .schedule-calendar-modal .fc .fc-next-button {
-          width: 48px !important;
+          width: 34px !important;
           padding: 0 !important;
-          border-radius: 1rem !important;
         }
 
         .schedule-calendar-modal .fc .fc-prev-button .fc-icon,
         .schedule-calendar-modal .fc .fc-next-button .fc-icon {
-          font-size: 1rem !important;
-        }
-
-        .schedule-calendar-modal .fc .fc-toolbar {
-          align-items: center !important;
-        }
-
-        .schedule-calendar-modal .fc .fc-toolbar-chunk {
-          display: flex;
-          align-items: center;
+          font-size: 0.88rem !important;
         }
 
         .schedule-calendar-modal .fc .fc-button:hover {
           background: #f9fafb !important;
-          border-color: #cbd5e1 !important;
+          border-color: #d1d5db !important;
         }
 
         .schedule-calendar-modal .fc .fc-button:focus {
-          box-shadow: none !important;
-        }
-
-        .schedule-calendar-modal .fc .fc-button-primary:not(:disabled).fc-button-active {
-          background: #ffffff !important;
-          border-color: #d1d5db !important;
-          color: #374151 !important;
+          box-shadow: 0 0 0 2px rgba(0, 192, 101, 0.12) !important;
         }
 
         .schedule-calendar-modal .fc .fc-col-header-cell {
           background: #f9fafb;
-          padding: 6px 0;
-          font-size: 10px;
+          padding: 5px 0;
+          font-size: 9px;
           font-weight: 700;
           letter-spacing: 0.04em;
           color: #6b7280;
@@ -139,23 +120,22 @@ export default function ScheduleCalendarModal({
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day-number {
-          font-size: 13px;
-          font-weight: 600;
-          color: #374151;
-          padding: 6px 8px;
           position: relative;
           z-index: 3;
+          padding: 5px 7px;
+          font-size: 11px;
+          font-weight: 600;
+          color: #374151;
         }
 
         .schedule-calendar-modal .fc .fc-day-other .fc-daygrid-day-number {
-          color: #d1d5db;
+          color: #cbd5e1;
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day-frame {
-          min-height: clamp(42px, 5.2vh, 62px);
+          min-height: clamp(38px, 5vh, 56px);
           cursor: pointer;
           transition: background 0.15s ease;
-          position: relative;
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day.fc-day-today {
@@ -175,114 +155,102 @@ export default function ScheduleCalendarModal({
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-available-day) {
-          background: #edf9f1 !important;
+          background: #f0fdf4 !important;
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-unavailable-day) {
-          background: #faeeee !important;
+          background: #fef2f2 !important;
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-selected-day) {
-          background: #dff4e7 !important;
-          box-shadow: inset 0 0 0 1px rgba(0, 192, 101, 0.35);
+          background: #dcfce7 !important;
+          box-shadow: inset 0 0 0 1px rgba(0, 192, 101, 0.45);
         }
 
         .schedule-calendar-modal .fc .fc-scrollgrid,
         .schedule-calendar-modal .fc .fc-scrollgrid table {
-          border-radius: 0.4rem;
+          border-radius: 0.5rem;
           overflow: hidden;
         }
 
         .schedule-calendar-modal .fc .fc-view-harness {
-          background: #fff;
-          border-radius: 0.4rem;
+          background: #ffffff;
+          border-radius: 0.5rem;
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-body-unbalanced .fc-daygrid-day-events {
           min-height: 0 !important;
         }
 
-        @media (max-width: 1024px) {
-          .schedule-calendar-modal .fc .fc-toolbar.fc-header-toolbar {
-            gap: 0.4rem;
-          }
-
-          .schedule-calendar-modal .fc .fc-toolbar-title {
-            text-align: center;
-          }
-        }
-
         @media (max-width: 640px) {
+          .schedule-calendar-modal .fc .fc-toolbar-title {
+            font-size: 0.8rem;
+          }
+
           .schedule-calendar-modal .fc .fc-daygrid-day-frame {
-            min-height: 38px;
+            min-height: 34px;
           }
 
           .schedule-calendar-modal .fc .fc-daygrid-day-number {
-            font-size: 11px;
-            padding: 5px 6px;
+            font-size: 10px;
+            padding: 4px 5px;
           }
 
           .schedule-calendar-modal .fc .fc-col-header-cell {
-            font-size: 9px;
-            padding: 5px 0;
-          }
-
-          .schedule-calendar-modal .fc .fc-button {
-            height: 40px !important;
-            min-width: 40px !important;
-            padding: 0 0.7rem !important;
-            font-size: 0.72rem !important;
+            font-size: 8px;
+            padding: 4px 0;
           }
         }
       `}</style>
 
       <div
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-3 backdrop-blur-sm"
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-4"
         onClick={onClose}
       >
         <div
-          className="schedule-calendar-modal flex h-[92vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
+          className="schedule-calendar-modal flex h-[88vh] w-full max-w-[980px] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl"
+          onClick={(event) => event.stopPropagation()}
         >
-          <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
+          <div className="h-1 w-full shrink-0 bg-[#00c065]" />
 
           <div className="shrink-0 border-b border-gray-200 px-4 py-3">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: ACCENT }}
-                    aria-hidden="true"
-                  />
-                  <p className="text-sm font-semibold text-gray-900">
-                    Select Scheduled Start Date
-                  </p>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-50 text-[#00c065]">
+                    <CalendarDays className="h-4 w-4" />
+                  </div>
+
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-900">
+                      Select Scheduled Start Date
+                    </h2>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Choose an available date based on the current schedule.
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-1.5 text-sm text-gray-500">
-                  Choose an available project date based on the current schedule.
-                </p>
               </div>
 
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
               >
-                <X className="h-4.5 w-4.5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_260px]">
+          <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_240px]">
             <div className="min-h-0 border-b border-gray-200 p-3 lg:border-b-0 lg:border-r">
-              <div className="h-full overflow-hidden">
+              <div className="h-full overflow-hidden rounded-lg border border-gray-200 bg-white p-2">
                 <FullCalendar
                   plugins={[dayGridPlugin, interactionPlugin]}
                   initialView="dayGridMonth"
                   height="100%"
                   contentHeight="100%"
-                  expandRows={true}
+                  expandRows
                   fixedWeekCount={false}
                   headerToolbar={{
                     left: "prev",
@@ -303,112 +271,113 @@ export default function ScheduleCalendarModal({
                       : []),
                   ]}
                   dateClick={(info) => {
-                    const clickedDate = info.dateStr
+                    const clickedDate = info.dateStr;
 
                     const dayEvents = availableDateEvents.filter(
-                      (event) => event.date === clickedDate
-                    )
+                      (event) => event.date === clickedDate,
+                    );
 
                     const isUnavailable = dayEvents.some(
-                      (event) => event.className === "fc-unavailable-day"
-                    )
+                      (event) => event.className === "fc-unavailable-day",
+                    );
 
                     const isAvailable = dayEvents.some(
-                      (event) => event.className === "fc-available-day"
-                    )
+                      (event) => event.className === "fc-available-day",
+                    );
 
-                    if (isUnavailable || !isAvailable) return
+                    if (isUnavailable || !isAvailable) return;
 
-                    onSelectDate(clickedDate)
+                    onSelectDate(clickedDate);
                   }}
                 />
               </div>
             </div>
 
-            <div className="min-h-0 overflow-hidden bg-gray-50/60 p-3">
-              <div className="grid h-full grid-rows-[auto_auto_auto_1fr_auto] gap-0">
-                <div className="pb-3">
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    <CalendarDays className="h-4 w-4" />
-                    Selected Date
-                  </div>
-                  <p className="mt-2 text-sm font-semibold text-gray-900">
-                    {formatSelectedDate(selectedDate)}
-                  </p>
-                </div>
+            <aside className="flex min-h-0 flex-col bg-gray-50 p-3">
+              <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  Selected Date
+                </p>
+                <p className="mt-1.5 text-sm font-semibold leading-snug text-gray-900">
+                  {formatSelectedDate(selectedDate)}
+                </p>
+              </div>
 
-                <div className="border-t border-gray-200 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Legend
-                  </div>
+              <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  Legend
+                </p>
 
-                  <div className="mt-3 space-y-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <Circle className="h-3.5 w-3.5 fill-emerald-400 text-emerald-400" />
-                      <span className="text-sm text-gray-700">Available</span>
-                    </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <Circle className="h-3.5 w-3.5 fill-red-400 text-red-400" />
-                      <span className="text-sm text-gray-700">Unavailable</span>
-                    </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <Circle className="h-3.5 w-3.5 fill-emerald-600 text-emerald-600" />
-                      <span className="text-sm text-gray-700">Selected</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-200 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Summary
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2.5">
-                    <div className="py-1">
-                      <div className="text-[11px] font-medium text-gray-500">
-                        Available
-                      </div>
-                      <div className="mt-1 text-base font-bold text-gray-900">
-                        {availableCount}
-                      </div>
-                    </div>
-
-                    <div className="py-1">
-                      <div className="text-[11px] font-medium text-gray-500">
-                        Unavailable
-                      </div>
-                      <div className="mt-1 text-base font-bold text-gray-900">
-                        {unavailableCount}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div />
-
-                <div className="flex justify-end border-t border-gray-200 pt-3">
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"
-                    style={{ backgroundColor: ACCENT }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = ACCENT_HOVER
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = ACCENT
-                    }}
-                  >
-                    Done
-                  </button>
+                <div className="mt-3 space-y-2">
+                  <LegendItem
+                    colorClass="fill-emerald-400 text-emerald-400"
+                    label="Available"
+                  />
+                  <LegendItem
+                    colorClass="fill-rose-400 text-rose-400"
+                    label="Unavailable"
+                  />
+                  <LegendItem
+                    colorClass="fill-emerald-600 text-emerald-600"
+                    label="Selected"
+                  />
                 </div>
               </div>
-            </div>
+
+              <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  Summary
+                </p>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-green-100 bg-green-50 p-2">
+                    <p className="text-[10px] font-medium text-green-700">
+                      Available
+                    </p>
+                    <p className="mt-0.5 text-lg font-semibold text-green-800">
+                      {availableCount}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-rose-100 bg-rose-50 p-2">
+                    <p className="text-[10px] font-medium text-rose-700">
+                      Unavailable
+                    </p>
+                    <p className="mt-0.5 text-lg font-semibold text-rose-800">
+                      {unavailableCount}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1" />
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-lg bg-[#00c065] px-3 text-xs font-medium text-white shadow-sm transition hover:bg-[#00a054]"
+              >
+                Done
+              </button>
+            </aside>
           </div>
         </div>
       </div>
     </>
-  )
+  );
+}
+
+function LegendItem({
+  colorClass,
+  label,
+}: {
+  colorClass: string;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Circle className={`h-3 w-3 ${colorClass}`} />
+      <span className="text-xs font-medium text-gray-700">{label}</span>
+    </div>
+  );
 }

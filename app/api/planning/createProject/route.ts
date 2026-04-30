@@ -5,6 +5,7 @@ import {
   estimateMaterialsForSubTask,
   type ProjectDimensions,
 } from "@/lib/planning/materialEstimator";
+import { normalizeEquipmentUsageForStorage } from "@/lib/planning/equipmentUsage";
 import { buildProjectSchedule } from "@/lib/planning/projectScheduling";
 import {
   calculateProjectCostEstimation,
@@ -37,6 +38,15 @@ type GeneratedAssignedEmployeeInput = {
   id?: unknown;
   name?: unknown;
   role?: unknown;
+};
+
+type GeneratedEquipmentInput = {
+  equipment_id?: unknown;
+  equipmentId?: unknown;
+  id?: unknown;
+  name?: unknown;
+  notes?: unknown;
+  quantity?: unknown;
 };
 
 type GeneratedSubTaskInput = {
@@ -253,10 +263,21 @@ function parseGeneratedTasks(value: unknown) {
                 ? subTask.equipment
                     .filter(isObject)
                     .map((equipment) => ({
+                      equipment_id: asTrimmedString(
+                        (equipment as GeneratedEquipmentInput).equipment_id ??
+                          (equipment as GeneratedEquipmentInput).equipmentId ??
+                          (equipment as GeneratedEquipmentInput).id,
+                      ),
                       name: asTrimmedString(equipment.name),
                       notes: asNullableTrimmedString(equipment.notes),
+                      quantity: asNumberOrFallback(
+                        (equipment as GeneratedEquipmentInput).quantity,
+                        1,
+                      ),
                     }))
-                    .filter((equipment) => equipment.name)
+                    .filter(
+                      (equipment) => equipment.equipment_id || equipment.name,
+                    )
                 : [],
               duration: isObject(subTask.duration)
                 ? {
@@ -850,9 +871,9 @@ export async function POST(req: Request) {
         subTask.duration?.adjustedDurationHours ??
         null;
 
-      const equipmentPayload = Array.isArray(subTask.equipment)
-        ? subTask.equipment
-        : [];
+      const equipmentPayload = normalizeEquipmentUsageForStorage(
+        subTask.equipment,
+      );
 
       const { data: insertedProjectSubTask, error: projectSubTaskInsertError } =
         await supabaseAdmin

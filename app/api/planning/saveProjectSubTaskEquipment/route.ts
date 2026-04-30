@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function asUuidOrNull(value: unknown) {
-  if (typeof value !== "string") return null;
-
-  const trimmed = value.trim();
-  return UUID_PATTERN.test(trimmed) ? trimmed : null;
-}
+import { normalizeEquipmentUsageForStorage } from "@/lib/planning/equipmentUsage";
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,14 +19,9 @@ export async function POST(request: NextRequest) {
     for (const item of projectSubTasks) {
       if (!item?.project_sub_task_id) continue;
 
-      const equipmentsUsed = Array.isArray(item?.equipments)
-        ? item.equipments.map((equipment: any) => ({
-            equipment_id: asUuidOrNull(equipment.equipmentId ?? equipment.id),
-            name:
-              typeof equipment.name === "string" ? equipment.name.trim() : "",
-            quantity: Number(equipment.quantity ?? 1),
-          }))
-        : [];
+      const equipmentsUsed = normalizeEquipmentUsageForStorage(
+        item?.equipments,
+      );
 
       const { error } = await supabaseAdmin
         .from("project_sub_task")

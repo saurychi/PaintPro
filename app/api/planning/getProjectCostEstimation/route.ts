@@ -5,6 +5,11 @@ import {
   normalizeMarkupRate,
   type CostEstimationMainTask,
 } from "@/lib/planning/costEstimation";
+import {
+  collectEquipmentUsageIds,
+  collectLegacyEquipmentNames,
+  parseEquipmentUsage,
+} from "@/lib/planning/equipmentUsage";
 
 type ProjectRow = {
   project_id: string;
@@ -88,15 +93,8 @@ type ClientRow = {
   address: string | null;
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
-}
-
-function isUuid(value: unknown) {
-  return typeof value === "string" && UUID_PATTERN.test(value.trim());
 }
 
 export async function GET(request: Request) {
@@ -285,26 +283,12 @@ export async function GET(request: Request) {
       subTasks = subTasksData ?? [];
     }
 
-    const equipmentIds = uniqueStrings(
-      (projectSubTasks ?? []).flatMap((row) =>
-        Array.isArray(row.equipments_used)
-          ? row.equipments_used
-              .map((item: any) => item?.equipment_id ?? item?.equipmentId ?? item?.id)
-              .filter(isUuid)
-          : [],
-      ),
+    const equipmentIds = collectEquipmentUsageIds(
+      (projectSubTasks ?? []).map((row) => row.equipments_used),
     );
 
-    const equipmentNames = uniqueStrings(
-      (projectSubTasks ?? []).flatMap((row) =>
-        Array.isArray(row.equipments_used)
-          ? row.equipments_used
-              .map((item: any) =>
-                typeof item?.name === "string" ? item.name.trim() : "",
-              )
-              .filter(Boolean)
-          : [],
-      ),
+    const equipmentNames = collectLegacyEquipmentNames(
+      (projectSubTasks ?? []).map((row) => row.equipments_used),
     );
 
     let equipmentById = new Map<string, EquipmentRow>();
@@ -444,25 +428,21 @@ export async function GET(request: Request) {
       const current = subtasksByProjectTaskId.get(row.project_task_id) ?? [];
       const subTask = subTaskMap.get(row.sub_task_id);
       const assignedUsers = staffByProjectSubTaskId.get(row.project_sub_task_id) ?? [];
-      const usedEquipment = Array.isArray(row.equipments_used)
-        ? row.equipments_used
-        : [];
+      const usedEquipment = parseEquipmentUsage(row.equipments_used);
 
       current.push({
         projectSubTaskId: row.project_sub_task_id,
         subTaskId: row.sub_task_id,
         title: subTask?.description ?? "Sub Task",
         estimatedHours: Number(row.estimated_hours ?? 0),
-        equipment: usedEquipment.map((item: any, index: number) => {
-          const rawEquipmentId =
-            item?.equipment_id ?? item?.equipmentId ?? item?.id ?? "";
-          const equipmentId = isUuid(rawEquipmentId) ? rawEquipmentId : "";
-          const equipmentName =
-            typeof item?.name === "string" ? item.name.trim() : "";
+        equipment: usedEquipment.map((item, index: number) => {
           const equipment =
-            equipmentById.get(equipmentId) ?? equipmentByName.get(equipmentName);
-          const resolvedName = equipment?.name || equipmentName || "Equipment";
-          const resolvedEquipmentId = equipment?.equipment_id ?? equipmentId ?? "";
+            equipmentById.get(item.equipmentId) ??
+            equipmentByName.get(item.legacyName);
+          const resolvedName =
+            equipment?.name || item.legacyName || "Equipment";
+          const resolvedEquipmentId =
+            equipment?.equipment_id ?? item.equipmentId ?? "";
 
           return {
             id:
@@ -470,9 +450,9 @@ export async function GET(request: Request) {
               `${row.project_sub_task_id}-${index}-${resolvedName}`,
             equipmentId: resolvedEquipmentId || null,
             name: resolvedName,
-            quantity: Number(item?.quantity ?? 1),
+            quantity: item.quantity,
             unitCost: Number(equipment?.unit_cost ?? 0),
-            notes: typeof item?.notes === "string" ? item.notes : null,
+            notes: item.notes,
           };
         }),
         scheduledStartDatetime: row.scheduled_start_datetime,
