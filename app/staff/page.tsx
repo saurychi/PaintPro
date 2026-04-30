@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import CurrentJobCard, {
@@ -1106,7 +1105,6 @@ export default function DashboardPage() {
             selectedProjectId={selectedProjectId}
             onDateChange={setSelectedDashboardDate}
             onProjectChange={handleDashboardProjectChange}
-            onCreateJob={() => router.push("/admin/job-creation/basic-details")}
           />
         </section>
 
