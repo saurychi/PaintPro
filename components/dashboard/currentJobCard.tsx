@@ -40,6 +40,7 @@ function CurrentJobCard({
   onCreateJob,
 }: CurrentJobProps) {
   const hasMultipleProjects = projects.length >= 2;
+  const hasAction = Boolean(onCreateJob);
 
   async function handleCopyCode() {
     if (!jobNo || jobNo === "No project code") {
@@ -64,8 +65,12 @@ function CurrentJobCard({
         className={[
           "grid min-h-0 items-center gap-x-[1.2%] px-[1.4%] py-[0.55%]",
           hasMultipleProjects
-            ? "grid-cols-[10%_12%_minmax(0,31%)_15%_minmax(0,20%)_10%]"
-            : "grid-cols-[10%_12%_minmax(0,39%)_17%_minmax(120px,14%)]",
+            ? hasAction
+              ? "grid-cols-[10%_12%_minmax(0,31%)_15%_minmax(0,20%)_10%]"
+              : "grid-cols-[10%_12%_minmax(0,36%)_15%_minmax(0,27%)]"
+            : hasAction
+              ? "grid-cols-[10%_12%_minmax(0,39%)_17%_minmax(120px,14%)]"
+              : "grid-cols-[10%_12%_minmax(0,45%)_17%_auto]",
           "grid-rows-[18px_minmax(0,1fr)]",
         ].join(" ")}
       >
@@ -92,9 +97,11 @@ function CurrentJobCard({
           </label>
         ) : null}
 
-        <div className="truncate text-[9px] font-medium uppercase tracking-[0.12em] text-gray-400">
-          Action
-        </div>
+        {hasAction && (
+          <div className="truncate text-[9px] font-medium uppercase tracking-[0.12em] text-gray-400">
+            Action
+          </div>
+        )}
 
         {/* Value row */}
         <div className="min-w-0 self-start">
@@ -150,16 +157,18 @@ function CurrentJobCard({
           </div>
         ) : null}
 
-        <div className="flex min-w-0 justify-end self-start">
-          <button
-            type="button"
-            onClick={onCreateJob}
-            className="inline-flex h-8 w-full max-w-[135px] items-center justify-center gap-1.5 rounded-md bg-[#00c065] px-2.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Create Project
-          </button>
-        </div>
+        {hasAction && (
+          <div className="flex min-w-0 justify-end self-start">
+            <button
+              type="button"
+              onClick={onCreateJob}
+              className="inline-flex h-8 w-full max-w-[135px] items-center justify-center gap-1.5 rounded-md bg-[#00c065] px-2.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Create Project
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
