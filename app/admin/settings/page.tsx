@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import rawCountries from "@/lib/data/country-by-calling-code.json";
 import SignatureCanvas from "react-signature-canvas";
-import { Upload } from "lucide-react";
+import { Calculator, ChevronRight, Upload, Wrench } from "lucide-react";
 import ProjectTimeReferenceSettings from "@/components/settings/projectTimeReferenceSettings";
 
 const ACCENT = "#00c065";
@@ -705,6 +705,37 @@ export default function AdminSettings() {
                 </div>
               </div>
 
+              {/* Advanced Settings */}
+              <div className="pt-2">
+                <div className="h-px w-full bg-gray-200" />
+                <div className="mt-5 grid gap-3">
+                  <SectionTitle
+                    title="Advanced Settings"
+                    subtitle="Manage workflow configuration and estimation rules used across admin planning."
+                  />
+
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <SettingsNavigationCard
+                      title="Task Management"
+                      description="Update main tasks, subtasks, replacements, and default resources."
+                      icon={Wrench}
+                      onClick={() =>
+                        router.push("/admin/settings/task-management")
+                      }
+                    />
+
+                    <SettingsNavigationCard
+                      title="Change Estimations"
+                      description="Manage estimation formulas, variables, and preview rules."
+                      icon={Calculator}
+                      onClick={() =>
+                        router.push("/admin/settings/change-estimations")
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Appearance */}
               <div className="pt-2">
                 <div className="h-px w-full bg-gray-200" />
@@ -772,6 +803,36 @@ function Card({ children }: { children: React.ReactNode }) {
       <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
       <div className="p-4">{children}</div>
     </div>
+  );
+}
+
+function SettingsNavigationCard({
+  title,
+  description,
+  icon: Icon,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  icon: React.ElementType;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#00c065]/30 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#00c065]/20">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#00c065]">
+        <Icon className="h-5 w-5" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
+        <p className="mt-1 text-sm text-gray-600">{description}</p>
+      </div>
+
+      <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#00c065]" />
+    </button>
   );
 }
 

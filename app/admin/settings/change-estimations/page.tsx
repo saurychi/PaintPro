@@ -658,9 +658,9 @@ export default function ChangeEstimationsSettingsPage() {
 
   return (
     <>
-      <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50">
+      <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
         <div className="shrink-0 px-4 py-3 sm:px-6">
-          <h1 className="text-xl font-semibold text-gray-900">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
             Change Estimations
           </h1>
         </div>
@@ -688,13 +688,13 @@ export default function ChangeEstimationsSettingsPage() {
           </section>
 
           {pageError ? (
-            <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+            <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-800 dark:bg-red-950/40">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs font-semibold text-red-800">
+                  <p className="text-xs font-semibold text-red-800 dark:text-red-300">
                     Failed to load estimation settings
                   </p>
-                  <p className="text-[11px] text-red-700">{pageError}</p>
+                  <p className="text-[11px] text-red-700 dark:text-red-400">{pageError}</p>
                 </div>
 
                 <button
@@ -708,14 +708,15 @@ export default function ChangeEstimationsSettingsPage() {
           ) : null}
 
           <section className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
-            <div className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="shrink-0 border-b border-gray-200 p-3">
+            {/* ── Formula Templates list ── */}
+            <div className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+              <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                   <div className="min-w-0">
-                    <h2 className="text-sm font-semibold text-gray-900">
+                    <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
                       Formula Templates
                     </h2>
-                    <p className="mt-0.5 max-w-md text-xs text-gray-500">
+                    <p className="mt-0.5 max-w-md text-xs text-gray-500 dark:text-gray-400">
                       Manage database formulas used by duration and material
                       estimation rules.
                     </p>
@@ -723,24 +724,24 @@ export default function ChangeEstimationsSettingsPage() {
 
                   <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_145px_auto]">
                     <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                       <input
                         type="text"
                         value={searchValue}
                         onChange={(event) => setSearchValue(event.target.value)}
                         placeholder="Search formula..."
-                        className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
+                        className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-3 text-xs text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:placeholder:text-gray-500"
                       />
                     </div>
 
                     <div className="relative">
-                      <Filter className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                      <Filter className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                       <select
                         value={scopeFilter}
                         onChange={(event) =>
                           setScopeFilter(event.target.value as ScopeFilter)
                         }
-                        className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-8 text-xs font-medium text-gray-700 outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10">
+                        className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-8 text-xs font-medium text-gray-700 outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                         <option value="all">All</option>
                         <option value="duration">Duration</option>
                         <option value="material">Material</option>
@@ -761,13 +762,13 @@ export default function ChangeEstimationsSettingsPage() {
               <div className="min-h-0 flex-1 overflow-hidden">
                 {loading ? (
                   <div className="flex h-full items-center justify-center">
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Loading formulas...
                     </div>
                   </div>
                 ) : filteredFormulas.length > 0 ? (
-                  <div className="h-full divide-y divide-gray-100 overflow-auto">
+                  <div className="h-full divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
                     {filteredFormulas.map((formula) => {
                       const isSelected =
                         formula.formula_template_id === selectedFormulaId;
@@ -775,36 +776,43 @@ export default function ChangeEstimationsSettingsPage() {
                         deletingFormulaId === formula.formula_template_id;
 
                       return (
-                        <button
-                          type="button"
+                        <div
                           key={formula.formula_template_id}
+                          role="button"
+                          tabIndex={0}
                           onClick={() =>
                             handleSelectFormula(formula.formula_template_id)
                           }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleSelectFormula(formula.formula_template_id);
+                            }
+                          }}
                           className={[
-                            "block w-full p-3 text-left transition",
+                            "block w-full cursor-pointer p-3 text-left transition",
                             isSelected
-                              ? "bg-emerald-50/70"
-                              : "hover:bg-gray-50",
+                              ? "bg-emerald-50/70 dark:bg-emerald-950/30"
+                              : "hover:bg-gray-50 dark:hover:bg-gray-800/60",
                           ].join(" ")}>
                           <div className="grid gap-3 lg:grid-cols-[minmax(180px,0.9fr)_minmax(0,1fr)_auto]">
                             <div className="flex min-w-0 items-start gap-2">
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-50 text-[#00c065]">
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-50 text-[#00c065] dark:bg-green-950">
                                 <FlaskConical className="h-4 w-4" />
                               </div>
 
                               <div className="min-w-0">
-                                <h3 className="truncate text-xs font-semibold text-gray-900">
+                                <h3 className="truncate text-xs font-semibold text-gray-900 dark:text-white">
                                   {formula.name}
                                 </h3>
-                                <p className="truncate text-[11px] text-gray-500">
+                                <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
                                   {formula.formula_key}
                                 </p>
                                 <div className="mt-2 flex flex-wrap gap-1">
-                                  <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                                  <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400">
                                     {formula.formula_scope}
                                   </span>
-                                  <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                                  <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400">
                                     {formula.variables.length} vars
                                   </span>
                                 </div>
@@ -812,13 +820,13 @@ export default function ChangeEstimationsSettingsPage() {
                             </div>
 
                             <div className="min-w-0">
-                              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
                                 Expression
                               </p>
-                              <code className="mt-1 block truncate rounded-md bg-gray-50 px-2 py-1 text-[11px] text-gray-700">
+                              <code className="mt-1 block truncate rounded-md bg-gray-50 px-2 py-1 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                                 {formula.formula_expression}
                               </code>
-                              <p className="mt-1 truncate text-[11px] text-gray-500">
+                              <p className="mt-1 truncate text-[11px] text-gray-500 dark:text-gray-400">
                                 Used by: {getUsageLabel(formula)}
                               </p>
                             </div>
@@ -833,14 +841,14 @@ export default function ChangeEstimationsSettingsPage() {
                                     formula.formula_template_id,
                                   )
                                 }
-                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100">
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 dark:hover:bg-emerald-900">
                                 Preview
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => openFormulaEditor(formula)}
-                                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-medium text-gray-700 hover:bg-white hover:shadow-sm">
+                                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-medium text-gray-700 hover:bg-white hover:shadow-sm dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
                                 Edit
                               </button>
 
@@ -850,7 +858,7 @@ export default function ChangeEstimationsSettingsPage() {
                                   void handleDeleteFormula(formula)
                                 }
                                 disabled={deleting}
-                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60">
+                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800">
                                 {deleting ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 ) : (
@@ -859,17 +867,17 @@ export default function ChangeEstimationsSettingsPage() {
                               </button>
                             </div>
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
                 ) : (
                   <div className="flex h-full items-center justify-center px-6 text-center">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">
                         No formulas found
                       </p>
-                      <p className="mt-1 text-xs text-gray-500">
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         Adjust your search or create a new formula.
                       </p>
                     </div>
@@ -879,18 +887,19 @@ export default function ChangeEstimationsSettingsPage() {
             </div>
 
             <aside className="grid min-h-0 gap-3 xl:grid-rows-[minmax(0,0.7fr)_minmax(0,0.3fr)]">
-              <div className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
-                <div className="shrink-0 border-b border-gray-200 p-3">
+              {/* ── Formula Preview ── */}
+              <div className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="text-sm font-semibold text-gray-900">
+                      <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
                         Formula Preview
                       </h2>
-                      <p className="truncate text-xs text-gray-500">
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                         Test selected formula with sample values.
                       </p>
                     </div>
-                    <Settings2 className="h-4 w-4 shrink-0 text-gray-400" />
+                    <Settings2 className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
                   </div>
                 </div>
 
@@ -902,7 +911,7 @@ export default function ChangeEstimationsSettingsPage() {
                         onChange={(event) =>
                           handleSelectFormula(event.target.value || null)
                         }
-                        className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10">
+                        className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-900 outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                         <option value="">Select a formula</option>
                         {formulas.map((formula) => (
                           <option
@@ -917,7 +926,7 @@ export default function ChangeEstimationsSettingsPage() {
                         type="button"
                         onClick={resetPreviewToSelectedFormula}
                         disabled={!selectedFormula}
-                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">
                         <RotateCcw className="h-3.5 w-3.5" />
                         Reset
                       </button>
@@ -929,25 +938,25 @@ export default function ChangeEstimationsSettingsPage() {
                         setPreviewExpression(event.target.value)
                       }
                       placeholder="Select a formula to preview its expression."
-                      className="min-h-0 flex-1 resize-none rounded-lg border border-gray-200 bg-white p-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
+                      className="min-h-0 flex-1 resize-none rounded-lg border border-gray-200 bg-white p-2 text-xs text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:placeholder:text-gray-500"
                     />
                   </div>
 
                   <div className="flex min-h-0 flex-col gap-2">
-                    <div className="rounded-lg border border-green-200 bg-green-50 p-2.5">
-                      <p className="text-[11px] font-medium text-green-700">
+                    <div className="rounded-lg border border-green-200 bg-green-50 p-2.5 dark:border-green-800 dark:bg-green-950/50">
+                      <p className="text-[11px] font-medium text-green-700 dark:text-green-400">
                         Estimated Result
                       </p>
-                      <p className="mt-0.5 truncate text-sm font-semibold text-green-800">
+                      <p className="mt-0.5 truncate text-sm font-semibold text-green-800 dark:text-green-300">
                         {previewResult.label}
                       </p>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] text-green-700">
+                      <p className="mt-0.5 line-clamp-2 text-[11px] text-green-700 dark:text-green-400">
                         {previewResult.error ?? previewResult.detail}
                       </p>
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-gray-100 bg-gray-50 p-2">
-                      <p className="mb-1 text-[11px] font-semibold text-gray-900">
+                    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-gray-100 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-800/50">
+                      <p className="mb-1 text-[11px] font-semibold text-gray-900 dark:text-white">
                         Preview Values
                       </p>
 
@@ -976,7 +985,7 @@ export default function ChangeEstimationsSettingsPage() {
                           ))}
                         </div>
                       ) : (
-                        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-2 text-center text-[11px] text-gray-500">
+                        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-2 text-center text-[11px] text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
                           Select a formula.
                         </div>
                       )}
@@ -985,14 +994,15 @@ export default function ChangeEstimationsSettingsPage() {
                 </div>
               </div>
 
-              <div className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
-                <div className="shrink-0 border-b border-gray-200 p-3">
+              {/* ── Variables ── */}
+              <div className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="text-sm font-semibold text-gray-900">
+                      <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
                         Variables
                       </h2>
-                      <p className="truncate text-xs text-gray-500">
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                         {selectedFormula
                           ? `Default values for ${selectedFormula.name}.`
                           : "Select a formula to manage its variables."}
@@ -1003,7 +1013,7 @@ export default function ChangeEstimationsSettingsPage() {
                       type="button"
                       onClick={openAddVariableModal}
                       disabled={!selectedFormula}
-                      className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                      className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
                       <Plus className="h-3.5 w-3.5" />
                       Add
                     </button>
@@ -1012,7 +1022,7 @@ export default function ChangeEstimationsSettingsPage() {
 
                 <div className="min-h-0 flex-1 overflow-hidden">
                   {selectedFormula?.variables.length ? (
-                    <div className="h-full divide-y divide-gray-100 overflow-auto">
+                    <div className="h-full divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
                       {selectedFormula.variables.map((variable) => {
                         const deleting =
                           deletingVariableId === variable.formula_variable_id;
@@ -1020,26 +1030,26 @@ export default function ChangeEstimationsSettingsPage() {
                         return (
                           <div
                             key={variable.formula_variable_id}
-                            className="grid gap-3 p-3 hover:bg-gray-50 md:grid-cols-[minmax(0,1fr)_auto]">
+                            className="grid gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 md:grid-cols-[minmax(0,1fr)_auto]">
                             <div className="min-w-0">
-                              <h3 className="truncate text-xs font-semibold text-gray-900">
+                              <h3 className="truncate text-xs font-semibold text-gray-900 dark:text-white">
                                 {variable.label}
                               </h3>
-                              <p className="truncate text-[11px] text-gray-500">
+                              <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
                                 {variable.variable_key}
                               </p>
 
                               {variable.description ? (
-                                <p className="mt-1 line-clamp-1 text-[11px] text-gray-500">
+                                <p className="mt-1 line-clamp-1 text-[11px] text-gray-500 dark:text-gray-400">
                                   {variable.description}
                                 </p>
                               ) : null}
 
                               <div className="mt-1 flex flex-wrap gap-1.5">
-                                <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                                <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400">
                                   {variable.data_type}
                                 </span>
-                                <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600">
+                                <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
                                   {variable.is_required
                                     ? "Required"
                                     : "Optional"}
@@ -1048,11 +1058,11 @@ export default function ChangeEstimationsSettingsPage() {
                             </div>
 
                             <div className="flex shrink-0 items-center gap-2">
-                              <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-right">
-                                <p className="text-xs font-semibold text-gray-800">
+                              <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-right dark:border-gray-700 dark:bg-gray-800">
+                                <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">
                                   {variable.default_value || "-"}
                                 </p>
-                                <p className="text-[9px] text-gray-500">
+                                <p className="text-[9px] text-gray-500 dark:text-gray-400">
                                   {variable.unit || "No unit"}
                                 </p>
                               </div>
@@ -1060,7 +1070,7 @@ export default function ChangeEstimationsSettingsPage() {
                               <button
                                 type="button"
                                 onClick={() => openEditVariableModal(variable)}
-                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:shadow-sm">
+                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:shadow-sm dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800">
                                 <Edit3 className="h-3.5 w-3.5" />
                               </button>
 
@@ -1070,7 +1080,7 @@ export default function ChangeEstimationsSettingsPage() {
                                   void handleDeleteVariable(variable)
                                 }
                                 disabled={deleting}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60">
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800">
                                 {deleting ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 ) : (
@@ -1085,12 +1095,12 @@ export default function ChangeEstimationsSettingsPage() {
                   ) : (
                     <div className="flex h-full items-center justify-center px-6 text-center">
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
                           {selectedFormula
                             ? "No variables yet"
                             : "No formula selected"}
                         </p>
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           {selectedFormula
                             ? "Add variables for this formula."
                             : "Pick a formula from the list."}
@@ -1155,25 +1165,25 @@ function SummaryCard({
   const styles = {
     green: {
       bar: "bg-[#00c065]",
-      icon: "bg-green-50 text-[#00c065]",
+      icon: "bg-green-50 text-[#00c065] dark:bg-green-950",
     },
     blue: {
       bar: "bg-blue-500",
-      icon: "bg-blue-50 text-blue-600",
+      icon: "bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400",
     },
     amber: {
       bar: "bg-amber-500",
-      icon: "bg-amber-50 text-amber-600",
+      icon: "bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400",
     },
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div className={`mb-2 h-1 w-10 rounded-full ${styles[color].bar}`} />
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-medium text-gray-500">{title}</p>
-          <p className="text-lg font-semibold text-gray-900">{value}</p>
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{title}</p>
+          <p className="text-lg font-semibold text-gray-900 dark:text-white">{value}</p>
         </div>
 
         <div
@@ -1199,15 +1209,15 @@ function PreviewInput({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2">
       <div className="min-w-0">
-        <label className="truncate text-[10px] font-medium text-gray-600">
+        <label className="truncate text-[10px] font-medium text-gray-600 dark:text-gray-300">
           {label}
         </label>
-        <p className="truncate text-[9px] text-gray-500">{meta}</p>
+        <p className="truncate text-[9px] text-gray-500 dark:text-gray-400">{meta}</p>
       </div>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-7 rounded-lg border border-gray-200 px-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
+        className="h-7 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-900 outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
       />
     </div>
   );

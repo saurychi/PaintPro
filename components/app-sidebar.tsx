@@ -847,14 +847,14 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-linear-to-b from-white via-white/95 to-transparent transition-opacity duration-200",
+                "pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-linear-to-b from-sidebar via-sidebar/95 to-transparent transition-opacity duration-200",
                 desktopScrollFade.showTop ? "opacity-100" : "opacity-0",
               )}
             />
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-linear-to-t from-white via-white/95 to-transparent transition-opacity duration-200",
+                "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-linear-to-t from-sidebar via-sidebar/95 to-transparent transition-opacity duration-200",
                 desktopScrollFade.showBottom ? "opacity-100" : "opacity-0",
               )}
             />
