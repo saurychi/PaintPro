@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo, useState, useEffect, Fragment } from "react";
+import React, { memo, useState, useEffect, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
@@ -486,6 +486,29 @@ function buildStartOfWorkChildren(group: ProcessItem) {
   ];
 }
 
+function computeEffectiveChildStatus(
+  child: ProcessItem,
+  isManageEndOfWorkGroup: boolean,
+  startOfWorkDone: boolean,
+  effectiveProjectStatus: string,
+): StepVisualStatus {
+  if (child.id === "project-kickoff" && startOfWorkDone) return "done";
+  if (
+    child.id === "manage-downpayment" &&
+    [
+      "ready_to_start",
+      "in_progress",
+      ...END_OF_WORK_STATUS_ORDER,
+      "completed",
+      "cancelled",
+    ].includes(effectiveProjectStatus)
+  )
+    return "done";
+  if (isManageEndOfWorkGroup && Boolean(END_OF_WORK_STEP_BY_ID[child.id]))
+    return getEndOfWorkStepVisualStatus(child.id, effectiveProjectStatus);
+  return child.status;
+}
+
 function ProgressSkeleton() {
   return (
     <div className="space-y-2 px-3 py-3">
@@ -558,6 +581,10 @@ function JobProgressCard({
     currentUserId || null,
   );
 
+  const seededForProjectRef = useRef<string | null>(null);
+  const openProcessIdsRef = useRef(openProcessIds);
+  openProcessIdsRef.current = openProcessIds;
+
   const selectedProjectStatus = readProjectStatus(selectedProject);
   const effectiveProjectId = projectId || readProjectId(selectedProject);
   const effectiveProjectStatus = projectStatusOverride || selectedProjectStatus;
@@ -594,6 +621,20 @@ function JobProgressCard({
         isEndOfWorkStatus(effectiveProjectStatus),
     );
   }, [effectiveProjectStatus]);
+
+  useEffect(() => {
+    if (!processItems.length || !effectiveProjectId) return;
+    if (seededForProjectRef.current === effectiveProjectId) return;
+    seededForProjectRef.current = effectiveProjectId;
+
+    for (const group of processItems) {
+      const children = buildStartOfWorkChildren(group);
+      const hasPendingChild = children.some((child) => child.status !== "done");
+      if (hasPendingChild && !openProcessIdsRef.current.has(group.id)) {
+        toggleProcessRow(group.id);
+      }
+    }
+  }, [processItems, effectiveProjectId, toggleProcessRow]);
 
   async function handleStartProjectWork() {
     if (!effectiveProjectId || startingProject) return;
@@ -934,6 +975,15 @@ function JobProgressCard({
                     group.title.toLowerCase().trim() === "job creation";
                   const isLastGroup = groupIndex === processItems.length - 1;
 
+                  const siblingStatuses = groupChildren.map((c) =>
+                    computeEffectiveChildStatus(
+                      c,
+                      currentIsManageEndOfWorkGroup,
+                      startOfWorkDone,
+                      effectiveProjectStatus,
+                    ),
+                  );
+
                   return (
                     <div
                       key={group.id}
@@ -1038,7 +1088,7 @@ function JobProgressCard({
                         leaveTo="opacity-0 -translate-y-1">
                         <div>
                           <div className="mt-1 space-y-0">
-                            {groupChildren.map((child) => {
+                            {groupChildren.map((child, childIndex) => {
                               const isProjectKickoff =
                                 child.id === "project-kickoff";
 
@@ -1069,6 +1119,9 @@ function JobProgressCard({
                                       : child.status;
 
                               const dim = effectiveChildStatus === "done";
+                              const isPreviousTaskDone =
+                                childIndex === 0 ||
+                                siblingStatuses[childIndex - 1] === "done";
                               const childOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
                               const childRoute = isJobCreationGroup
@@ -1525,6 +1578,12 @@ function JobProgressCard({
                                             child.status !== "done" ? (
                                               <button
                                                 type="button"
+                                                disabled={!isPreviousTaskDone}
+                                                title={
+                                                  !isPreviousTaskDone
+                                                    ? "Complete the previous task first"
+                                                    : undefined
+                                                }
                                                 onClick={() => {
                                                   setConfirmingFinishId(
                                                     child.id,
@@ -1533,7 +1592,12 @@ function JobProgressCard({
                                                     child.title,
                                                   );
                                                 }}
-                                                className="ml-auto shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100">
+                                                className={[
+                                                  "ml-auto shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                                  isPreviousTaskDone
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
+                                                    : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300",
+                                                ].join(" ")}>
                                                 Finish
                                               </button>
                                             ) : null}

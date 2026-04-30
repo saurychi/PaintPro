@@ -220,7 +220,7 @@ export async function POST(request: Request) {
     const { error: statusError } = await supabaseAdmin
       .from("projects")
       .update({
-        status: "ready_to_start",
+        status: "downpayment_pending",
         updated_at: new Date().toISOString(),
       })
       .eq("project_id", projectId);
@@ -229,7 +229,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: "Quotation signed and saved.",
-      nextStatus: "ready_to_start",
+      nextStatus: "downpayment_pending",
       documentId,
       signedName,
       signedAt: now,

@@ -976,24 +976,36 @@ export default function BasicDetails() {
     setNewClientPhone(`${callingCode}${normalizedPhone}`);
   }
 
-  function handleClientSelect(clientId: string) {
-    setSelectedClientId(clientId);
+  function resolvePhoneCountry(phone: string | null | undefined) {
+    const rawPhone = String(phone ?? "").trim();
 
-    const client = clients.find((item) => item.client_id === clientId);
-    if (!client) return;
+    if (!rawPhone) return "+63";
 
+    const matchedCountry = phoneCountryOptions.find((item) =>
+      rawPhone.startsWith(item.calling_code),
+    );
+
+    if (matchedCountry) {
+      return matchedCountry.calling_code;
+    }
+
+    const extractedCountry = rawPhone.match(/^(\+\d+)/)?.[1];
+    return extractedCountry || "+63";
+  }
+
+  function applyClientToForm(client: ClientOption) {
+    setSelectedClientId(client.client_id);
     setClientName(client.full_name ?? "");
     setClientEmail(client.email ?? "");
     setClientPhone(client.phone ?? "");
     setAddress(client.address ?? "");
+    setSelectedPhoneCountry(resolvePhoneCountry(client.phone));
+  }
 
-    const matchedCountry = phoneCountryOptions.find((item) =>
-      (client.phone ?? "").startsWith(item.calling_code),
-    );
-
-    if (matchedCountry) {
-      setSelectedPhoneCountry(matchedCountry.calling_code);
-    }
+  function handleClientSelect(clientId: string) {
+    const client = clients.find((item) => item.client_id === clientId);
+    if (!client) return;
+    applyClientToForm(client);
   }
 
   function openCreateClientModal() {
@@ -1071,12 +1083,7 @@ export default function BasicDetails() {
         ),
       );
 
-      setSelectedClientId(createdClient.client_id);
-      setClientName(createdClient.full_name ?? "");
-      setClientEmail(createdClient.email ?? "");
-      setClientPhone(createdClient.phone ?? "");
-      setAddress(createdClient.address ?? "");
-
+      applyClientToForm(createdClient);
       setIsCreateClientModalOpen(false);
       toast.success("Client created successfully.");
     } catch (error: any) {
