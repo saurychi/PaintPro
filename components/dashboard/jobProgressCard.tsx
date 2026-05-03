@@ -4,9 +4,15 @@ import React, { memo, useState, useEffect, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, RefreshCw } from "lucide-react";
 import DownpaymentModal from "@/components/project-creation/DownpaymentModal";
 import ProjectReviewModal from "@/components/dashboard/ProjectReviewModal";
+import GeneratedTaskEditModal, {
+  type GeneratedTaskEditTarget,
+  type GeneratedTaskEquipment,
+  type GeneratedTaskMaterial,
+  type GeneratedTaskStaff,
+} from "@/components/dashboard/GeneratedTaskEditModal";
 import FinalPaymentModal from "@/components/progressCard/FinalPaymentModal";
 import EmployeeManagementModal from "@/components/progressCard/EmployeeManagementModal";
 import { supabase } from "@/lib/supabaseClient";
@@ -22,6 +28,14 @@ export type ProcessDetail = {
   employees: string[];
   employeeIds: string[];
   estimatedHours: string;
+  estimatedHoursValue?: number | null;
+  projectTaskId?: string | null;
+  projectSubTaskId?: string | null;
+  materials?: GeneratedTaskMaterial[];
+  equipment?: GeneratedTaskEquipment[];
+  assignedStaff?: GeneratedTaskStaff[];
+  scheduledStartDatetime?: string | null;
+  scheduledEndDatetime?: string | null;
   completedAt?: string | null;
 };
 
@@ -49,6 +63,7 @@ type Props = {
   toggleSubtaskRow: (id: string) => void;
   onFinishSubtask?: (subtaskId: string) => Promise<void>;
   onRefresh?: () => void;
+  canEditGeneratedTasks?: boolean;
   currentUserId?: string | null;
   employeeReviewItems?: EmployeeReviewItem[];
   reviewSummary?: ProjectReviewSummary | null;
@@ -550,6 +565,7 @@ function JobProgressCard({
   toggleSubtaskRow,
   onFinishSubtask,
   onRefresh,
+  canEditGeneratedTasks = false,
   currentUserId,
   employeeReviewItems = [],
   reviewSummary = null,
@@ -572,6 +588,9 @@ function JobProgressCard({
     useState(false);
   const [employeeManagementSaving, setEmployeeManagementSaving] =
     useState(false);
+  const [editingGeneratedTask, setEditingGeneratedTask] =
+    useState<GeneratedTaskEditTarget | null>(null);
+  const [savingGeneratedTask, setSavingGeneratedTask] = useState(false);
   const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(
     null,
   );
@@ -747,6 +766,70 @@ function JobProgressCard({
       toast.error("Could not finish subtask", { description: message });
     } finally {
       setFinishing(false);
+    }
+  }
+
+  async function handleSaveGeneratedTask(payload: {
+    projectTaskId: string;
+    projectSubTaskId: string;
+    materials: GeneratedTaskMaterial[];
+    equipment: GeneratedTaskEquipment[];
+    employeeIds: string[];
+    estimatedHours: number | null;
+    scheduledStartDatetime: string | null;
+    scheduledEndDatetime: string | null;
+  }) {
+    try {
+      setSavingGeneratedTask(true);
+
+      const response = await fetch("/api/planning/updateGeneratedSubTask", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectTaskId: payload.projectTaskId,
+          projectSubTaskId: payload.projectSubTaskId,
+          materials: payload.materials.map((material) => ({
+            materialId: material.id,
+            quantity: material.quantity,
+            estimatedCost: material.estimatedCost,
+          })),
+          equipment: payload.equipment.map((item) => ({
+            equipment_id: item.id,
+            quantity: item.quantity,
+            notes: item.notes,
+          })),
+          employeeIds: payload.employeeIds,
+          estimatedHours: payload.estimatedHours,
+          scheduledStartDatetime: payload.scheduledStartDatetime,
+          scheduledEndDatetime: payload.scheduledEndDatetime,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to update generated task.",
+        );
+      }
+
+      setEditingGeneratedTask(null);
+      toast.success("Generated task updated");
+      onRefresh?.();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to update generated task.";
+
+      toast.error("Could not update task", {
+        description: message,
+      });
+    } finally {
+      setSavingGeneratedTask(false);
     }
   }
 
@@ -1570,6 +1653,51 @@ function JobProgressCard({
                                               </span>
                                             </span>
 
+                                            {canEditGeneratedTasks &&
+                                            child.detail?.projectTaskId &&
+                                            child.detail?.projectSubTaskId ? (
+                                              <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  setEditingGeneratedTask({
+                                                    projectTaskId:
+                                                      child.detail
+                                                        ?.projectTaskId || "",
+                                                    projectSubTaskId:
+                                                      child.detail
+                                                        ?.projectSubTaskId ||
+                                                      child.id,
+                                                    title: child.title,
+                                                    materials:
+                                                      child.detail
+                                                        ?.materials ?? [],
+                                                    equipment:
+                                                      child.detail
+                                                        ?.equipment ?? [],
+                                                    employees:
+                                                      child.detail
+                                                        ?.assignedStaff ?? [],
+                                                    estimatedHours:
+                                                      child.detail
+                                                        ?.estimatedHoursValue ??
+                                                      null,
+                                                    scheduledStartDatetime:
+                                                      child.detail
+                                                        ?.scheduledStartDatetime ??
+                                                      null,
+                                                    scheduledEndDatetime:
+                                                      child.detail
+                                                        ?.scheduledEndDatetime ??
+                                                      null,
+                                                  });
+                                                }}
+                                                className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100">
+                                                <Pencil className="h-3.5 w-3.5" />
+                                                Edit
+                                              </button>
+                                            ) : null}
+
                                             {onFinishSubtask &&
                                             currentUserId &&
                                             child.detail?.employeeIds?.includes(
@@ -1593,7 +1721,10 @@ function JobProgressCard({
                                                   );
                                                 }}
                                                 className={[
-                                                  "ml-auto shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                                  "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                                  canEditGeneratedTasks
+                                                    ? ""
+                                                    : "ml-auto",
                                                   isPreviousTaskDone
                                                     ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
                                                     : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300",
@@ -1693,6 +1824,16 @@ function JobProgressCard({
         saving={employeeManagementSaving}
         onClose={() => setEmployeeManagementModalOpen(false)}
         onFinish={handleEmployeeManagementFinish}
+      />
+
+      <GeneratedTaskEditModal
+        open={Boolean(editingGeneratedTask)}
+        task={editingGeneratedTask}
+        saving={savingGeneratedTask}
+        onClose={() => {
+          if (!savingGeneratedTask) setEditingGeneratedTask(null);
+        }}
+        onSave={handleSaveGeneratedTask}
       />
 
       {/* Finish subtask confirmation modal */}

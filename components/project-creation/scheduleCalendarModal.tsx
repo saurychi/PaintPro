@@ -51,6 +51,10 @@ export default function ScheduleCalendarModal({
     (event) => event.className === "fc-unavailable-day",
   ).length;
 
+  const holidayCount = availableDateEvents.filter(
+    (event) => event.className === "fc-holiday-day",
+  ).length;
+
   return (
     <>
       <style>{`
@@ -150,7 +154,8 @@ export default function ScheduleCalendarModal({
           display: none !important;
         }
 
-        .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-unavailable-day) .fc-daygrid-day-frame {
+        .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-unavailable-day) .fc-daygrid-day-frame,
+        .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-holiday-day) .fc-daygrid-day-frame {
           cursor: not-allowed;
         }
 
@@ -160,6 +165,10 @@ export default function ScheduleCalendarModal({
 
         .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-unavailable-day) {
           background: #fef2f2 !important;
+        }
+
+        .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-holiday-day) {
+          background: #fef9c3 !important;
         }
 
         .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-selected-day) {
@@ -281,11 +290,15 @@ export default function ScheduleCalendarModal({
                       (event) => event.className === "fc-unavailable-day",
                     );
 
+                    const isHoliday = dayEvents.some(
+                      (event) => event.className === "fc-holiday-day",
+                    );
+
                     const isAvailable = dayEvents.some(
                       (event) => event.className === "fc-available-day",
                     );
 
-                    if (isUnavailable || !isAvailable) return;
+                    if (isUnavailable || isHoliday || !isAvailable) return;
 
                     onSelectDate(clickedDate);
                   }}
@@ -317,6 +330,12 @@ export default function ScheduleCalendarModal({
                     colorClass="fill-rose-400 text-rose-400"
                     label="Unavailable"
                   />
+                  {holidayCount > 0 ? (
+                    <LegendItem
+                      colorClass="fill-amber-400 text-amber-400"
+                      label="Holiday"
+                    />
+                  ) : null}
                   <LegendItem
                     colorClass="fill-emerald-600 text-emerald-600"
                     label="Selected"
@@ -347,6 +366,17 @@ export default function ScheduleCalendarModal({
                       {unavailableCount}
                     </p>
                   </div>
+
+                  {holidayCount > 0 ? (
+                    <div className="col-span-2 rounded-lg border border-amber-100 bg-amber-50 p-2">
+                      <p className="text-[10px] font-medium text-amber-700">
+                        Holidays
+                      </p>
+                      <p className="mt-0.5 text-lg font-semibold text-amber-800">
+                        {holidayCount}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

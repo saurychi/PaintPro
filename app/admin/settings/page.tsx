@@ -8,6 +8,7 @@ import rawCountries from "@/lib/data/country-by-calling-code.json";
 import SignatureCanvas from "react-signature-canvas";
 import { Calculator, ChevronRight, Upload, Wrench } from "lucide-react";
 import ProjectTimeReferenceSettings from "@/components/settings/projectTimeReferenceSettings";
+import HolidaySettings from "@/components/settings/holidaySettings";
 
 const ACCENT = "#00c065";
 
@@ -702,6 +703,19 @@ export default function AdminSettings() {
                   />
 
                   <ProjectTimeReferenceSettings />
+                </div>
+              </div>
+
+              {/* Schedule */}
+              <div className="pt-2">
+                <div className="h-px w-full bg-gray-200" />
+                <div className="mt-5 grid gap-3">
+                  <SectionTitle
+                    title="Schedule"
+                    subtitle="Configure how the schedule and project schedule modal treat non-working days."
+                  />
+
+                  <HolidaySettings />
                 </div>
               </div>
 

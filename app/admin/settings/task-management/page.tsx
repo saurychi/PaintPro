@@ -84,6 +84,12 @@ function upsertSubTasks(
   return Array.from(map.values());
 }
 
+function getMainTaskOrderSignature(tasks: TaskManagementMainTask[]) {
+  return sortMainTasks(tasks)
+    .map((task) => task.main_task_id)
+    .join("|");
+}
+
 async function parseJson<T>(response: Response): Promise<T | null> {
   try {
     return (await response.json()) as T;
@@ -132,9 +138,12 @@ function requestConfirmation(args: {
 
 export default function TaskManagementSettingsPage() {
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [pageError, setPageError] = useState<string | null>(null);
   const [searchValue, setSearchValue] = useState("");
   const [mainTasks, setMainTasks] = useState<TaskManagementMainTask[]>([]);
+  const [persistedMainTaskOrderSignature, setPersistedMainTaskOrderSignature] =
+    useState("");
   const [subTasks, setSubTasks] = useState<TaskManagementSubTask[]>([]);
   const [persistedSubTasks, setPersistedSubTasks] = useState<
     TaskManagementSubTask[]
@@ -157,9 +166,12 @@ export default function TaskManagementSettingsPage() {
   const [resourceModalType, setResourceModalType] = useState<
     "materials" | "equipment"
   >("materials");
+  const [confirmMainTaskOrderOpen, setConfirmMainTaskOrderOpen] =
+    useState(false);
   const [addMainTaskOpen, setAddMainTaskOpen] = useState(false);
   const [addSubTaskOpen, setAddSubTaskOpen] = useState(false);
   const [isSavingMainTask, setIsSavingMainTask] = useState(false);
+  const [isSavingMainTaskOrder, setIsSavingMainTaskOrder] = useState(false);
   const [isSavingSubTasks, setIsSavingSubTasks] = useState(false);
   const [isSavingModal, setIsSavingModal] = useState(false);
   const [isDeletingMainTask, setIsDeletingMainTask] = useState(false);
@@ -167,6 +179,10 @@ export default function TaskManagementSettingsPage() {
     null,
   );
   const [expandedSubTaskIds, setExpandedSubTaskIds] = useState<string[]>([]);
+  const [mainDragTaskId, setMainDragTaskId] = useState<string | null>(null);
+  const [mainDragOverTaskId, setMainDragOverTaskId] = useState<string | null>(
+    null,
+  );
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
@@ -193,6 +209,9 @@ export default function TaskManagementSettingsPage() {
         if (cancelled) return;
 
         setMainTasks(nextMainTasks);
+        setPersistedMainTaskOrderSignature(
+          getMainTaskOrderSignature(nextMainTasks),
+        );
         setSubTasks(nextSubTasks);
         setPersistedSubTasks(nextSubTasks);
         setExpandedSubTaskIds([]);
@@ -230,7 +249,7 @@ export default function TaskManagementSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
 
   useEffect(() => {
     if (selectedMainTaskId && mainTasks.some((task) => task.main_task_id === selectedMainTaskId)) {
@@ -249,6 +268,8 @@ export default function TaskManagementSettingsPage() {
   }, [subTasks, selectedSubTaskId]);
 
   useEffect(() => {
+    setMainDragTaskId(null);
+    setMainDragOverTaskId(null);
     setDragIndex(null);
     setDragOverIndex(null);
   }, [selectedMainTaskId]);
@@ -261,6 +282,13 @@ export default function TaskManagementSettingsPage() {
       task.name.toLowerCase().includes(query),
     );
   }, [mainTasks, searchValue]);
+
+  const mainTaskOrderChanged = useMemo(
+    () =>
+      Boolean(persistedMainTaskOrderSignature) &&
+      getMainTaskOrderSignature(mainTasks) !== persistedMainTaskOrderSignature,
+    [mainTasks, persistedMainTaskOrderSignature],
+  );
 
   const selectedMainTask = useMemo(
     () =>
@@ -393,6 +421,65 @@ export default function TaskManagementSettingsPage() {
     );
   }
 
+  function handleMainTaskDragStart(taskId: string) {
+    setMainDragTaskId(taskId);
+  }
+
+  function handleMainTaskDragOver(
+    event: DragEvent<HTMLButtonElement>,
+    taskId: string,
+  ) {
+    event.preventDefault();
+
+    if (mainDragOverTaskId !== taskId) {
+      setMainDragOverTaskId(taskId);
+    }
+  }
+
+  function handleMainTaskDrop(targetTaskId: string) {
+    if (!mainDragTaskId) {
+      setMainDragTaskId(null);
+      setMainDragOverTaskId(null);
+      return;
+    }
+
+    if (mainDragTaskId !== targetTaskId) {
+      setMainTasks((current) => {
+        const sorted = sortMainTasks(current);
+        const sourceIndex = sorted.findIndex(
+          (task) => task.main_task_id === mainDragTaskId,
+        );
+        const targetIndex = sorted.findIndex(
+          (task) => task.main_task_id === targetTaskId,
+        );
+
+        if (sourceIndex === -1 || targetIndex === -1) return current;
+
+        const reordered = [...sorted];
+        const [moved] = reordered.splice(sourceIndex, 1);
+
+        if (!moved) return current;
+
+        reordered.splice(targetIndex, 0, moved);
+
+        return reordered.map((task, index) => ({
+          ...task,
+          default_sort_order: index + 1,
+        }));
+      });
+
+      setSelectedMainTaskId(mainDragTaskId);
+    }
+
+    setMainDragTaskId(null);
+    setMainDragOverTaskId(null);
+  }
+
+  function handleMainTaskDragEnd() {
+    setMainDragTaskId(null);
+    setMainDragOverTaskId(null);
+  }
+
   function handleSubTaskDragStart(index: number) {
     setDragIndex(index);
   }
@@ -469,6 +556,40 @@ export default function TaskManagementSettingsPage() {
       toast.error(getErrorMessage(error, "Failed to save main task."));
     } finally {
       setIsSavingMainTask(false);
+    }
+  }
+
+  async function handleSaveMainTaskOrder() {
+    if (mainTasks.length === 0) return;
+
+    setIsSavingMainTaskOrder(true);
+
+    try {
+      const orderedMainTasks = sortMainTasks(mainTasks).map((task, index) => ({
+        ...task,
+        default_sort_order: index + 1,
+      }));
+
+      const savedRows = await Promise.all(
+        orderedMainTasks.map((task) =>
+          saveMainTaskRequest({
+            mainTaskId: task.main_task_id,
+            name: task.name,
+            isActive: task.is_active,
+            defaultSortOrder: task.default_sort_order,
+            replacedByMainTaskId: task.replaced_by_main_task_id,
+          }),
+        ),
+      );
+
+      mergeSavedMainTasks(savedRows);
+      setPersistedMainTaskOrderSignature(getMainTaskOrderSignature(savedRows));
+      setConfirmMainTaskOrderOpen(false);
+      toast.success("Main task order saved.");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to save main task order."));
+    } finally {
+      setIsSavingMainTaskOrder(false);
     }
   }
 
@@ -826,14 +947,51 @@ export default function TaskManagementSettingsPage() {
         <aside className="col-span-12 min-h-0 overflow-hidden lg:col-span-3">
           <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <div className="shrink-0 border-b border-gray-100 px-3 py-2">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                <input
-                  value={searchValue}
-                  onChange={(event) => setSearchValue(event.target.value)}
-                  placeholder="Search main task..."
-                  className="h-8 w-full rounded-full border border-gray-200 bg-white pl-8 pr-3 text-xs text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
-                />
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={searchValue}
+                    onChange={(event) => setSearchValue(event.target.value)}
+                    placeholder="Search main task..."
+                    className="h-8 w-full rounded-full border border-gray-200 bg-white pl-8 pr-3 text-xs text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (mainTaskOrderChanged) {
+                      setConfirmMainTaskOrderOpen(true);
+                      return;
+                    }
+
+                    setRefreshKey((current) => current + 1);
+                  }}
+                  disabled={
+                    isSavingMainTaskOrder ||
+                    (mainTaskOrderChanged && mainTasks.length < 2)
+                  }
+                  className={[
+                    "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
+                    mainTaskOrderChanged
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800",
+                  ].join(" ")}
+                >
+                  {isSavingMainTaskOrder ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : mainTaskOrderChanged ? (
+                    null
+                  ) : (
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                  )}
+                  {isSavingMainTaskOrder
+                    ? "Saving..."
+                    : mainTaskOrderChanged
+                      ? "Save Order"
+                      : "Refresh"}
+                </button>
               </div>
             </div>
 
@@ -842,6 +1000,10 @@ export default function TaskManagementSettingsPage() {
                 <div className="space-y-1.5">
                   {filteredMainTasks.map((task) => {
                     const selected = task.main_task_id === selectedMainTaskId;
+                    const isDragging = mainDragTaskId === task.main_task_id;
+                    const isOver =
+                      mainDragOverTaskId === task.main_task_id &&
+                      mainDragTaskId !== task.main_task_id;
                     const replacementName =
                       (task.replaced_by_main_task_id &&
                         mainTaskNameById.get(task.replaced_by_main_task_id)) ||
@@ -851,22 +1013,45 @@ export default function TaskManagementSettingsPage() {
                       <button
                         key={task.main_task_id}
                         type="button"
+                        onDragOver={(event) =>
+                          handleMainTaskDragOver(event, task.main_task_id)
+                        }
+                        onDrop={() => handleMainTaskDrop(task.main_task_id)}
                         onClick={() => setSelectedMainTaskId(task.main_task_id)}
                         className={[
                           "w-full rounded-lg border px-2.5 py-2 text-left transition",
-                          selected
+                          isDragging
+                            ? "border-dashed border-emerald-300 opacity-40"
+                            : isOver
+                              ? "border-emerald-400 bg-emerald-50/40"
+                              : selected
                             ? "border-emerald-200 bg-emerald-50/70"
                             : "border-gray-200 bg-white hover:border-emerald-100 hover:bg-gray-50",
                         ].join(" ")}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-semibold text-gray-900">
-                              {task.name}
-                            </p>
-                            <p className="mt-0.5 text-[10px] text-gray-500">
-                              Default sort {task.default_sort_order ?? "-"}
-                            </p>
+                          <div className="flex min-w-0 items-start gap-2">
+                            <span
+                              draggable
+                              onClick={(event) => event.stopPropagation()}
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                handleMainTaskDragStart(task.main_task_id);
+                              }}
+                              onDragEnd={handleMainTaskDragEnd}
+                              className="mt-0.5 inline-flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded-md text-gray-300 transition hover:bg-gray-100 hover:text-gray-500 active:cursor-grabbing"
+                              aria-label={`Drag ${task.name}`}
+                            >
+                              <GripVertical className="h-3.5 w-3.5" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold text-gray-900">
+                                {task.name}
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-gray-500">
+                                Default sort {task.default_sort_order ?? "-"}
+                              </p>
+                            </div>
                           </div>
 
                           <span
@@ -1387,6 +1572,50 @@ export default function TaskManagementSettingsPage() {
         onClose={() => setResourceModalOpen(false)}
         onSave={(selectedIds) => void handleSaveResources(selectedIds)}
       />
+
+      {confirmMainTaskOrderOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          onClick={() => {
+            if (!isSavingMainTaskOrder) setConfirmMainTaskOrderOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-5 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-gray-900">
+              Save main task order?
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              This will update the default sort order of all main tasks based on
+              their current position in the list.
+            </p>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmMainTaskOrderOpen(false)}
+                disabled={isSavingMainTaskOrder}
+                className="inline-flex h-8 items-center justify-center rounded-full border border-gray-200 bg-white px-3 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveMainTaskOrder()}
+                disabled={isSavingMainTaskOrder}
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-full bg-[#00c065] px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#00a054] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSavingMainTaskOrder ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : null}
+                {isSavingMainTaskOrder ? "Saving..." : "Save Order"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <AddMainTaskModal
         open={addMainTaskOpen}

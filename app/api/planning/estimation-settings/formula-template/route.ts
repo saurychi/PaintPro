@@ -38,6 +38,10 @@ function normalizeBoolean(value: unknown) {
   return value !== false;
 }
 
+function normalizeOptionalString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function mapFormulaTemplateRow(row: FormulaTemplateRow): EstimationFormulaTemplate {
   return {
     formula_template_id: row.formula_template_id,
@@ -54,6 +58,7 @@ function mapFormulaTemplateRow(row: FormulaTemplateRow): EstimationFormulaTempla
     duration_rule_count: 0,
     total_rule_count: 0,
     sample_usage: null,
+    rule_relations: [],
   };
 }
 
@@ -64,6 +69,9 @@ function parsePayloadObject(body: Partial<EstimationFormulaTemplatePayload>) {
   const formulaScope = normalizeScope(body.formulaScope);
   const formulaExpression = normalizeString(body.formulaExpression);
   const isActive = normalizeBoolean(body.isActive);
+  const relatedMainTaskId = normalizeOptionalString(body.relatedMainTaskId);
+  const relatedSubTaskId = normalizeOptionalString(body.relatedSubTaskId);
+  const relatedRuleLabel = normalizeOptionalString(body.relatedRuleLabel);
 
   if (!formulaKey) {
     return NextResponse.json(
@@ -93,6 +101,27 @@ function parsePayloadObject(body: Partial<EstimationFormulaTemplatePayload>) {
     );
   }
 
+  if (!relatedMainTaskId) {
+    return NextResponse.json(
+      { error: "A related main task is required." },
+      { status: 400 },
+    );
+  }
+
+  if (formulaScope === "duration" && !relatedSubTaskId) {
+    return NextResponse.json(
+      { error: "A related subtask is required for duration formulas." },
+      { status: 400 },
+    );
+  }
+
+  if (formulaScope === "material" && !relatedRuleLabel) {
+    return NextResponse.json(
+      { error: "A material rule label is required for material formulas." },
+      { status: 400 },
+    );
+  }
+
   return {
     formulaKey,
     name,
@@ -100,6 +129,9 @@ function parsePayloadObject(body: Partial<EstimationFormulaTemplatePayload>) {
     formulaScope,
     formulaExpression,
     isActive,
+    relatedMainTaskId,
+    relatedSubTaskId,
+    relatedRuleLabel,
   };
 }
 
@@ -132,6 +164,59 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 },
       );
+    }
+
+    if (payload.formulaScope === "duration") {
+      const { error: relationError } = await supabaseAdmin
+        .from("task_duration_rules")
+        .insert({
+          formula_template_id: data.formula_template_id,
+          main_task_id: payload.relatedMainTaskId,
+          sub_task_id: payload.relatedSubTaskId,
+          minimum_hours: 0.25,
+          is_active: payload.isActive,
+        });
+
+      if (relationError) {
+        await supabaseAdmin
+          .from("formula_templates")
+          .delete()
+          .eq("formula_template_id", data.formula_template_id);
+
+        return NextResponse.json(
+          {
+            error: "Failed to create duration rule relationship.",
+            details: relationError.message,
+          },
+          { status: 500 },
+        );
+      }
+    } else {
+      const { error: relationError } = await supabaseAdmin
+        .from("material_estimation_rules")
+        .insert({
+          formula_template_id: data.formula_template_id,
+          main_task_id: payload.relatedMainTaskId,
+          sub_task_id: null,
+          material_name: payload.relatedRuleLabel,
+          minimum_quantity: 0,
+          is_active: payload.isActive,
+        });
+
+      if (relationError) {
+        await supabaseAdmin
+          .from("formula_templates")
+          .delete()
+          .eq("formula_template_id", data.formula_template_id);
+
+        return NextResponse.json(
+          {
+            error: "Failed to create material rule relationship.",
+            details: relationError.message,
+          },
+          { status: 500 },
+        );
+      }
     }
 
     return NextResponse.json({

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Loader2, Plus, X } from "lucide-react";
 
 import {
+  type EstimationMainTaskOption,
+  type EstimationSubTaskOption,
   type EstimationFormulaTemplatePayload,
   ESTIMATION_FORMULA_SCOPES,
 } from "@/lib/estimationSettings";
@@ -11,6 +13,8 @@ import {
 type AddFormulaModalProps = {
   open: boolean;
   saving: boolean;
+  mainTasks: EstimationMainTaskOption[];
+  subTasks: EstimationSubTaskOption[];
   onClose: () => void;
   onSubmit: (payload: EstimationFormulaTemplatePayload) => void;
 };
@@ -22,16 +26,25 @@ const initialState: EstimationFormulaTemplatePayload = {
   formulaScope: "duration",
   formulaExpression: "",
   isActive: true,
+  relatedMainTaskId: "",
+  relatedSubTaskId: "",
+  relatedRuleLabel: "",
 };
 
 export default function AddFormulaModal({
   open,
   saving,
+  mainTasks,
+  subTasks,
   onClose,
   onSubmit,
 }: AddFormulaModalProps) {
   const [formState, setFormState] =
     useState<EstimationFormulaTemplatePayload>(initialState);
+
+  const filteredSubTasks = subTasks.filter(
+    (item) => item.main_task_id === formState.relatedMainTaskId,
+  );
 
   if (!open) return null;
 
@@ -92,6 +105,7 @@ export default function AddFormulaModal({
                 setFormState((current) => ({
                   ...current,
                   formulaScope: value as EstimationFormulaTemplatePayload["formulaScope"],
+                  relatedSubTaskId: "",
                 }))
               }
               options={ESTIMATION_FORMULA_SCOPES.map((scope) => ({
@@ -128,6 +142,57 @@ export default function AddFormulaModal({
                 className="mt-1 h-24 w-full resize-none rounded-lg border border-gray-200 bg-white p-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
               />
             </div>
+
+            <SelectField
+              label="Related Main Task"
+              value={formState.relatedMainTaskId ?? ""}
+              onChange={(value) =>
+                setFormState((current) => ({
+                  ...current,
+                  relatedMainTaskId: value,
+                  relatedSubTaskId: "",
+                }))
+              }
+              options={mainTasks.map((task) => ({
+                value: task.main_task_id,
+                label: task.name,
+              }))}
+              placeholder="Select a main task"
+            />
+
+            {formState.formulaScope === "duration" ? (
+              <SelectField
+                label="Related Rule"
+                value={formState.relatedSubTaskId ?? ""}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    relatedSubTaskId: value,
+                  }))
+                }
+                options={filteredSubTasks.map((task) => ({
+                  value: task.sub_task_id,
+                  label: task.description,
+                }))}
+                placeholder={
+                  formState.relatedMainTaskId
+                    ? "Select a subtask"
+                    : "Select a main task first"
+                }
+              />
+            ) : (
+              <Field
+                label="Material Rule Label"
+                placeholder="Interior paint quantity"
+                value={formState.relatedRuleLabel ?? ""}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    relatedRuleLabel: value,
+                  }))
+                }
+              />
+            )}
 
             <SelectField
               label="Status"
@@ -209,11 +274,13 @@ function SelectField({
   value,
   onChange,
   options,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
+  placeholder?: string;
 }) {
   return (
     <div>
@@ -223,6 +290,9 @@ function SelectField({
         onChange={(event) => onChange(event.target.value)}
         className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
       >
+        {placeholder ? (
+          <option value="">{placeholder}</option>
+        ) : null}
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

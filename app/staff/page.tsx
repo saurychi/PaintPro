@@ -9,7 +9,6 @@ import CurrentJobCard, {
 import EmployeesCard from "../../components/dashboard/employeesCard";
 import JobProgressCard from "../../components/dashboard/jobProgressCard";
 import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
-import JobNumberCard from "@/components/jobNumberCard";
 import NotificationsCard from "@/components/dashboard/notificationsCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
@@ -767,7 +766,6 @@ function buildProcessItems(args: {
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const { isLoaded: isProjectTimeReferenceReady, referenceIso } =
     useProjectTimeReference();
 
