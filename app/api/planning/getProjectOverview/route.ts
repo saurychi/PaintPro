@@ -90,7 +90,9 @@ type UserRow = {
 };
 
 type ParsedEquipment = {
+  equipment_id: string | null;
   name: string;
+  quantity: number;
   notes: string | null;
 };
 
@@ -152,7 +154,9 @@ function parseEquipment(
       const resolvedName = equipment?.name ?? item.legacyName;
 
       return {
+        equipment_id: equipment?.equipment_id ?? item.equipmentId ?? null,
         name: resolvedName || "",
+        quantity: item.quantity,
         notes: item.notes,
       };
     })

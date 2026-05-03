@@ -1,15 +1,29 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
-import { Loader2, CalendarDays, BriefcaseBusiness, AlertCircle } from "lucide-react";
+import type {
+  EventClickArg,
+  EventContentArg,
+  EventInput,
+} from "@fullcalendar/core";
+import type { DateClickArg } from "@fullcalendar/interaction";
+import {
+  BriefcaseBusiness,
+  CalendarDays,
+  Loader2,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+
+import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { supabase } from "@/lib/supabaseClient";
-import StaffPageShell from "@/components/staff/StaffPageShell";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
+
+type ProjectStatus = "current" | "behind" | "done" | "pending";
 
 type ScheduleProject = {
   id: string;
@@ -17,16 +31,29 @@ type ScheduleProject = {
   title: string;
   scheduledStartDatetime: string | null;
   scheduledEndDatetime: string | null;
-  status: EventStatus;
+  status: ProjectStatus;
   rawStatus: string;
   dateLabel: string;
 };
 
-type Unavailability = {
+type StaffUnavailability = {
   id: string;
   startDatetime: string | null;
   endDatetime: string | null;
   reason: string | null;
+  status: string;
+};
+
+type StaffScheduleResponse = {
+  projects?: ScheduleProject[];
+  currentProject?: ScheduleProject | null;
+  unavailability?: StaffUnavailability[];
+  error?: string;
+};
+
+type UnavailableDaysResponse = {
+  unavailableDays?: ScheduleUnavailableDay[];
+  error?: string;
 };
 
 type FCEvent = {
@@ -34,47 +61,58 @@ type FCEvent = {
   title: string;
   start: string;
   end?: string;
-  display?: "background";
   backgroundColor: string;
-  borderColor?: string;
-  textColor?: string;
+  borderColor: string;
+  textColor: string;
   extendedProps: {
-    type: "project" | "unavailability";
-    status?: EventStatus;
-    projectCode?: string | null;
-    rawStatus?: string;
+    status: EventStatus;
+    type: "project";
+    projectCode: string | null;
+    rawStatus: string;
     scheduledStartDatetime?: string | null;
     scheduledEndDatetime?: string | null;
-    reason?: string | null;
   };
 };
 
-const ACCENT = "#00c065";
+type CalendarUnavailableItem = {
+  id: string;
+  date: string;
+  label: string;
+  source: "blocked" | "holiday" | "personal-approved";
+  notes: string | null;
+};
+
 const BORDER = "border border-gray-200";
 
-const STATUS_COLORS: Record<EventStatus, { bg: string; border: string; text: string }> = {
+const STATUS_COLORS: Record<
+  EventStatus,
+  { bg: string; border: string; text: string }
+> = {
   current: { bg: "#00c065", border: "#00a054", text: "#ffffff" },
   behind: { bg: "#ef4444", border: "#dc2626", text: "#ffffff" },
   done: { bg: "#9ca3af", border: "#6b7280", text: "#ffffff" },
   pending: { bg: "#facc15", border: "#eab308", text: "#1f2937" },
 };
 
-function toProjectEvent(project: ScheduleProject): FCEvent | null {
+function toFCEvent(project: ScheduleProject): FCEvent | null {
   if (!project.scheduledStartDatetime) return null;
+
   const start = new Date(project.scheduledStartDatetime);
   if (Number.isNaN(start.getTime())) return null;
 
   const colors = STATUS_COLORS[project.status];
+  const startDateStr = project.scheduledStartDatetime.slice(0, 10);
+
   const event: FCEvent = {
     id: project.id,
     title: project.title,
-    start: project.scheduledStartDatetime.slice(0, 10),
+    start: startDateStr,
     backgroundColor: colors.bg,
     borderColor: colors.border,
     textColor: colors.text,
     extendedProps: {
-      type: "project",
       status: project.status,
+      type: "project",
       projectCode: project.projectCode,
       rawStatus: project.rawStatus,
       scheduledStartDatetime: project.scheduledStartDatetime,
@@ -85,53 +123,20 @@ function toProjectEvent(project: ScheduleProject): FCEvent | null {
   if (project.scheduledEndDatetime) {
     const end = new Date(project.scheduledEndDatetime);
     if (!Number.isNaN(end.getTime())) {
-      const inclusive = new Date(end);
-      inclusive.setDate(inclusive.getDate() + 1);
-      event.end = inclusive.toISOString().slice(0, 10);
+      const inclusiveEnd = new Date(end);
+      inclusiveEnd.setDate(inclusiveEnd.getDate() + 1);
+      event.end = inclusiveEnd.toISOString().slice(0, 10);
     }
   }
 
   return event;
 }
 
-function toUnavailEvent(u: Unavailability): FCEvent | null {
-  if (!u.startDatetime) return null;
-  const start = new Date(u.startDatetime);
-  if (Number.isNaN(start.getTime())) return null;
-
-  const endStr = u.endDatetime
-    ? (() => {
-        const d = new Date(u.endDatetime);
-        if (Number.isNaN(d.getTime())) return undefined;
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().slice(0, 10);
-      })()
-    : (() => {
-        const d = new Date(start);
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().slice(0, 10);
-      })();
-
-  return {
-    id: `unavail-${u.id}`,
-    title: u.reason || "Unavailable",
-    start: u.startDatetime.slice(0, 10),
-    end: endStr,
-    display: "background",
-    backgroundColor: "#fecaca",
-    extendedProps: {
-      type: "unavailability",
-      reason: u.reason,
-    },
-  };
-}
-
-function isFCEvent(e: FCEvent | null): e is FCEvent {
-  return Boolean(e);
+function isFCEvent(event: FCEvent | null): event is FCEvent {
+  return Boolean(event);
 }
 
 function renderEventContent(info: EventContentArg) {
-  if (info.event.display === "background") return null;
   return (
     <div className="flex w-full items-center overflow-hidden px-1.5 py-0.5">
       <span className="truncate text-[11px] font-semibold leading-tight">
@@ -141,93 +146,321 @@ function renderEventContent(info: EventContentArg) {
   );
 }
 
-function formatDatetime(dt: string | null | undefined) {
-  if (!dt) return "—";
-  const d = new Date(dt);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-PH", {
+function formatLongDate(dateKey: string) {
+  const parsed = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return dateKey;
+  return parsed.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatShortDate(dateKey: string) {
+  const parsed = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return dateKey;
+  return parsed.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
 }
 
-export default function StaffSchedule() {
+function enumerateDateRange(startDatetime: string | null, endDatetime: string | null) {
+  if (!startDatetime) return [] as string[];
+
+  const start = new Date(startDatetime);
+  const end = endDatetime ? new Date(endDatetime) : new Date(startDatetime);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return [];
+  }
+
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+
+  const endDay = new Date(end);
+  endDay.setHours(0, 0, 0, 0);
+
+  const dates: string[] = [];
+  while (cursor <= endDay) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function getUnavailableBadge(item: CalendarUnavailableItem) {
+  if (item.source === "holiday") return "Holiday";
+  if (item.source === "personal-approved") return "Approved leave";
+  return "Blocked day";
+}
+
+function getUnavailableBadgeStyles(item: CalendarUnavailableItem) {
+  if (item.source === "holiday") {
+    return "border border-amber-200 bg-amber-50 text-amber-800";
+  }
+  if (item.source === "personal-approved") {
+    return "border border-violet-200 bg-violet-50 text-violet-800";
+  }
+  return "border border-red-200 bg-red-50 text-red-700";
+}
+
+async function getAccessToken() {
+  const { data } = await supabase.auth.getSession();
+  return data?.session?.access_token ?? null;
+}
+
+export default function StaffSchedulePage() {
+  const router = useRouter();
+
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
-  const [unavailability, setUnavailability] = useState<Unavailability[]>([]);
+  const [currentProject, setCurrentProject] = useState<ScheduleProject | null>(
+    null,
+  );
   const [fcEvents, setFcEvents] = useState<FCEvent[]>([]);
-  const [currentProject, setCurrentProject] = useState<ScheduleProject | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<FCEvent | null>(null);
+  const [sharedUnavailableDays, setSharedUnavailableDays] = useState<
+    ScheduleUnavailableDay[]
+  >([]);
+  const [personalUnavailability, setPersonalUnavailability] = useState<
+    StaffUnavailability[]
+  >([]);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadData() {
       try {
         setLoading(true);
 
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-
+        const token = await getAccessToken();
         if (!token) {
-          setLoading(false);
-          return;
+          throw new Error("Not authenticated.");
         }
 
-        const response = await fetch("/api/schedule/getStaffSchedule", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const [scheduleResponse, unavailableResponse] = await Promise.all([
+          fetch("/api/schedule/getStaffSchedule", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            cache: "no-store",
+          }),
+          fetch("/api/schedule/unavailable-days", {
+            method: "GET",
+            cache: "no-store",
+          }),
+        ]);
 
-        const data = await response.json();
+        const scheduleData =
+          (await scheduleResponse.json()) as StaffScheduleResponse;
+        const unavailableData =
+          (await unavailableResponse.json()) as UnavailableDaysResponse;
 
-        if (!response.ok) {
-          throw new Error(data?.error || "Failed to load schedule.");
+        if (!scheduleResponse.ok) {
+          throw new Error(
+            scheduleData?.error || "Failed to load staff schedule.",
+          );
         }
 
-        const nextProjects: ScheduleProject[] = Array.isArray(data?.projects)
-          ? data.projects
-          : [];
-        const nextUnavail: Unavailability[] = Array.isArray(data?.unavailability)
-          ? data.unavailability
+        if (!unavailableResponse.ok) {
+          throw new Error(
+            unavailableData?.error || "Failed to load unavailable days.",
+          );
+        }
+
+        if (cancelled) return;
+
+        const nextProjects = Array.isArray(scheduleData?.projects)
+          ? scheduleData.projects
           : [];
 
         setProjects(nextProjects);
-        setUnavailability(nextUnavail);
-        setCurrentProject(data?.currentProject ?? null);
-
-        const projectEvents = nextProjects.map(toProjectEvent).filter(isFCEvent);
-        const unavailEvents = nextUnavail.map(toUnavailEvent).filter(isFCEvent);
-
-        setFcEvents([...unavailEvents, ...projectEvents]);
-      } catch (err) {
-        console.error("Failed to load staff schedule:", err);
+        setCurrentProject(scheduleData?.currentProject ?? null);
+        setFcEvents(nextProjects.map((project) => toFCEvent(project)).filter(isFCEvent));
+        setSharedUnavailableDays(
+          Array.isArray(unavailableData?.unavailableDays)
+            ? unavailableData.unavailableDays
+            : [],
+        );
+        setPersonalUnavailability(
+          Array.isArray(scheduleData?.unavailability)
+            ? scheduleData.unavailability
+            : [],
+        );
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to load staff schedule:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Failed to load schedule.",
+        );
         setProjects([]);
-        setUnavailability([]);
         setCurrentProject(null);
         setFcEvents([]);
+        setSharedUnavailableDays([]);
+        setPersonalUnavailability([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadData();
+    void loadData();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  const approvedLeaveItems = useMemo<CalendarUnavailableItem[]>(() => {
+    return personalUnavailability
+      .filter((entry) => entry.status === "approved")
+      .flatMap((entry) =>
+        enumerateDateRange(entry.startDatetime, entry.endDatetime).map((date) => ({
+          id: `${entry.id}-${date}`,
+          date,
+          label: entry.reason?.trim() || "Approved leave",
+          source: "personal-approved" as const,
+          notes: null,
+        })),
+      );
+  }, [personalUnavailability]);
+
+  const sharedUnavailableItems = useMemo<CalendarUnavailableItem[]>(() => {
+    return sharedUnavailableDays.map((day) => ({
+      id: day.id,
+      date: day.blockedDate,
+      label: day.reason,
+      source: day.source === "holiday" ? "holiday" : "blocked",
+      notes: day.notes,
+    }));
+  }, [sharedUnavailableDays]);
+
+  const allUnavailableItems = useMemo(() => {
+    return [...sharedUnavailableItems, ...approvedLeaveItems].sort((left, right) => {
+      if (left.date !== right.date) return left.date.localeCompare(right.date);
+      return left.label.localeCompare(right.label);
+    });
+  }, [approvedLeaveItems, sharedUnavailableItems]);
+
+  const unavailableEvents = useMemo<EventInput[]>(() => {
+    const sharedEvents = sharedUnavailableDays.map((day) => {
+      if (day.source === "holiday") {
+        return {
+          id: day.id,
+          title: day.reason,
+          start: day.blockedDate,
+          allDay: true,
+          backgroundColor: "#fef3c7",
+          borderColor: "#fde68a",
+          textColor: "#92400e",
+          classNames: ["fc-staff-holiday-event"],
+          extendedProps: {
+            type: "holiday",
+          },
+        } satisfies EventInput;
+      }
+
+      return {
+        id: day.id,
+        title: day.reason,
+        start: day.blockedDate,
+        allDay: true,
+        display: "background",
+        backgroundColor: "#fee2e2",
+        borderColor: "#fecaca",
+        classNames: ["fc-staff-unavailable-event"],
+        extendedProps: {
+          type: "blocked-day",
+        },
+      } satisfies EventInput;
+    });
+
+    const leaveEvents = approvedLeaveItems.map((item) => ({
+      id: item.id,
+      title: item.label,
+      start: item.date,
+      allDay: true,
+      display: "background",
+      backgroundColor: "#ede9fe",
+      borderColor: "#c4b5fd",
+      classNames: ["fc-staff-leave-event"],
+      extendedProps: {
+        type: "approved-leave",
+      },
+    })) satisfies EventInput[];
+
+    return [...sharedEvents, ...leaveEvents];
+  }, [approvedLeaveItems, sharedUnavailableDays]);
+
+  const projectsByDate = useMemo(() => {
+    const map = new Map<string, ScheduleProject[]>();
+
+    for (const project of projects) {
+      if (!project.scheduledStartDatetime) continue;
+
+      const startKey = project.scheduledStartDatetime.slice(0, 10);
+      const endKey = project.scheduledEndDatetime
+        ? project.scheduledEndDatetime.slice(0, 10)
+        : startKey;
+
+      const cursor = new Date(`${startKey}T00:00:00`);
+      const end = new Date(`${endKey}T00:00:00`);
+      if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) continue;
+
+      while (cursor <= end) {
+        const key = cursor.toISOString().slice(0, 10);
+        const list = map.get(key) ?? [];
+        list.push(project);
+        map.set(key, list);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    return map;
+  }, [projects]);
+
+  const unavailableByDate = useMemo(() => {
+    const map = new Map<string, CalendarUnavailableItem[]>();
+
+    for (const item of allUnavailableItems) {
+      const list = map.get(item.date) ?? [];
+      list.push(item);
+      map.set(item.date, list);
+    }
+
+    return map;
+  }, [allUnavailableItems]);
+
+  const selectedDayProjects = selectedDate
+    ? (projectsByDate.get(selectedDate) ?? [])
+    : [];
+  const selectedDayUnavailableItems = selectedDate
+    ? (unavailableByDate.get(selectedDate) ?? [])
+    : [];
+
+  const upcomingUnavailableItems = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return allUnavailableItems.filter((item) => item.date >= today).slice(0, 8);
+  }, [allUnavailableItems]);
+
   const handleEventClick = (info: EventClickArg) => {
-    if (info.event.display === "background") return;
-    const found = fcEvents.find((e) => e.id === info.event.id);
-    if (found) setSelectedEvent(found);
+    const dateKey = (info.event.startStr || "").slice(0, 10);
+    if (dateKey) setSelectedDate(dateKey);
+  };
+
+  const handleDateClick = (info: DateClickArg) => {
+    setSelectedDate(info.dateStr);
   };
 
   return (
-    <StaffPageShell
-      title="Schedule"
-      subtitle="View your assigned projects and mark unavailability on your personal calendar."
-      bodyClassName="overflow-hidden"
-    >
+    <>
       <style>{`
         .fc {
           --fc-border-color: #f3f4f6;
-          --fc-today-bg-color: #f0fdf4;
+          --fc-today-bg-color: #f9fafb;
           --fc-page-bg-color: #ffffff;
           --fc-neutral-bg-color: #f9fafb;
           font-family: inherit;
@@ -283,7 +516,7 @@ export default function StaffSchedule() {
         }
 
         .fc .fc-daygrid-day.fc-day-today {
-          background-color: #f0fdf4 !important;
+          background-color: #f9fafb !important;
         }
 
         .fc .fc-event {
@@ -309,16 +542,29 @@ export default function StaffSchedule() {
           overflow: hidden;
         }
 
-        .fc .fc-bg-event {
-          opacity: 0.35 !important;
+        .fc .fc-event.fc-staff-holiday-event {
+          border-radius: 6px !important;
+          border: 1px solid #fde68a !important;
+        }
+
+        .fc .fc-daygrid-day-frame {
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+
+        .fc .fc-daygrid-day-frame:hover {
+          background: #f9fafb;
         }
       `}</style>
 
-      <div className="h-full min-h-0">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
+      <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
+        <h1 className="shrink-0 text-2xl font-semibold leading-8 text-gray-900">
+          Schedule
+        </h1>
 
-            <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
+        <div className="mt-3 min-h-0">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="min-h-0 flex-1 overflow-hidden p-2">
               {loading ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
@@ -329,35 +575,33 @@ export default function StaffSchedule() {
                   </div>
                 </div>
               ) : (
-                <div className="grid h-full min-h-0 grid-cols-12 gap-3">
-                  {/* Calendar */}
-                  <div className="col-span-12 lg:col-span-9 min-h-0 h-full overflow-hidden rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm flex flex-col">
-                    <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="grid h-full min-h-0 grid-cols-12 gap-2">
+                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9">
+                    <div className="mb-2 flex items-start justify-between gap-2">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: ACCENT }}
-                            aria-hidden="true"
-                          />
-                          <p className="text-sm font-semibold text-gray-900">
-                            Monthly Schedule
-                          </p>
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500">
-                          Your assigned jobs and marked unavailable days.
+                        <p className="text-xs font-semibold text-gray-900">
+                          Monthly Schedule
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-gray-500">
+                          Calendar view of your scheduled projects, blocked days,
+                          and approved leave.
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex flex-wrap items-center justify-end gap-3">
                         {[
                           { label: "Current", color: "#00c065" },
                           { label: "Behind", color: "#ef4444" },
                           { label: "Done", color: "#9ca3af" },
                           { label: "Pending", color: "#facc15" },
-                          { label: "Unavailable", color: "#fca5a5" },
+                          { label: "Blocked day", color: "#fca5a5" },
+                          { label: "Approved leave", color: "#c4b5fd" },
+                          { label: "Holiday", color: "#fde68a" },
                         ].map((item) => (
-                          <div key={item.label} className="flex items-center gap-1.5">
+                          <div
+                            key={item.label}
+                            className="flex items-center gap-1.5"
+                          >
                             <span
                               className="inline-block h-2.5 w-2.5 rounded-full"
                               style={{ backgroundColor: item.color }}
@@ -371,14 +615,16 @@ export default function StaffSchedule() {
                     </div>
 
                     <div
-                      className={`min-h-0 flex-1 overflow-hidden rounded-2xl border ${BORDER} bg-gray-50 p-2.5`}>
+                      className={`min-h-0 flex-1 overflow-hidden rounded-xl border ${BORDER} bg-white p-1.5`}
+                    >
                       <div className="h-full min-h-0">
                         <FullCalendar
                           plugins={[dayGridPlugin, interactionPlugin]}
                           initialView="dayGridMonth"
                           initialDate={new Date()}
-                          events={fcEvents}
+                          events={[...fcEvents, ...unavailableEvents]}
                           eventClick={handleEventClick}
+                          dateClick={handleDateClick}
                           eventContent={renderEventContent}
                           headerToolbar={{
                             left: "prev",
@@ -395,135 +641,134 @@ export default function StaffSchedule() {
                     </div>
                   </div>
 
-                  {/* Right sidebar */}
-                  <div className="col-span-12 lg:col-span-3 min-h-0 h-full flex flex-col gap-3">
-                    {/* Current job */}
-                    <div className="shrink-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
-                      <div className="mb-3 flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ backgroundColor: ACCENT }}
-                          aria-hidden="true"
-                        />
-                        <p className="text-sm font-semibold text-gray-900">
-                          Current Job Status
-                        </p>
-                      </div>
+                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:col-span-3">
+                    <div className="flex h-full min-h-0 flex-col overflow-hidden p-4">
+                      <section className="flex basis-[20%] flex-col pb-4">
+                        <div className="mb-3 flex items-center gap-2">
+                          <p className="text-xs font-semibold text-gray-900">
+                            Current Project Status
+                          </p>
+                        </div>
 
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                          <span>
-                            Status:{" "}
-                            {currentProject?.status ?? "No active project"}
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-xs font-medium text-gray-700">
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{
+                                backgroundColor: currentProject
+                                  ? STATUS_COLORS[currentProject.status].bg
+                                  : "#9ca3af",
+                              }}
+                            />
+                            <span>
+                              Status:{" "}
+                              {currentProject?.status ?? "No active project"}
+                            </span>
+                          </div>
+
+                          <div className="mt-3">
+                            <div className="text-sm font-bold text-gray-900">
+                              {currentProject?.projectCode ?? "-"}
+                            </div>
+                            <div className="mt-0.5 line-clamp-2 text-xs text-gray-600">
+                              {currentProject?.title ?? "No project selected"}
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+
+                      <div className="border-t border-gray-200" />
+
+                      <section className="flex min-h-0 basis-[34%] flex-col py-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <p className="text-xs font-semibold text-gray-900">
+                            Unavailable Days
+                          </p>
+
+                          <button
+                            type="button"
+                            onClick={() => router.push("/staff/schedule/requests")}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#00c065] px-3 text-[11px] font-semibold text-white transition hover:bg-[#00a054]"
+                          >
+                            Request leave
+                          </button>
+                        </div>
+
+                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1">
+                          {upcomingUnavailableItems.length > 0 ? (
+                            upcomingUnavailableItems.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => setSelectedDate(item.date)}
+                                className="flex w-full items-start justify-between gap-3 rounded-lg px-2 py-3 text-left transition hover:bg-gray-50"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-medium text-gray-500">
+                                    {formatShortDate(item.date)}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-xs font-semibold text-gray-900">
+                                    {item.label}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${getUnavailableBadgeStyles(
+                                    item,
+                                  )}`}
+                                >
+                                  {getUnavailableBadge(item)}
+                                </span>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="flex h-full min-h-20 items-center justify-center rounded-lg text-center text-xs text-gray-500">
+                              No unavailable days yet.
+                            </div>
+                          )}
+                        </div>
+                      </section>
+
+                      <div className="border-t border-gray-200" />
+
+                      <section className="flex min-h-0 basis-[46%] flex-col pt-4">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-gray-900">
+                            Projects
+                          </p>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+                            {projects.length}
                           </span>
                         </div>
-                        <div className="mt-3">
-                          <div className="text-base font-bold text-gray-900">
-                            {currentProject?.projectCode ?? "—"}
-                          </div>
-                          <div className="mt-1 text-sm text-gray-600">
-                            {currentProject?.title ?? "No project selected"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
 
-                    {/* Unavailability */}
-                    <div className="shrink-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
-                      <div className="mb-3 flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-red-400" aria-hidden="true" />
-                        <p className="text-sm font-semibold text-gray-900">
-                          My Unavailability
-                        </p>
-                      </div>
-
-                      {unavailability.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">
-                          No unavailability recorded.
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5 max-h-[130px] overflow-y-auto pr-0.5">
-                          {unavailability.map((u) => (
-                            <div
-                              key={u.id}
-                              className="rounded-lg border border-red-100 bg-red-50 px-2.5 py-2">
-                              <div className="flex items-center gap-1.5">
-                                <AlertCircle className="h-3 w-3 shrink-0 text-red-400" />
-                                <span className="text-[11px] font-semibold text-red-700 truncate">
-                                  {u.reason || "Unavailable"}
-                                </span>
-                              </div>
-                              <div className="mt-1 text-[10px] text-red-500">
-                                {formatDatetime(u.startDatetime)}
-                                {u.endDatetime && u.endDatetime !== u.startDatetime
-                                  ? ` → ${formatDatetime(u.endDatetime)}`
-                                  : ""}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Assigned projects */}
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col">
-                      <div className="mb-3 flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ backgroundColor: ACCENT }}
-                          aria-hidden="true"
-                        />
-                        <p className="text-sm font-semibold text-gray-900">
-                          Assigned Projects
-                        </p>
-                      </div>
-
-                      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                        <div className="space-y-2">
+                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1">
                           {projects.length ? (
                             projects.map((project) => (
                               <button
                                 key={project.id}
                                 type="button"
-                                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-left transition hover:border-emerald-200 hover:bg-white"
+                                className="w-full rounded-lg px-2 py-3 text-left transition hover:bg-gray-50"
                                 onClick={() => {
-                                  const colors = STATUS_COLORS[project.status];
-                                  const fake: FCEvent = {
-                                    id: project.id,
-                                    title: project.title,
-                                    start: project.scheduledStartDatetime
-                                      ? project.scheduledStartDatetime.slice(0, 10)
-                                      : "",
-                                    backgroundColor: colors.bg,
-                                    borderColor: colors.border,
-                                    textColor: colors.text,
-                                    extendedProps: {
-                                      type: "project",
-                                      status: project.status,
-                                      projectCode: project.projectCode,
-                                      rawStatus: project.rawStatus,
-                                      scheduledStartDatetime: project.scheduledStartDatetime,
-                                      scheduledEndDatetime: project.scheduledEndDatetime,
-                                    },
-                                  };
-                                  setSelectedEvent(fake);
-                                }}>
-                                <div className="text-xs font-semibold text-gray-500">
+                                  const startKey = project.scheduledStartDatetime
+                                    ? project.scheduledStartDatetime.slice(0, 10)
+                                    : "";
+                                  if (startKey) setSelectedDate(startKey);
+                                }}
+                              >
+                                <div className="text-[11px] font-medium text-gray-500">
                                   {project.dateLabel}
                                 </div>
-                                <div className="mt-1 text-sm font-medium text-gray-800">
+                                <div className="mt-0.5 line-clamp-2 text-xs font-semibold text-gray-800">
                                   {project.title}
                                 </div>
                               </button>
                             ))
                           ) : (
-                            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-                              No assigned projects.
+                            <div className="flex h-full min-h-[100px] items-center justify-center rounded-lg text-center text-xs text-gray-500">
+                              No projects yet.
                             </div>
                           )}
                         </div>
-                      </div>
+                      </section>
                     </div>
                   </div>
                 </div>
@@ -532,91 +777,151 @@ export default function StaffSchedule() {
           </div>
         </div>
 
-        {/* Event detail modal */}
-        {selectedEvent && (
+        {selectedDate ? (
           <div
             className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm"
-            onClick={() => setSelectedEvent(null)}>
+            onClick={() => setSelectedDate(null)}
+          >
             <div
-              className="w-[92%] max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
-              onClick={(e) => e.stopPropagation()}>
-              <div
-                className="h-1 w-full rounded-t-2xl"
-                style={{ backgroundColor: ACCENT }}
-              />
-
-              <div className="px-5 py-4 border-b border-gray-200">
+              className="w-[92%] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="border-b border-gray-200 px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: ACCENT }}
-                        aria-hidden="true"
-                      />
-                      <p className="text-sm font-semibold text-gray-900">
-                        Schedule Details
-                      </p>
-                    </div>
+                    <p className="text-sm font-semibold text-gray-900">
+                      Day Details
+                    </p>
                     <h3 className="mt-2 text-lg font-bold text-gray-900">
-                      {selectedEvent.title}
+                      {formatLongDate(selectedDate)}
                     </h3>
                   </div>
 
                   <button
-                    onClick={() => setSelectedEvent(null)}
+                    type="button"
+                    onClick={() => setSelectedDate(null)}
                     className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
-                    aria-label="Close">
-                    ✕
+                    aria-label="Close"
+                  >
+                    x
                   </button>
                 </div>
               </div>
 
-              <div className="px-5 py-4">
-                <div className="grid gap-3">
-                  <div className={`rounded-xl border ${BORDER} bg-gray-50 p-3`}>
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                      <CalendarDays className="h-4 w-4" />
-                      Date
-                    </div>
-                    <p className="mt-2 text-sm font-medium text-gray-800">
-                      {selectedEvent.extendedProps.scheduledStartDatetime
-                        ? `${new Date(
-                            selectedEvent.extendedProps.scheduledStartDatetime,
-                          ).toLocaleString()}${
-                            selectedEvent.extendedProps.scheduledEndDatetime
-                              ? ` to ${new Date(
-                                  selectedEvent.extendedProps.scheduledEndDatetime,
-                                ).toLocaleString()}`
-                              : ""
-                          }`
-                        : "—"}
-                    </p>
-                  </div>
-
-                  <div className={`rounded-xl border ${BORDER} bg-gray-50 p-3`}>
+              <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+                <div className="grid gap-4">
+                  <div>
                     <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                       <BriefcaseBusiness className="h-4 w-4" />
-                      Project Code
+                      Projects
                     </div>
-                    <p className="mt-2 text-sm text-gray-700">
-                      {selectedEvent.extendedProps.projectCode ?? "—"}
-                    </p>
+
+                    <div className="mt-2 grid gap-2">
+                      {selectedDayProjects.length === 0 ? (
+                        <div
+                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500`}
+                        >
+                          No projects scheduled.
+                        </div>
+                      ) : (
+                        selectedDayProjects.map((project) => {
+                          const colors = STATUS_COLORS[project.status];
+                          return (
+                            <div
+                              key={project.id}
+                              className={`flex items-center justify-between gap-3 rounded-xl border ${BORDER} bg-white px-3 py-3 text-left shadow-sm`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                                    style={{ backgroundColor: colors.bg }}
+                                  />
+                                  <p className="truncate text-sm font-semibold text-gray-900">
+                                    {project.title}
+                                  </p>
+                                </div>
+                                <p className="mt-1 text-xs text-gray-500">
+                                  {project.projectCode ?? "-"} · {project.dateLabel}
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-xs font-medium text-gray-700 capitalize">
+                                {project.status}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      <CalendarDays className="h-4 w-4" />
+                      Unavailable Days
+                    </div>
+
+                    <div className="grid gap-2">
+                      {selectedDayUnavailableItems.length === 0 ? (
+                        <div
+                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500`}
+                        >
+                          No unavailable days recorded.
+                        </div>
+                      ) : (
+                        selectedDayUnavailableItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`rounded-xl border px-3 py-3 ${
+                              item.source === "holiday"
+                                ? "border-amber-200 bg-amber-50"
+                                : item.source === "personal-approved"
+                                  ? "border-violet-200 bg-violet-50"
+                                  : "border-red-200 bg-red-50/60"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-semibold text-gray-900">
+                                    {item.label}
+                                  </p>
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${getUnavailableBadgeStyles(
+                                      item,
+                                    )}`}
+                                  >
+                                    {getUnavailableBadge(item)}
+                                  </span>
+                                </div>
+                                {item.notes ? (
+                                  <p className="mt-1 text-xs text-gray-600">
+                                    {item.notes}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 px-5 py-4 flex justify-end">
+              <div className="flex justify-end border-t border-gray-200 px-5 py-4">
                 <button
-                  onClick={() => setSelectedEvent(null)}
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:opacity-90"
-                  style={{ backgroundColor: ACCENT }}>
+                  type="button"
+                  onClick={() => setSelectedDate(null)}
+                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800"
+                >
                   Close
                 </button>
               </div>
             </div>
           </div>
-        )}
-    </StaffPageShell>
+        ) : null}
+      </div>
+    </>
   );
 }

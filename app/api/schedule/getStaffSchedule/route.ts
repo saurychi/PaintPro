@@ -16,6 +16,7 @@ type UnavailRow = {
   start_datetime: string | null;
   end_datetime: string | null;
   reason: string | null;
+  status: string | null;
 };
 
 function normalizeStatus(status: string | null) {
@@ -130,7 +131,7 @@ export async function GET(request: NextRequest) {
   // Get unavailability for this staff member
   const { data: unavailData, error: unavailErr } = await supabaseAdmin
     .from("staff_unavailability")
-    .select("unavailability_id, start_datetime, end_datetime, reason")
+    .select("unavailability_id, start_datetime, end_datetime, reason, status")
     .eq("user_id", userId)
     .order("start_datetime", { ascending: true });
 
@@ -146,6 +147,7 @@ export async function GET(request: NextRequest) {
     startDatetime: u.start_datetime,
     endDatetime: u.end_datetime,
     reason: u.reason,
+    status: String(u.status ?? "pending").trim().toLowerCase(),
   }));
 
   const currentProject =

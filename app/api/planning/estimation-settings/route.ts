@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import {
+  type EstimationFormulaRuleRelation,
   type EstimationFormulaScope,
+  type EstimationMainTaskOption,
+  type EstimationSubTaskOption,
   type EstimationFormulaTemplate,
   type EstimationFormulaVariable,
   isEstimationFormulaScope,
@@ -35,9 +38,11 @@ type FormulaVariableRow = {
 };
 
 type RuleUsageRow = {
+  rule_id: string;
   formula_template_id: string | null;
   main_task_id: string | null;
   sub_task_id: string | null;
+  rule_label?: string | null;
 };
 
 type MainTaskRow = {
@@ -47,6 +52,7 @@ type MainTaskRow = {
 
 type SubTaskRow = {
   sub_task_id: string;
+  main_task_id: string | null;
   description: string | null;
 };
 
@@ -98,23 +104,39 @@ function buildUsageMaps(args: {
   const materialCounts = new Map<string, number>();
   const durationCounts = new Map<string, number>();
   const sampleUsageByFormulaId = new Map<string, string>();
+  const ruleRelationsByFormulaId = new Map<string, EstimationFormulaRuleRelation[]>();
 
   const recordRule = (
     rows: RuleUsageRow[],
     counter: Map<string, number>,
+    scope: EstimationFormulaScope,
   ) => {
     for (const row of rows) {
       const formulaTemplateId = String(row.formula_template_id ?? "").trim();
       if (!formulaTemplateId) continue;
 
+      const mainTaskId = String(row.main_task_id ?? "").trim();
+      const subTaskId = String(row.sub_task_id ?? "").trim();
+      const mainTaskName =
+        mainTaskNameById.get(mainTaskId) ?? "Untitled main task";
+      const subTaskName =
+        String(row.rule_label ?? "").trim() ||
+        ((subTaskNameById.get(subTaskId) ?? "Untitled rule"));
+
       counter.set(formulaTemplateId, (counter.get(formulaTemplateId) ?? 0) + 1);
 
-      if (!sampleUsageByFormulaId.has(formulaTemplateId)) {
-        const subTaskName = subTaskNameById.get(String(row.sub_task_id ?? "").trim());
-        const mainTaskName = mainTaskNameById.get(
-          String(row.main_task_id ?? "").trim(),
-        );
+      const existingRelations = ruleRelationsByFormulaId.get(formulaTemplateId) ?? [];
+      existingRelations.push({
+        relation_id: `${scope}-${row.rule_id}`,
+        rule_scope: scope,
+        main_task_id: mainTaskId,
+        main_task_name: mainTaskName,
+        sub_task_id: subTaskId,
+        sub_task_name: subTaskName,
+      });
+      ruleRelationsByFormulaId.set(formulaTemplateId, existingRelations);
 
+      if (!sampleUsageByFormulaId.has(formulaTemplateId)) {
         const sampleUsage =
           [mainTaskName, subTaskName].filter(Boolean).join(" / ") ||
           mainTaskName ||
@@ -127,10 +149,27 @@ function buildUsageMaps(args: {
     }
   };
 
-  recordRule(materialRules, materialCounts);
-  recordRule(durationRules, durationCounts);
+  recordRule(materialRules, materialCounts, "material");
+  recordRule(durationRules, durationCounts, "duration");
 
-  return { materialCounts, durationCounts, sampleUsageByFormulaId };
+  for (const item of ruleRelationsByFormulaId.values()) {
+    item.sort((left, right) => {
+      const mainGap = left.main_task_name.localeCompare(right.main_task_name);
+      if (mainGap !== 0) return mainGap;
+
+      const subGap = left.sub_task_name.localeCompare(right.sub_task_name);
+      if (subGap !== 0) return subGap;
+
+      return left.rule_scope.localeCompare(right.rule_scope);
+    });
+  }
+
+  return {
+    materialCounts,
+    durationCounts,
+    sampleUsageByFormulaId,
+    ruleRelationsByFormulaId,
+  };
 }
 
 export async function GET() {
@@ -157,14 +196,14 @@ export async function GET() {
         .order("label", { ascending: true }),
       supabaseAdmin
         .from("material_estimation_rules")
-        .select("formula_template_id, main_task_id, sub_task_id")
+        .select("material_rule_id, formula_template_id, main_task_id, sub_task_id, material_name")
         .eq("is_active", true),
       supabaseAdmin
         .from("task_duration_rules")
-        .select("formula_template_id, main_task_id, sub_task_id")
+        .select("duration_rule_id, formula_template_id, main_task_id, sub_task_id")
         .eq("is_active", true),
       supabaseAdmin.from("main_task").select("main_task_id, name"),
-      supabaseAdmin.from("sub_task").select("sub_task_id, description"),
+      supabaseAdmin.from("sub_task").select("sub_task_id, main_task_id, description"),
     ]);
 
     if (formulaTemplatesResult.error) {
@@ -268,10 +307,56 @@ export async function GET() {
         ]),
     );
 
-    const materialRules = (materialRulesResult.data ?? []) as RuleUsageRow[];
-    const durationRules = (durationRulesResult.data ?? []) as RuleUsageRow[];
+    const materialRules = ((materialRulesResult.data ?? []) as Array<{
+      material_rule_id: string | null;
+      formula_template_id: string | null;
+      main_task_id: string | null;
+      sub_task_id: string | null;
+      material_name: string | null;
+    }>).map((row) => ({
+      rule_id: String(row.material_rule_id ?? "").trim(),
+      formula_template_id: row.formula_template_id,
+      main_task_id: row.main_task_id,
+      sub_task_id: row.sub_task_id,
+      rule_label: row.material_name,
+    }));
 
-    const { materialCounts, durationCounts, sampleUsageByFormulaId } =
+    const durationRules = ((durationRulesResult.data ?? []) as Array<{
+      duration_rule_id: string | null;
+      formula_template_id: string | null;
+      main_task_id: string | null;
+      sub_task_id: string | null;
+    }>).map((row) => ({
+      rule_id: String(row.duration_rule_id ?? "").trim(),
+      formula_template_id: row.formula_template_id,
+      main_task_id: row.main_task_id,
+      sub_task_id: row.sub_task_id,
+      rule_label: null,
+    }));
+
+    const mainTasks: EstimationMainTaskOption[] = Array.from(
+      mainTaskNameById.entries(),
+    ).map(([main_task_id, name]) => ({
+      main_task_id,
+      name,
+    }));
+
+    const subTasks: EstimationSubTaskOption[] = (
+      (subTasksResult.data ?? []) as SubTaskRow[]
+    )
+      .filter((row) => row.sub_task_id && row.main_task_id)
+      .map((row) => ({
+        sub_task_id: row.sub_task_id,
+        main_task_id: String(row.main_task_id ?? "").trim(),
+        description: String(row.description ?? "").trim() || "Untitled subtask",
+      }));
+
+    const {
+      materialCounts,
+      durationCounts,
+      sampleUsageByFormulaId,
+      ruleRelationsByFormulaId,
+    } =
       buildUsageMaps({
         materialRules,
         durationRules,
@@ -302,6 +387,7 @@ export async function GET() {
           duration_rule_count: durationRuleCount,
           total_rule_count: materialRuleCount + durationRuleCount,
           sample_usage: sampleUsageByFormulaId.get(formulaTemplateId) ?? null,
+          rule_relations: ruleRelationsByFormulaId.get(formulaTemplateId) ?? [],
         };
       })
       .filter(
@@ -324,6 +410,8 @@ export async function GET() {
 
     return NextResponse.json({
       formulas,
+      mainTasks,
+      subTasks,
       summary: {
         formulaTemplateCount: formulas.length,
         formulaVariableCount: variables.length,

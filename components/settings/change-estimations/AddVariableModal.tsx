@@ -67,6 +67,8 @@ export default function AddVariableModal({
 
   if (!open) return null;
 
+  const isEditing = mode === "edit" && variable;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="w-full max-w-xl rounded-lg border border-gray-200 bg-white shadow-xl">
@@ -76,7 +78,9 @@ export default function AddVariableModal({
               {mode === "edit" ? "Edit Variable" : "Add Variable"}
             </h2>
             <p className="text-xs text-gray-500">
-              Add or update the default values used in formula expressions.
+              {isEditing
+                ? `Update the value for ${variable.label}.`
+                : "Add a default value used in formula expressions."}
             </p>
           </div>
 
@@ -95,125 +99,158 @@ export default function AddVariableModal({
             onSubmit(formState);
           }}
         >
-          <div className="grid gap-3 p-4 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <label className="text-[11px] font-medium text-gray-600">
-                Formula Template
-              </label>
-              <select
-                value={formState.formulaTemplateId}
-                onChange={(event) =>
-                  setFormState((current) => ({
-                    ...current,
-                    formulaTemplateId: event.target.value,
-                  }))
-                }
-                className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
-              >
-                <option value="">Select a formula</option>
-                {formulas.map((formula) => (
-                  <option
-                    key={formula.formula_template_id}
-                    value={formula.formula_template_id}
-                  >
-                    {formula.name} ({formula.formula_key})
-                  </option>
-                ))}
-              </select>
+          {isEditing ? (
+            <div className="p-4">
+              <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <p className="text-xs font-semibold text-gray-900">
+                  {variable.label}
+                </p>
+                <p className="mt-0.5 text-[11px] text-gray-500">
+                  {variable.variable_key}
+                  {variable.unit ? ` • ${variable.unit}` : ""}
+                </p>
+              </div>
+
+              <div className="mt-3">
+                <label className="text-[11px] font-medium text-gray-600">
+                  Number
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formState.defaultValue}
+                  onChange={(event) =>
+                    setFormState((current) => ({
+                      ...current,
+                      defaultValue: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
+                />
+              </div>
             </div>
+          ) : (
+            <div className="grid gap-3 p-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="text-[11px] font-medium text-gray-600">
+                  Formula Template
+                </label>
+                <select
+                  value={formState.formulaTemplateId}
+                  onChange={(event) =>
+                    setFormState((current) => ({
+                      ...current,
+                      formulaTemplateId: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
+                >
+                  <option value="">Select a formula</option>
+                  {formulas.map((formula) => (
+                    <option
+                      key={formula.formula_template_id}
+                      value={formula.formula_template_id}
+                    >
+                      {formula.name} ({formula.formula_key})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <Field
-              label="Variable Key"
-              placeholder="rate_per_hour"
-              value={formState.variableKey}
-              onChange={(value) =>
-                setFormState((current) => ({
-                  ...current,
-                  variableKey: value,
-                }))
-              }
-            />
-            <Field
-              label="Label"
-              placeholder="Rate Per Hour"
-              value={formState.label}
-              onChange={(value) =>
-                setFormState((current) => ({
-                  ...current,
-                  label: value,
-                }))
-              }
-            />
-            <Field
-              label="Default Value"
-              placeholder="80"
-              value={formState.defaultValue}
-              onChange={(value) =>
-                setFormState((current) => ({
-                  ...current,
-                  defaultValue: value,
-                }))
-              }
-            />
-            <Field
-              label="Unit"
-              placeholder="m2/hour"
-              value={formState.unit}
-              onChange={(value) =>
-                setFormState((current) => ({
-                  ...current,
-                  unit: value,
-                }))
-              }
-            />
-
-            <SelectField
-              label="Data Type"
-              value={formState.dataType}
-              onChange={(value) =>
-                setFormState((current) => ({
-                  ...current,
-                  dataType: value as EstimationFormulaVariablePayload["dataType"],
-                }))
-              }
-              options={ESTIMATION_VARIABLE_DATA_TYPES.map((dataType) => ({
-                value: dataType,
-                label: dataType,
-              }))}
-            />
-
-            <SelectField
-              label="Required"
-              value={formState.isRequired ? "true" : "false"}
-              onChange={(value) =>
-                setFormState((current) => ({
-                  ...current,
-                  isRequired: value === "true",
-                }))
-              }
-              options={[
-                { value: "true", label: "Yes" },
-                { value: "false", label: "No" },
-              ]}
-            />
-
-            <div className="md:col-span-2">
-              <label className="text-[11px] font-medium text-gray-600">
-                Description
-              </label>
-              <textarea
-                value={formState.description}
-                onChange={(event) =>
+              <Field
+                label="Variable Key"
+                placeholder="rate_per_hour"
+                value={formState.variableKey}
+                onChange={(value) =>
                   setFormState((current) => ({
                     ...current,
-                    description: event.target.value,
+                    variableKey: value,
                   }))
                 }
-                placeholder="Explain how this variable affects the formula."
-                className="mt-1 h-20 w-full resize-none rounded-lg border border-gray-200 bg-white p-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
               />
+              <Field
+                label="Label"
+                placeholder="Rate Per Hour"
+                value={formState.label}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    label: value,
+                  }))
+                }
+              />
+              <Field
+                label="Default Value"
+                placeholder="80"
+                value={formState.defaultValue}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    defaultValue: value,
+                  }))
+                }
+              />
+              <Field
+                label="Unit"
+                placeholder="m2/hour"
+                value={formState.unit}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    unit: value,
+                  }))
+                }
+              />
+
+              <SelectField
+                label="Data Type"
+                value={formState.dataType}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    dataType:
+                      value as EstimationFormulaVariablePayload["dataType"],
+                  }))
+                }
+                options={ESTIMATION_VARIABLE_DATA_TYPES.map((dataType) => ({
+                  value: dataType,
+                  label: dataType,
+                }))}
+              />
+
+              <SelectField
+                label="Required"
+                value={formState.isRequired ? "true" : "false"}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    isRequired: value === "true",
+                  }))
+                }
+                options={[
+                  { value: "true", label: "Yes" },
+                  { value: "false", label: "No" },
+                ]}
+              />
+
+              <div className="md:col-span-2">
+                <label className="text-[11px] font-medium text-gray-600">
+                  Description
+                </label>
+                <textarea
+                  value={formState.description}
+                  onChange={(event) =>
+                    setFormState((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  placeholder="Explain how this variable affects the formula."
+                  className="mt-1 h-20 w-full resize-none rounded-lg border border-gray-200 bg-white p-2 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex justify-end gap-2 border-t border-gray-200 p-3">
             <button

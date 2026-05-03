@@ -564,6 +564,119 @@ function collectEmployeeLabelsFromSubTask(subTask: Record<string, unknown>) {
   return unique(labels);
 }
 
+function collectEmployeeIdsFromSubTask(subTask: Record<string, unknown>) {
+  const employeeIds = new Set<string>();
+  collectEmployeesFromSubTask(subTask, employeeIds);
+  return [...employeeIds];
+}
+
+function collectAssignedStaffFromSubTask(subTask: Record<string, unknown>) {
+  const staff = [
+    ...asArray<Record<string, unknown>>(subTask.assignedStaff),
+    ...asArray<Record<string, unknown>>(subTask.assignedEmployees),
+    ...asArray<Record<string, unknown>>(subTask.employees),
+    ...asArray<Record<string, unknown>>(subTask.staff),
+    ...asArray<Record<string, unknown>>(subTask.projectSubTaskStaff),
+    ...asArray<Record<string, unknown>>(subTask.assigned_staff),
+  ];
+
+  return staff
+    .map((entry) => {
+      const nested =
+        asRecord(entry.user) ||
+        asRecord(entry.employee) ||
+        asRecord(entry.profile);
+      const id = readString(entry.user_id, entry.userId, entry.id, nested?.id);
+      const name = readString(
+        entry.username,
+        entry.full_name,
+        entry.fullName,
+        entry.name,
+        entry.email,
+        nested?.username,
+        nested?.full_name,
+        nested?.fullName,
+        nested?.name,
+        nested?.email,
+      );
+
+      return id ? { id, name: name || "Staff" } : null;
+    })
+    .filter((item): item is { id: string; name: string } => Boolean(item));
+}
+
+function collectMaterialsFromMainTask(mainTask: Record<string, unknown>) {
+  return asArray<Record<string, unknown>>(mainTask.materials)
+    .map((material) => {
+      const id = readString(
+        material.material_id,
+        material.materialId,
+        material.id,
+      );
+
+      return id
+        ? {
+            id,
+            name: readString(material.name, material.title) || "Material",
+            quantity: readNumber(
+              material.estimated_quantity,
+              material.estimatedQuantity,
+              material.quantity,
+            ),
+            estimatedCost: readNumber(
+              material.estimated_cost,
+              material.estimatedCost,
+              material.cost,
+            ),
+          }
+        : null;
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        name: string;
+        quantity: number;
+        estimatedCost: number;
+      } => Boolean(item),
+    );
+}
+
+function collectEquipmentFromSubTask(subTask: Record<string, unknown>) {
+  return [
+    ...asArray<Record<string, unknown>>(subTask.equipments_used),
+    ...asArray<Record<string, unknown>>(subTask.equipmentsUsed),
+    ...asArray<Record<string, unknown>>(subTask.equipment),
+  ]
+    .map((item) => {
+      const id = readString(
+        item.equipment_id,
+        item.equipmentId,
+        item.id,
+      );
+
+      return id
+        ? {
+            id,
+            name: readString(item.name, item.title) || "Equipment",
+            quantity: readNumber(item.quantity) || 1,
+            notes: readString(item.notes, item.note) || null,
+          }
+        : null;
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        name: string;
+        quantity: number;
+        notes: string | null;
+      } => Boolean(item),
+    );
+}
+
 function deriveProjectMeta(
   projectRow: RawProject | null,
   overviewProject: Record<string, unknown> | null,
@@ -721,6 +834,8 @@ function buildProcessItems(args: {
 
   for (let index = 0; index < mainTasks.length; index += 1) {
     const mainTask = mainTasks[index];
+    const projectTaskId = readString(mainTask.project_task_id, mainTask.id);
+    const materials = collectMaterialsFromMainTask(mainTask);
 
     const subTasks = [
       ...asArray<Record<string, unknown>>(mainTask.subTasks),
@@ -738,11 +853,19 @@ function buildProcessItems(args: {
       const status = getTaskStatus(rawStatus);
 
       const employeeLabels = collectEmployeeLabelsFromSubTask(subTask);
+      const employeeIds = collectEmployeeIdsFromSubTask(subTask);
+      const assignedStaff = collectAssignedStaffFromSubTask(subTask);
       const scheduledStart = readString(
         subTask.scheduled_start_datetime,
         subTask.scheduledStartDatetime,
         subTask.start_datetime,
         subTask.startDatetime,
+      );
+      const scheduledEnd = readString(
+        subTask.scheduled_end_datetime,
+        subTask.scheduledEndDatetime,
+        subTask.end_datetime,
+        subTask.endDatetime,
       );
       const completedAt = readString(subTask.updated_at, subTask.updatedAt);
 
@@ -781,19 +904,22 @@ function buildProcessItems(args: {
           status === "done"
             ? formatDateTime(
                 completedAt ||
-                  readString(
-                    subTask.scheduled_end_datetime,
-                    subTask.scheduledEndDatetime,
-                    subTask.end_datetime,
-                    subTask.endDatetime,
-                  ) ||
+                  scheduledEnd ||
                   null,
               )
             : "-",
         detail: {
           employees: employeeLabels,
-          employeeIds: [],
+          employeeIds,
           estimatedHours: formatHours(estimatedHours),
+          estimatedHoursValue: estimatedHours,
+          projectTaskId,
+          projectSubTaskId: readString(subTask.project_sub_task_id, subTask.id),
+          materials,
+          equipment: collectEquipmentFromSubTask(subTask),
+          assignedStaff,
+          scheduledStartDatetime: scheduledStart || null,
+          scheduledEndDatetime: scheduledEnd || null,
           completedAt: completedAt || null,
         },
       };
@@ -810,7 +936,7 @@ function buildProcessItems(args: {
           : "pending";
 
     items.push({
-      id: `task-${readString(mainTask.project_task_id, mainTask.id) || index}`,
+      id: `task-${projectTaskId || index}`,
       title:
         readString(
           mainTask.title,
@@ -1222,6 +1348,7 @@ export default function DashboardPage() {
               toggleSubtaskRow={toggleSubtaskRow}
               employeeReviewItems={employeeReviewItems}
               onRefresh={handleRefresh}
+              canEditGeneratedTasks
               reviewSummary={reviewSummary}
             />
           </div>

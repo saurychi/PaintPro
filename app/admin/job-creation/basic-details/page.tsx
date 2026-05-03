@@ -35,6 +35,7 @@ import {
 } from "@/lib/planning/materialEstimator";
 import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
+import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
@@ -406,6 +407,7 @@ export default function BasicDetails() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get("projectId") || "";
+  const { settings: holidaySettings } = useHolidaySettings();
 
   const [projectCode, setProjectCode] = useState(() => generateProjectCode());
   const [projectName, setProjectName] = useState("");
@@ -1713,6 +1715,8 @@ export default function BasicDetails() {
   }, [clients, selectedClientId]);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadUnavailableScheduleDates() {
       try {
         const response = await fetch("/api/schedule/getUnavailableDates", {
@@ -1731,6 +1735,40 @@ export default function BasicDetails() {
           ? data.unavailableDates
           : [];
 
+        let holidayDates: Set<string> = new Set();
+
+        if (holidaySettings.enabled && holidaySettings.countryCode) {
+          const today = new Date();
+          const years = Array.from(
+            new Set([today.getFullYear(), today.getFullYear() + 1]),
+          );
+
+          const holidayResults = await Promise.all(
+            years.map(async (year) => {
+              try {
+                const res = await fetch(
+                  `/api/holidays?country=${encodeURIComponent(
+                    holidaySettings.countryCode,
+                  )}&year=${year}`,
+                );
+                if (!res.ok) return [] as string[];
+                const json = await res.json();
+                return Array.isArray(json?.holidays)
+                  ? (json.holidays as Array<{ date: string }>).map(
+                      (h) => h.date,
+                    )
+                  : [];
+              } catch {
+                return [] as string[];
+              }
+            }),
+          );
+
+          holidayDates = new Set(holidayResults.flat());
+        }
+
+        if (cancelled) return;
+
         const today = new Date();
         const events: Array<{
           title: string;
@@ -1745,19 +1783,33 @@ export default function BasicDetails() {
 
           const dateKey = current.toISOString().slice(0, 10);
           const isUnavailable = unavailableDates.includes(dateKey);
+          const isHoliday = holidayDates.has(dateKey);
+
+          let className: string;
+          let title: string;
+
+          if (isUnavailable) {
+            className = "fc-unavailable-day";
+            title = "Unavailable";
+          } else if (isHoliday) {
+            className = "fc-holiday-day";
+            title = "Holiday";
+          } else {
+            className = "fc-available-day";
+            title = "Available";
+          }
 
           events.push({
-            title: isUnavailable ? "Unavailable" : "Available",
+            title,
             date: dateKey,
             display: "background",
-            className: isUnavailable
-              ? "fc-unavailable-day"
-              : "fc-available-day",
+            className,
           });
         }
 
         setAvailableDateEvents(events);
       } catch (error) {
+        if (cancelled) return;
         console.error("Failed to load unavailable schedule dates:", error);
 
         setAvailableDateEvents([]);
@@ -1765,7 +1817,11 @@ export default function BasicDetails() {
     }
 
     loadUnavailableScheduleDates();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [holidaySettings.enabled, holidaySettings.countryCode]);
 
   const isBusy = saving || loading;
 

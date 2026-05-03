@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   CalendarDays,
   CheckCircle2,
+  ChevronRight,
   Clock,
   FileText,
   Loader2,
@@ -63,6 +65,10 @@ function formatSubmitted(value: string | null) {
   return formatDate(value);
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export default function StaffLeaveRequestsPage() {
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +86,7 @@ export default function StaffLeaveRequestsPage() {
     return data?.session?.access_token ?? null;
   }
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       const token = await getToken();
@@ -95,16 +101,16 @@ export default function StaffLeaveRequestsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to load requests.");
       setRequests(Array.isArray(data?.requests) ? data.requests : []);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load requests.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to load requests."));
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    loadRequests();
-  }, []);
+    void loadRequests();
+  }, [loadRequests]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -144,22 +150,27 @@ export default function StaffLeaveRequestsPage() {
       setShowModal(false);
       setForm({ startDate: "", endDate: "", reason: "" });
       await loadRequests();
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to submit request.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to submit request."));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-gray-50">
-      <div className="p-6 pb-4">
-        <h1 className="text-2xl font-semibold text-gray-900">
-          My Leave Requests
-        </h1>
+    <main className="flex h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 w-full flex-col bg-gray-50 px-4 py-3">
+      <div className="mb-3 flex shrink-0 items-center gap-2">
+        <Link
+          href="/staff/schedule"
+          className="text-xl font-semibold text-gray-900 transition hover:text-[#00a054]"
+        >
+          Schedule
+        </Link>
+        <ChevronRight className="h-5 w-5 text-gray-300" aria-hidden />
+        <div className="text-xl font-semibold text-gray-900">Requests</div>
       </div>
 
-      <div className="flex flex-1 flex-col px-6 pb-6">
+      <div className="flex min-h-0 flex-1 flex-col">
         <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="shrink-0 border-b border-gray-200 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
