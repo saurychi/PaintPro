@@ -18,7 +18,6 @@ import {
   PhilippinePeso,
   Printer,
   RefreshCw,
-  Target,
   TrendingDown,
   TrendingUp,
 } from "lucide-react"
@@ -32,17 +31,17 @@ import {
 type ReportView = RepoReportView
 
 const cardShell =
-  "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700/70 dark:bg-slate-800 dark:shadow-slate-950/20"
+  "overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700/70 dark:bg-slate-800 dark:shadow-slate-950/20"
 
 const cardAccent = "before:block before:h-1 before:w-full before:bg-[#00c065]"
 
-const sectionHeader = "border-b border-gray-100 px-4 py-3 dark:border-slate-700/70"
+const sectionHeader = "border-b border-gray-100 px-3 py-2 dark:border-slate-700/70"
 
 const actionBtn =
   "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-800 shadow-sm transition-all duration-200 hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300"
 
 const toolbarShell =
-  "rounded-xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-700/70 dark:bg-slate-800"
+  "rounded-xl border border-gray-200 bg-white p-1.5 shadow-sm dark:border-slate-700/70 dark:bg-slate-800"
 
 const mutedText = "text-gray-500 dark:text-slate-400"
 const strongText = "text-gray-950 dark:text-slate-100"
@@ -226,7 +225,7 @@ function SmartBadge({
   return (
     <span
       className={[
-        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+        "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold",
         comparisonClass(current, previous),
       ].join(" ")}
     >
@@ -253,27 +252,29 @@ function KpiCard({
   previous?: number
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/70 transition-colors dark:border-slate-700 dark:bg-slate-900/35">
-      <div className="flex h-full items-start justify-between gap-3 p-4">
-        <div className="min-w-0">
-          <div className={`text-xs font-semibold ${mutedText}`}>{title}</div>
+    <div className="flex min-h-[116px] overflow-hidden rounded-lg border border-gray-200 bg-gray-50/70 transition-colors dark:border-slate-700 dark:bg-slate-900/35">
+      <div className="flex h-full w-full min-w-0 items-start justify-between gap-3 p-4">
+        <div className="flex min-h-[84px] min-w-0 flex-1 flex-col justify-between gap-2">
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className={`truncate text-sm font-semibold ${mutedText}`}>{title}</div>
 
-          <div className={`mt-1 truncate text-xl font-semibold ${strongText}`}>
-            {loading ? "—" : value}
+            {!loading && typeof current === "number" && typeof previous === "number" && (
+              <SmartBadge current={current} previous={previous} />
+            )}
           </div>
 
-          <div className={`mt-1 text-xs ${mutedText}`}>{hint}</div>
-
-          {!loading && typeof current === "number" && typeof previous === "number" && (
-            <div className="mt-2">
-              <SmartBadge current={current} previous={previous} />
+          <div>
+            <div className={`whitespace-nowrap text-2xl font-semibold leading-7 tracking-tight ${strongText}`}>
+              {loading ? "—" : value}
             </div>
-          )}
+
+            <div className={`mt-1 line-clamp-1 text-sm ${mutedText}`}>{hint}</div>
+          </div>
         </div>
 
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-800">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-gray-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-800">
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-gray-500 dark:text-slate-400" />
+            <Loader2 className="h-5 w-5 animate-spin text-gray-500 dark:text-slate-400" />
           ) : (
             icon
           )}
@@ -293,10 +294,10 @@ function MiniStat({
   subtext: string
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+    <div className="flex h-full min-h-0 flex-col justify-center rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
       <div className={`text-xs font-semibold ${mutedText}`}>{label}</div>
-      <div className={`mt-1 text-lg font-semibold ${strongText}`}>{value}</div>
-      <div className={`mt-1 text-xs ${mutedText}`}>{subtext}</div>
+      <div className={`mt-1 text-lg font-semibold leading-6 ${strongText}`}>{value}</div>
+      <div className={`mt-1 line-clamp-1 text-xs ${mutedText}`}>{subtext}</div>
     </div>
   )
 }
@@ -315,8 +316,8 @@ function ProgressLine({
   const width = clampPercent(value)
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-      <div className="flex items-center justify-between gap-3 text-xs">
+    <div className="flex h-full min-h-0 flex-col justify-center rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex items-center justify-between gap-3 text-sm">
         <span className="font-semibold text-gray-950 dark:text-slate-100">{label}</span>
         <span className="font-semibold text-gray-600 dark:text-slate-300">{amount}</span>
       </div>
@@ -328,7 +329,7 @@ function ProgressLine({
         />
       </div>
 
-      <div className="mt-2 text-xs leading-5 text-gray-500 dark:text-slate-400">
+      <div className="mt-2 line-clamp-1 text-xs leading-4 text-gray-500 dark:text-slate-400">
         {note}
       </div>
     </div>
@@ -349,10 +350,10 @@ function ActionLink({
   return (
     <Link
       href={href}
-      className="group flex min-h-[72px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-left transition-all duration-200 hover:border-[#00c065]/35 hover:bg-[#00c065]/5 active:scale-[0.99] dark:border-slate-700 dark:bg-slate-800 dark:hover:border-[#00c065]/35 dark:hover:bg-[#00c065]/10"
+      className="group flex min-h-[54px] w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-[#00c065]/35 hover:bg-[#00c065]/5 active:scale-[0.99] dark:border-slate-700 dark:bg-slate-800 dark:hover:border-[#00c065]/35 dark:hover:bg-[#00c065]/10"
     >
       <span className="flex min-w-0 items-start gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 group-hover:text-[#047857] dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-400 dark:group-hover:text-emerald-300">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 group-hover:text-[#047857] dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-400 dark:group-hover:text-emerald-300">
           {icon}
         </span>
 
@@ -360,7 +361,7 @@ function ActionLink({
           <span className="block text-sm font-semibold text-gray-950 dark:text-slate-100">
             {title}
           </span>
-          <span className="mt-1 line-clamp-2 block text-xs leading-5 text-gray-500 dark:text-slate-400">
+          <span className="mt-1 line-clamp-1 block text-xs leading-4 text-gray-500 dark:text-slate-400">
             {desc}
           </span>
         </span>
@@ -389,10 +390,10 @@ function ActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="group flex min-h-[72px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-left transition-all duration-200 hover:border-[#00c065]/35 hover:bg-[#00c065]/5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-[#00c065]/35 dark:hover:bg-[#00c065]/10"
+      className="group flex min-h-[54px] w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-[#00c065]/35 hover:bg-[#00c065]/5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-[#00c065]/35 dark:hover:bg-[#00c065]/10"
     >
       <span className="flex min-w-0 items-start gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 group-hover:text-[#047857] dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-400 dark:group-hover:text-emerald-300">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 group-hover:text-[#047857] dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-400 dark:group-hover:text-emerald-300">
           {icon}
         </span>
 
@@ -400,7 +401,7 @@ function ActionButton({
           <span className="block text-sm font-semibold text-gray-950 dark:text-slate-100">
             {title}
           </span>
-          <span className="mt-1 line-clamp-2 block text-xs leading-5 text-gray-500 dark:text-slate-400">
+          <span className="mt-1 line-clamp-1 block text-xs leading-4 text-gray-500 dark:text-slate-400">
             {desc}
           </span>
         </span>
@@ -429,7 +430,7 @@ function ComparisonRow({
   previousLabel: string
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+    <div className="flex h-full min-h-0 flex-col justify-center rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gray-200 bg-gray-50 text-[#047857] dark:border-slate-600 dark:bg-slate-900/50 dark:text-emerald-300">
@@ -440,7 +441,7 @@ function ComparisonRow({
             <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
               {title}
             </div>
-            <div className="mt-0.5 text-xs leading-5 text-gray-500 dark:text-slate-400">
+            <div className="mt-1 line-clamp-2 text-xs leading-4 text-gray-500 dark:text-slate-400">
               {desc}
             </div>
           </div>
@@ -448,7 +449,7 @@ function ComparisonRow({
 
         <span
           className={[
-            "shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+            "shrink-0 rounded-md border px-2.5 py-1 text-xs font-semibold",
             comparisonClass(current, previous),
           ].join(" ")}
         >
@@ -485,7 +486,7 @@ function SummaryInsight({
   children: ReactNode
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/35">
+    <div className="flex h-full min-h-0 rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/35">
       <div className="flex items-start gap-3">
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[#00c065]/25 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300">
           {icon}
@@ -495,7 +496,7 @@ function SummaryInsight({
           <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
             {title}
           </div>
-          <div className="mt-1 text-xs leading-5 text-gray-500 dark:text-slate-400">
+          <div className="mt-1 line-clamp-2 text-xs leading-4 text-gray-500 dark:text-slate-400">
             {children}
           </div>
         </div>
@@ -504,29 +505,6 @@ function SummaryInsight({
   )
 }
 
-function ManagementNote({
-  title,
-  value,
-  description,
-}: {
-  title: string
-  value: string
-  description: string
-}) {
-  return (
-    <div className="flex h-full flex-col justify-center rounded-lg border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
-      <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">
-        {title}
-      </div>
-      <div className="mt-1 text-base font-semibold text-gray-950 dark:text-slate-100">
-        {value}
-      </div>
-      <div className="mt-1 text-xs leading-5 text-gray-500 dark:text-slate-400">
-        {description}
-      </div>
-    </div>
-  )
-}
 
 export default function AdminReportPage() {
   const [view, setView] = useState<ReportView>("weekly")
@@ -979,13 +957,13 @@ export default function AdminReportPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-1rem)] min-h-0 flex-col overflow-hidden bg-[#f7f8fa] px-4 py-4 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-6">
-      <div className="flex shrink-0 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
+    <div className="flex h-[calc(100dvh-0.75rem)] min-h-[560px] max-h-[calc(100dvh-0.75rem)] min-w-0 flex-col overflow-hidden bg-[#f7f8fa] px-3 py-2 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-3">
+      <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-tight text-gray-950 dark:text-slate-100">
+          <h1 className="ml-5 text-[22px] font-semibold leading-tight tracking-tight text-gray-950 dark:text-slate-100">
             Report
           </h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-slate-300">
+          <p className="ml-5 mt-1 text-sm leading-5 text-gray-500 dark:text-slate-300">
             Monitor project performance, financial estimates, and reporting outputs.
           </p>
         </div>
@@ -996,7 +974,7 @@ export default function AdminReportPage() {
               <select
                 value={view}
                 onChange={(e) => setView(e.target.value as ReportView)}
-                className="h-9 min-w-[125px] appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 pr-8 text-sm font-semibold text-gray-900 transition-colors hover:border-[#00c065]/40 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:border-[#00c065]/40"
+                className="h-9 min-w-[125px] appearance-none rounded-lg border border-gray-200 bg-gray-50 px-2.5 pr-8 text-sm font-semibold text-gray-900 transition-colors hover:border-[#00c065]/40 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:border-[#00c065]/40"
               >
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
@@ -1038,21 +1016,21 @@ export default function AdminReportPage() {
         </div>
       </div>
 
-      <div className="mt-5 grid min-h-0 flex-1 grid-cols-1 items-stretch gap-4 overflow-hidden xl:grid-cols-12">
-        <section className={`h-full xl:col-span-8 ${cardShell} ${cardAccent}`}>
+      <div className="mt-2 grid min-h-0 flex-1 grid-cols-1 items-stretch gap-3 overflow-hidden xl:grid-cols-12">
+        <section className={`flex h-full min-h-0 flex-col xl:col-span-8 ${cardShell} ${cardAccent}`}>
           <div className={sectionHeader}>
             <div>
               <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
                 Business Performance Summary
               </div>
-              <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+              <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
                 Main project and financial totals for the selected reporting period.
               </div>
             </div>
           </div>
 
-          <div className="flex h-[calc(100%-57px)] flex-col p-4">
-            <div className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/35">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
+            <div className="flex w-full shrink-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-900/35">
               <div className="flex items-center gap-2">
                 <CalendarDays className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                 <span className="text-gray-500 dark:text-slate-400">Range:</span>
@@ -1075,15 +1053,15 @@ export default function AdminReportPage() {
                 </span>
               </div>
 
-              <div className="ml-auto">
-                <span className="inline-flex items-center rounded-full border border-[#00c065]/20 bg-[#00c065]/10 px-2.5 py-1 text-[11px] font-semibold text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300">
+              <div className="ml-auto hidden sm:block">
+                <span className="inline-flex items-center rounded-full border border-[#00c065]/20 bg-[#00c065]/10 px-3 py-1 text-xs font-semibold text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300">
                   {dataStatus}
                 </span>
               </div>
             </div>
 
             {loadError && (
-              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-400/25 dark:bg-red-500/15">
+              <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-400/25 dark:bg-red-500/15">
                 <div className="flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-300">
                   <AlertTriangle className="h-4 w-4" />
                   Could not load report summary
@@ -1095,7 +1073,7 @@ export default function AdminReportPage() {
             )}
 
             {!loading && !loadError && kpi.totalJobs === 0 && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-400/25 dark:bg-amber-500/15">
+              <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-400/25 dark:bg-amber-500/15">
                 <div className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
                   <Info className="h-4 w-4" />
                   No projects found in this range
@@ -1106,7 +1084,7 @@ export default function AdminReportPage() {
               </div>
             )}
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid shrink-0 grid-cols-2 gap-3">
               <KpiCard
                 title="Total Jobs"
                 value={formatNumber(kpi.totalJobs)}
@@ -1148,7 +1126,7 @@ export default function AdminReportPage() {
               />
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <div className="grid shrink-0 grid-cols-3 gap-3">
               <MiniStat
                 label="Profit Margin"
                 value={percent(profitMargin)}
@@ -1168,7 +1146,7 @@ export default function AdminReportPage() {
               />
             </div>
 
-            <div className="mt-3 grid gap-3 lg:grid-cols-3">
+            <div className="grid shrink-0 grid-cols-3 gap-3">
               <SummaryInsight
                 icon={<CheckCircle2 className="h-4 w-4" />}
                 title="Profit/Loss Status"
@@ -1190,60 +1168,57 @@ export default function AdminReportPage() {
               </SummaryInsight>
             </div>
 
-            <div className="mt-3 flex flex-1 flex-col justify-center rounded-lg border border-gray-200 bg-gray-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/35">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-[#00a054] dark:text-emerald-300" />
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
-                  Management Summary
+            <div className="flex min-h-[168px] flex-1 flex-col justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/35">
+              <div className="flex shrink-0 items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                    Revenue Breakdown
+                  </div>
+                  <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                    Estimated revenue split across project cost and profit.
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-3 grid flex-1 gap-3 lg:grid-cols-3">
-                <ManagementNote
-                  title="Overall Standing"
-                  value={profitStatus}
-                  description={
-                    kpi.netProfit >= 0
-                      ? "The selected period is currently estimated to produce a positive return."
-                      : "The selected period is currently showing a possible loss based on stored estimates."
-                  }
+              <div className="grid min-h-0 flex-1 grid-cols-3 gap-3">
+                <ProgressLine
+                  label="Estimated Revenue"
+                  value={revenueCoverage}
+                  amount={currency(kpi.totalRevenue)}
+                  note="Total estimated budget in the selected range."
                 />
 
-                <ManagementNote
-                  title="Cost Control"
-                  value={costStatus}
-                  description={
-                    costRatio >= 85
-                      ? "Costs are taking most of the estimated revenue. Review labor and material estimates."
-                      : costRatio >= 65
-                        ? "Costs are within a moderate range but should still be monitored."
-                        : "Costs are low compared with revenue, leaving stronger room for profit."
-                  }
+                <ProgressLine
+                  label="Estimated Cost"
+                  value={costRatio}
+                  amount={`${percent(costRatio)} · ${currency(kpi.totalCost)}`}
+                  note="Expected spending from project costs."
                 />
 
-                <ManagementNote
-                  title="Recommended Action"
-                  value="Review project list"
-                  description="Open the project report list to inspect which projects contribute most to revenue, cost, and profit."
+                <ProgressLine
+                  label="Estimated Profit"
+                  value={profitShare}
+                  amount={`${percent(profitShare)} · ${currency(kpi.netProfit)}`}
+                  note="Remaining portion after costs."
                 />
               </div>
             </div>
           </div>
         </section>
 
-        <aside className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1 pb-4 xl:col-span-4">
-          <div className="space-y-4">
-            <section className={`${cardShell} ${cardAccent}`}>
+        <aside className="h-full min-h-0 overflow-hidden xl:col-span-4">
+          <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+            <section className={`flex shrink-0 flex-col ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
                 <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
                   Report Actions
                 </div>
-                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
                   Common report tasks.
                 </div>
               </div>
 
-              <div className="grid gap-2 p-4">
+              <div className="flex flex-col gap-2 p-3">
                 <ActionLink
                   href="/admin/report/report-list"
                   icon={<FileText className="h-4 w-4" />}
@@ -1268,51 +1243,18 @@ export default function AdminReportPage() {
               </div>
             </section>
 
-            <section className={`${cardShell} ${cardAccent}`}>
-              <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
-                  Revenue Breakdown
-                </div>
-                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
-                  Shows how much of the estimated revenue is cost and profit.
-                </div>
-              </div>
 
-              <div className="space-y-3 p-4">
-                <ProgressLine
-                  label="Estimated Revenue"
-                  value={revenueCoverage}
-                  amount={currency(kpi.totalRevenue)}
-                  note="Total estimated budget from projects in the selected range."
-                />
-
-                <ProgressLine
-                  label="Estimated Cost"
-                  value={costRatio}
-                  amount={`${percent(costRatio)} · ${currency(kpi.totalCost)}`}
-                  note="Portion of revenue expected to be spent on project costs."
-                />
-
-                <ProgressLine
-                  label="Estimated Profit"
-                  value={profitShare}
-                  amount={`${percent(profitShare)} · ${currency(kpi.netProfit)}`}
-                  note="Remaining portion after estimated costs are deducted."
-                />
-              </div>
-            </section>
-
-            <section className={`${cardShell} ${cardAccent}`}>
+            <section className={`flex min-h-0 flex-1 flex-col ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
                 <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
                   Previous Period Check
                 </div>
-                <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
                   Compares this report range with {previousRangeText}.
                 </div>
               </div>
 
-              <div className="space-y-2 p-4">
+              <div className="grid min-h-0 flex-1 grid-rows-3 gap-3 p-3">
                 <ComparisonRow
                   icon={<TrendingUp className="h-4 w-4" />}
                   title="Revenue Movement"
