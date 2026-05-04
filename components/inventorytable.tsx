@@ -31,6 +31,7 @@ type InventoryTableProps = {
   type: "materials" | "equipment"
   isLoading: boolean
   onRowClick: (item: InventoryTableItem) => void
+  onQuickAdd?: (item: InventoryTableItem) => void // New Prop for the shortcut modal
 }
 
 function getItemId(item: InventoryTableItem) {
@@ -61,7 +62,7 @@ function formatUnit(unit: string | null | undefined, quantity: number) {
   return unit
 }
 
-export default function InventoryTable({ data, type, isLoading, onRowClick }: InventoryTableProps) {
+export default function InventoryTable({ data, type, isLoading, onRowClick, onQuickAdd }: InventoryTableProps) {
   if (isLoading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-gray-500" /></div>
   if (!data || data.length === 0) return <div className="m-auto flex flex-col items-center justify-center text-gray-400 py-12"><p className="text-sm">No items found matching your filters.</p></div>
 
@@ -143,13 +144,20 @@ export default function InventoryTable({ data, type, isLoading, onRowClick }: In
                   </div>
                 </td>
 
-                {/* NEW NEEDED STOCK COLUMN */}
+                {/* NEEDED STOCK COLUMN WITH QUICK ADD SHORTCUT */}
                 {type === "materials" && (
                   <td className="px-5 py-3 text-center">
                     {hasNeededStock ? (
-                      <div className="inline-flex items-center justify-center gap-1.5 bg-red-50 text-red-700 px-2.5 py-1 rounded-md border border-red-200 font-semibold text-xs shadow-sm">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation() // Prevents the main row click from opening the normal edit modal
+                          if (onQuickAdd) onQuickAdd(item)
+                        }}
+                        title="Click to resolve deficit"
+                        className="inline-flex items-center justify-center gap-1.5 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-colors px-2.5 py-1 rounded-md border border-red-200 font-semibold text-xs shadow-sm cursor-pointer"
+                      >
                         {neededStock} <AlertOctagon className="w-3.5 h-3.5 text-red-600 fill-red-200" />
-                      </div>
+                      </button>
                     ) : (
                       <span className="text-gray-400">-</span>
                     )}
