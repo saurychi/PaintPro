@@ -27,6 +27,7 @@ import UnavailableDayModal, {
 } from "@/components/schedule/UnavailableDayModal";
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
+import { useProjectNow } from "@/lib/time/useProjectNow";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -179,6 +180,7 @@ function getUnavailableTypeLabel(day: ScheduleUnavailableDay) {
 export default function AdminSchedule() {
   const router = useRouter();
   const { settings: holidaySettings } = useHolidaySettings();
+  const { now: projectNow, todayKey } = useProjectNow();
 
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
   const [fcEvents, setFcEvents] = useState<FCEvent[]>([]);
@@ -359,11 +361,10 @@ export default function AdminSchedule() {
     ? (unavailableDaysByDate.get(selectedDate) ?? [])
     : [];
   const upcomingUnavailableDays = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     return unavailableDays
-      .filter((day) => day.blockedDate >= today)
+      .filter((day) => day.blockedDate >= todayKey)
       .slice(0, 8);
-  }, [unavailableDays]);
+  }, [unavailableDays, todayKey]);
 
   const handleEventClick = (info: EventClickArg) => {
     const startStr = info.event.startStr || "";
@@ -609,7 +610,7 @@ export default function AdminSchedule() {
     <>
       <style>{`
         .fc {
-          --fc-border-color: #f3f4f6;
+          --fc-border-color: #e5e7eb;
           --fc-today-bg-color: #f0fdf4;
           --fc-page-bg-color: #ffffff;
           --fc-neutral-bg-color: #f9fafb;
@@ -617,10 +618,21 @@ export default function AdminSchedule() {
           height: 100%;
         }
 
+        .dark .fc {
+          --fc-border-color: #334155;
+          --fc-today-bg-color: rgba(0, 192, 101, 0.14);
+          --fc-page-bg-color: #0f172a;
+          --fc-neutral-bg-color: #111827;
+        }
+
         .fc .fc-toolbar-title {
           font-size: 1.05rem;
           font-weight: 600;
           color: #111827;
+        }
+
+        .dark .fc .fc-toolbar-title {
+          color: #e5e7eb;
         }
 
         .fc .fc-button {
@@ -632,11 +644,23 @@ export default function AdminSchedule() {
           padding: 0.42rem 0.7rem !important;
           font-size: 0.8rem !important;
           font-weight: 600 !important;
-          transition: background 0.15s !important;
+          transition: background 0.15s, border-color 0.15s, color 0.15s !important;
+        }
+
+        .dark .fc .fc-button {
+          background: #111827 !important;
+          border-color: #334155 !important;
+          color: #e5e7eb !important;
+          box-shadow: 0 8px 18px rgba(0,0,0,.22) !important;
         }
 
         .fc .fc-button:hover {
           background: #f9fafb !important;
+        }
+
+        .dark .fc .fc-button:hover {
+          background: #1e293b !important;
+          border-color: #475569 !important;
         }
 
         .fc .fc-button:focus {
@@ -644,33 +668,69 @@ export default function AdminSchedule() {
         }
 
         .fc .fc-col-header-cell {
-          padding: 6px 0;
+          padding: 4px 0;
           font-size: 11px;
           font-weight: 600;
           letter-spacing: 0.05em;
-          color: #9ca3af;
+          color: #6b7280;
           text-transform: uppercase;
-          border-color: #f3f4f6;
+          border-color: #e5e7eb;
+          background: #f9fafb;
+        }
+
+        .dark .fc .fc-col-header-cell {
+          color: #cbd5e1;
+          border-color: #334155;
+          background: #1e293b;
+        }
+
+        .fc .fc-scrollgrid,
+        .fc .fc-scrollgrid-section > * {
+          border-color: #e5e7eb !important;
+        }
+
+        .dark .fc .fc-scrollgrid,
+        .dark .fc .fc-scrollgrid-section > * {
+          border-color: #334155 !important;
+        }
+
+        .fc .fc-daygrid-day {
           background: #ffffff;
         }
 
+        .dark .fc .fc-daygrid-day {
+          background: #0f172a;
+        }
+
         .fc .fc-daygrid-day-number {
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 600;
           color: #374151;
-          padding: 6px 8px;
+          padding: 3px 6px;
+        }
+
+        .dark .fc .fc-daygrid-day-number {
+          color: #cbd5e1;
         }
 
         .fc .fc-day-other .fc-daygrid-day-number {
           color: #d1d5db;
         }
 
+        .dark .fc .fc-day-other .fc-daygrid-day-number {
+          color: #64748b;
+        }
+
         .fc .fc-daygrid-day.fc-day-today {
           background-color: #f0fdf4 !important;
         }
 
+        .dark .fc .fc-daygrid-day.fc-day-today {
+          background-color: rgba(0, 192, 101, 0.14) !important;
+        }
+
         .fc .fc-event {
-          border-radius: 6px !important;
+          border-radius: 5px !important;
           cursor: pointer;
         }
 
@@ -678,12 +738,71 @@ export default function AdminSchedule() {
           filter: brightness(0.95);
         }
 
+        .dark .fc .fc-event:hover {
+          filter: brightness(1.08);
+        }
+
         .fc .fc-daygrid-event-harness {
-          margin-top: 2px;
+          margin-top: 1px;
+        }
+
+        .fc .fc-daygrid-event {
+          min-height: 18px;
         }
 
         .fc .fc-toolbar.fc-header-toolbar {
-          margin-bottom: 12px;
+          margin-bottom: 8px;
+        }
+
+        .fc .fc-view-harness,
+        .fc .fc-view-harness-active,
+        .fc .fc-daygrid,
+        .fc .fc-scrollgrid,
+        .fc .fc-scrollgrid-section-body,
+        .fc .fc-scrollgrid-section-body > td,
+        .fc .fc-daygrid-body,
+        .fc .fc-daygrid-body table {
+          height: 100% !important;
+        }
+
+        .fc .fc-scroller,
+        .fc .fc-scroller-liquid-absolute {
+          overflow: hidden !important;
+        }
+
+        .fc .fc-daygrid-day-frame {
+          min-height: 0 !important;
+        }
+
+        .fc .fc-scroller {
+          scrollbar-width: thin;
+          scrollbar-color: #cbd5e1 transparent;
+        }
+
+        .dark .fc .fc-scroller {
+          scrollbar-color: #64748b #0f172a;
+        }
+
+        .fc .fc-scroller::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+
+        .fc .fc-scroller::-webkit-scrollbar-track {
+          background: transparent;
+        }
+
+        .fc .fc-scroller::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 999px;
+          border: 2px solid transparent;
+          background-clip: padding-box;
+        }
+
+        .dark .fc .fc-scroller::-webkit-scrollbar-thumb {
+          background: #64748b;
+          border: 2px solid #0f172a;
+          background-clip: padding-box;
         }
 
         .fc .fc-scrollgrid,
@@ -697,6 +816,16 @@ export default function AdminSchedule() {
           border: 1px solid #fde68a !important;
         }
 
+        .dark .fc .fc-event.fc-admin-holiday-event {
+          background-color: #fef3c7 !important;
+          border-color: #facc15 !important;
+          color: #78350f !important;
+        }
+
+        .dark .fc .fc-admin-unavailable-event {
+          background-color: rgba(248, 113, 113, 0.22) !important;
+        }
+
         .fc .fc-daygrid-day-frame {
           cursor: pointer;
           transition: background 0.15s ease;
@@ -705,32 +834,36 @@ export default function AdminSchedule() {
         .fc .fc-daygrid-day-frame:hover {
           background: #f9fafb;
         }
+
+        .dark .fc .fc-daygrid-day-frame:hover {
+          background: rgba(30, 41, 59, 0.78);
+        }
       `}</style>
 
-      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden">
-        <h1 className="text-2xl font-semibold text-gray-900">Schedule</h1>
+      <div className="h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden bg-gray-50 p-4 text-gray-900 dark:bg-[#0b1120] dark:text-slate-100">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Schedule</h1>
 
-        <div className="mt-6 min-h-0 h-[calc(100%-3rem)]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <div className="mt-3 h-[calc(100%-2.75rem)] min-h-0">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/30">
             <div
               className="h-1 w-full shrink-0"
               style={{ backgroundColor: ACCENT }}
             />
 
-            <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
+            <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2">
               {loading ? (
                 <div className="flex h-full items-center justify-center">
-                  <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                    <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                    <span className="text-sm font-medium text-gray-700">
+                  <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
+                    <Loader2 className="h-5 w-5 animate-spin text-gray-700 dark:text-slate-200" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-slate-300">
                       Loading schedule...
                     </span>
                   </div>
                 </div>
               ) : (
                 <div className="grid h-full min-h-0 grid-cols-12 gap-3">
-                  <div className="col-span-12 lg:col-span-9 min-h-0 h-full overflow-hidden rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm flex flex-col">
-                    <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-9">
+                    <div className="mb-2 flex items-center justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
                           <span
@@ -738,11 +871,11 @@ export default function AdminSchedule() {
                             style={{ backgroundColor: ACCENT }}
                             aria-hidden="true"
                           />
-                          <p className="text-sm font-semibold text-gray-900">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                             Monthly Schedule
                           </p>
                         </div>
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">
                           Calendar view of scheduled jobs and activity.
                         </p>
                       </div>
@@ -767,7 +900,7 @@ export default function AdminSchedule() {
                                 className="inline-block h-2.5 w-2.5 rounded-full"
                                 style={{ backgroundColor: item.color }}
                               />
-                              <span className="text-[11px] font-medium text-gray-600">
+                              <span className="text-[11px] font-medium text-gray-600 dark:text-slate-300">
                                 {item.label}
                               </span>
                             </div>
@@ -776,23 +909,23 @@ export default function AdminSchedule() {
 
                         <button
                           type="button"
-                          onClick={() => openCreateUnavailableDay()}
-                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[#00c065] px-3 text-xs font-semibold text-white transition hover:bg-[#00a054] active:scale-[0.99]"
+                          onClick={() => router.push("/admin/schedule/requests")}
+                          className="inline-flex h-9 items-center justify-center rounded-lg bg-[#00c065] px-4 text-xs font-semibold text-white transition hover:bg-[#00a054] active:scale-[0.99]"
                         >
-                          <Plus className="h-3.5 w-3.5" />
-                          Unavailable day
+                          Requests
                         </button>
                       </div>
                     </div>
 
                     <div
-                      className={`min-h-0 flex-1 overflow-hidden rounded-2xl border ${BORDER} bg-gray-50 p-2.5`}
+                      className={`min-h-0 flex-1 overflow-hidden rounded-2xl border ${BORDER} bg-gray-50 p-2 dark:border-slate-700 dark:bg-slate-950`}
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
+                          key={todayKey}
                           plugins={[dayGridPlugin, interactionPlugin]}
                           initialView="dayGridMonth"
-                          initialDate={new Date()}
+                          initialDate={projectNow}
                           events={[...fcEvents, ...unavailableDayEvents]}
                           dayCellDidMount={handleCalendarDayMount}
                           eventClick={handleEventClick}
@@ -807,13 +940,14 @@ export default function AdminSchedule() {
                           height="100%"
                           contentHeight="100%"
                           expandRows={true}
-                          dayMaxEvents={2}
+                          fixedWeekCount={false}
+                          dayMaxEvents={1}
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="col-span-12 lg:col-span-3 min-h-0 h-full overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm flex flex-col">
+                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-3">
                     <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
                       <section className="shrink-0 pb-3">
                         <div className="mb-2 flex items-center gap-2">
@@ -822,13 +956,13 @@ export default function AdminSchedule() {
                             style={{ backgroundColor: ACCENT }}
                             aria-hidden="true"
                           />
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-slate-300">
                             Status
                           </p>
                         </div>
 
                         <div className="pl-3">
-                          <div className="flex items-center gap-2 text-[12px] font-medium text-gray-700">
+                          <div className="flex items-center gap-2 text-[12px] font-medium text-gray-700 dark:text-slate-300">
                             <span className="h-2 w-2 rounded-full bg-emerald-500" />
                             <span className="truncate">
                               {currentProject?.status ?? "No active project"}
@@ -836,17 +970,17 @@ export default function AdminSchedule() {
                           </div>
 
                           <div className="mt-2 min-w-0">
-                            <div className="truncate text-sm font-semibold text-gray-900">
+                            <div className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">
                               {currentProject?.projectCode ?? "—"}
                             </div>
-                            <div className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-gray-600">
+                            <div className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-gray-600 dark:text-slate-400">
                               {currentProject?.title ?? "No project selected"}
                             </div>
                           </div>
                         </div>
                       </section>
 
-                      <section className="shrink-0 border-t border-gray-200 py-3">
+                      <section className="shrink-0 border-t border-gray-200 py-3 dark:border-slate-800">
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
                             <span
@@ -854,7 +988,7 @@ export default function AdminSchedule() {
                               style={{ backgroundColor: ACCENT }}
                               aria-hidden="true"
                             />
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-slate-300">
                               Unavailable Days
                             </p>
                           </div>
@@ -862,16 +996,16 @@ export default function AdminSchedule() {
                           <button
                             type="button"
                             onClick={() => openCreateUnavailableDay()}
-                            className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700 transition hover:bg-gray-50"
+                            className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
                           >
                             <Plus className="h-3 w-3" />
                             Add
                           </button>
                         </div>
 
-                        <div className="max-h-[210px] divide-y divide-gray-200 overflow-y-auto pr-1">
+                        <div className="max-h-[210px] divide-y divide-gray-200 overflow-y-auto pr-1 dark:divide-slate-800">
                           {unavailableLoading ? (
-                            <div className="flex items-center justify-center py-4 text-[12px] text-gray-500">
+                            <div className="flex items-center justify-center py-4 text-[12px] text-gray-500 dark:text-slate-400">
                               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
                               Loading blocked days...
                             </div>
@@ -881,14 +1015,14 @@ export default function AdminSchedule() {
                                 key={day.id}
                                 type="button"
                                 onClick={() => setSelectedDate(day.blockedDate)}
-                                className="w-full px-0 py-2 text-left transition hover:bg-gray-50"
+                                className="w-full rounded-lg px-2 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800/80"
                               >
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                    <p className="text-[11px] font-semibold text-gray-500">
+                                    <p className="text-[11px] font-semibold text-gray-500 dark:text-slate-400">
                                       {formatShortDate(day.blockedDate)}
                                     </p>
-                                    <p className="mt-0.5 line-clamp-2 text-[12px] font-medium leading-snug text-gray-900">
+                                    <p className="mt-0.5 line-clamp-2 text-[12px] font-medium leading-snug text-gray-900 dark:text-slate-100">
                                       {day.reason}
                                     </p>
                                   </div>
@@ -896,8 +1030,8 @@ export default function AdminSchedule() {
                                     className={[
                                       "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
                                       day.source === "holiday"
-                                        ? "border border-amber-200 bg-amber-50 text-amber-800"
-                                        : "border border-red-200 bg-red-50 text-red-700",
+                                        ? "border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200"
+                                        : "border border-red-200 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-200",
                                     ].join(" ")}
                                   >
                                     {getUnavailableTypeLabel(day)}
@@ -906,14 +1040,14 @@ export default function AdminSchedule() {
                               </button>
                             ))
                           ) : (
-                            <div className="py-4 text-center text-[12px] text-gray-500">
+                            <div className="py-4 text-center text-[12px] text-gray-500 dark:text-slate-400">
                               No blocked days yet.
                             </div>
                           )}
                         </div>
                       </section>
 
-                      <section className="flex min-h-0 flex-1 flex-col border-t border-gray-200 pt-3">
+                      <section className="flex min-h-0 flex-1 flex-col border-t border-gray-200 pt-3 dark:border-slate-800">
                         <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span
@@ -921,22 +1055,22 @@ export default function AdminSchedule() {
                               style={{ backgroundColor: ACCENT }}
                               aria-hidden="true"
                             />
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-slate-300">
                               Projects
                             </p>
                           </div>
-                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500 dark:bg-slate-800 dark:text-slate-300">
                             {projects.length}
                           </span>
                         </div>
 
-                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1">
+                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1 dark:divide-slate-800">
                           {projects.length ? (
                             projects.map((project) => (
                               <button
                                 key={project.id}
                                 type="button"
-                                className="w-full px-0 py-2 text-left transition hover:bg-gray-50"
+                                className="w-full rounded-lg px-2 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800/80"
                                 onClick={() => {
                                   const startKey =
                                     project.scheduledStartDatetime
@@ -948,16 +1082,16 @@ export default function AdminSchedule() {
                                   if (startKey) setSelectedDate(startKey);
                                 }}
                               >
-                                <div className="text-[11px] font-semibold text-gray-500">
+                                <div className="text-[11px] font-semibold text-gray-500 dark:text-slate-400">
                                   {project.dateLabel}
                                 </div>
-                                <div className="mt-0.5 line-clamp-2 text-[12px] font-medium leading-snug text-gray-800">
+                                <div className="mt-0.5 line-clamp-2 text-[12px] font-medium leading-snug text-gray-800 dark:text-slate-200">
                                   {project.title}
                                 </div>
                               </button>
                             ))
                           ) : (
-                            <div className="py-5 text-center text-[12px] text-gray-500">
+                            <div className="py-5 text-center text-[12px] text-gray-500 dark:text-slate-400">
                               No projects yet.
                             </div>
                           )}
@@ -973,11 +1107,11 @@ export default function AdminSchedule() {
 
         {selectedDate && (
           <div
-            className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm"
             onClick={() => setSelectedDate(null)}
           >
             <div
-              className="w-[92%] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+              className="w-[92%] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/50"
               onClick={(e) => e.stopPropagation()}
             >
               <div
@@ -985,7 +1119,7 @@ export default function AdminSchedule() {
                 style={{ backgroundColor: ACCENT }}
               />
 
-              <div className="px-5 py-4 border-b border-gray-200">
+              <div className="border-b border-gray-200 px-5 py-4 dark:border-slate-800">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -994,18 +1128,18 @@ export default function AdminSchedule() {
                         style={{ backgroundColor: ACCENT }}
                         aria-hidden="true"
                       />
-                      <p className="text-sm font-semibold text-gray-900">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                         Day Details
                       </p>
                     </div>
-                    <h3 className="mt-2 text-lg font-bold text-gray-900">
+                    <h3 className="mt-2 text-lg font-bold text-gray-900 dark:text-slate-100">
                       {formatLongDate(selectedDate)}
                     </h3>
                   </div>
 
                   <button
                     onClick={() => setSelectedDate(null)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                     aria-label="Close"
                   >
                     ✕
@@ -1016,7 +1150,7 @@ export default function AdminSchedule() {
               <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
                 <div className="grid gap-4">
                   <div>
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
                       <BriefcaseBusiness className="h-4 w-4" />
                       Projects
                     </div>
@@ -1024,7 +1158,7 @@ export default function AdminSchedule() {
                     <div className="mt-2 grid gap-2">
                       {selectedDayProjects.length === 0 ? (
                         <div
-                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500`}
+                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400`}
                         >
                           No projects scheduled.
                         </div>
@@ -1044,7 +1178,7 @@ export default function AdminSchedule() {
                                 );
                                 setSelectedDate(null);
                               }}
-                              className={`flex items-center justify-between gap-3 rounded-xl border ${BORDER} bg-white px-3 py-3 text-left shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/40`}
+                              className={`flex items-center justify-between gap-3 rounded-xl border ${BORDER} bg-white px-3 py-3 text-left shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/40 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/25 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-950/20`}
                             >
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -1052,16 +1186,16 @@ export default function AdminSchedule() {
                                     className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
                                     style={{ backgroundColor: colors.bg }}
                                   />
-                                  <p className="text-sm font-semibold text-gray-900 truncate">
+                                  <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">
                                     {project.title}
                                   </p>
                                 </div>
-                                <p className="mt-1 text-xs text-gray-500">
+                                <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">
                                   {project.projectCode ?? "—"} ·{" "}
                                   {project.dateLabel}
                                 </p>
                               </div>
-                              <span className="text-xs font-medium text-emerald-700 shrink-0">
+                              <span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                                 Open →
                               </span>
                             </button>
@@ -1073,7 +1207,7 @@ export default function AdminSchedule() {
 
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
                         <CalendarDays className="h-4 w-4" />
                         Unavailable Days
                       </div>
@@ -1081,7 +1215,7 @@ export default function AdminSchedule() {
                       <button
                         type="button"
                         onClick={() => openCreateUnavailableDay(selectedDate)}
-                        className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50"
+                        className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         Add
@@ -1091,7 +1225,7 @@ export default function AdminSchedule() {
                     <div className="grid gap-2">
                       {selectedDayUnavailableDays.length === 0 ? (
                         <div
-                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500`}
+                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400`}
                         >
                           No unavailable days recorded.
                         </div>
@@ -1102,29 +1236,29 @@ export default function AdminSchedule() {
                             className={[
                               "rounded-xl border px-3 py-3",
                               day.source === "holiday"
-                                ? "border-amber-200 bg-amber-50"
-                                : "border-red-200 bg-red-50/60",
+                                ? "border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/15"
+                                : "border-red-200 bg-red-50/60 dark:border-red-500/40 dark:bg-red-500/15",
                             ].join(" ")}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold text-gray-900">
+                                  <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                                     {day.reason}
                                   </p>
                                   <span
                                     className={[
                                       "rounded-full px-2 py-0.5 text-[10px] font-semibold",
                                       day.source === "holiday"
-                                        ? "border border-amber-200 bg-white/70 text-amber-800"
-                                        : "border border-red-200 bg-white/70 text-red-700",
+                                        ? "border border-amber-200 bg-white/70 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200"
+                                        : "border border-red-200 bg-white/70 text-red-700 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-200",
                                     ].join(" ")}
                                   >
                                     {getUnavailableTypeLabel(day)}
                                   </span>
                                 </div>
                                 {day.notes ? (
-                                  <p className="mt-1 text-xs text-gray-600">
+                                  <p className="mt-1 text-xs text-gray-600 dark:text-slate-300">
                                     {day.notes}
                                   </p>
                                 ) : null}
@@ -1135,7 +1269,7 @@ export default function AdminSchedule() {
                                   <button
                                     type="button"
                                     onClick={() => openEditUnavailableDay(day)}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700 transition hover:bg-red-50"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700 transition hover:bg-red-50 dark:border-red-900/60 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/30"
                                     aria-label="Edit unavailable day"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
@@ -1148,7 +1282,7 @@ export default function AdminSchedule() {
                                     disabled={
                                       deletingUnavailableDayId === day.id
                                     }
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/30"
                                     aria-label="Delete unavailable day"
                                   >
                                     {deletingUnavailableDayId === day.id ? (
@@ -1159,7 +1293,7 @@ export default function AdminSchedule() {
                                   </button>
                                 </div>
                               ) : (
-                                <span className="shrink-0 text-[11px] font-medium text-amber-800">
+                                <span className="shrink-0 text-[11px] font-medium text-amber-800 dark:text-amber-300">
                                   Read only
                                 </span>
                               )}
@@ -1172,7 +1306,7 @@ export default function AdminSchedule() {
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 px-5 py-4 flex justify-end">
+              <div className="flex justify-end border-t border-gray-200 px-5 py-4 dark:border-slate-800">
                 <button
                   onClick={() => setSelectedDate(null)}
                   className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"
@@ -1201,15 +1335,15 @@ export default function AdminSchedule() {
             }}
           >
             <div
-              className="absolute min-w-[220px] overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl"
+              className="absolute min-w-[220px] overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/50"
               style={{
                 left: calendarContextMenu.x,
                 top: calendarContextMenu.y,
               }}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="border-b border-gray-100 px-3 py-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              <div className="border-b border-gray-100 px-3 py-2 dark:border-slate-800">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
                   {formatLongDate(calendarContextMenu.date)}
                 </p>
               </div>
@@ -1217,7 +1351,7 @@ export default function AdminSchedule() {
               <button
                 type="button"
                 onClick={() => openCreateUnavailableDay(calendarContextMenu.date)}
-                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-gray-50"
+                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-gray-50 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Plus className="h-4 w-4 text-[#00c065]" />
                 Create unavailable day

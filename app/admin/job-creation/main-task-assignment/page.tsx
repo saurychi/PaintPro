@@ -8,15 +8,17 @@ import {
   Loader2,
   RefreshCw,
   GripVertical,
+  Search,
 } from "lucide-react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
+import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
 
-const ACCENT = "#00c065";
-const ACCENT_SOFT = "#e6f9ef";
-const ACCENT_BORDER = "#b7efcf";
+const ACCENT = "#4ade80";
+const ACCENT_SOFT = "rgba(74, 222, 128, 0.14)";
+const ACCENT_BORDER = "rgba(74, 222, 128, 0.35)";
 
 type Task = {
   id: string;
@@ -42,13 +44,23 @@ function AddTaskModal({
   onCreateNew: () => void;
   onRefresh: () => void;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredTasks = normalizedQuery
+    ? tasks.filter((task) => task.name.toLowerCase().includes(normalizedQuery))
+    : tasks;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-      <div className="flex w-full max-w-md flex-col rounded-xl border border-gray-200 bg-white shadow-lg"
-        style={{ maxHeight: "80vh" }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+      <div
+        className="flex w-full max-w-md flex-col rounded-xl border border-gray-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30"
+        style={{ maxHeight: "80vh" }}
+      >
         {/* header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
-          <h3 className="text-sm font-semibold text-gray-900">Add Main Task</h3>
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-slate-700">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+            Add Main Task
+          </h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -60,17 +72,44 @@ function AddTaskModal({
                 borderColor: ACCENT_BORDER,
                 backgroundColor: ACCENT_SOFT,
                 color: ACCENT,
-              }}>
+              }}
+            >
               <RefreshCw
-                className={["h-3.5 w-3.5", refreshing ? "animate-spin" : ""].join(" ")}
+                className={[
+                  "h-3.5 w-3.5",
+                  refreshing ? "animate-spin" : "",
+                ].join(" ")}
               />
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="grid h-7 w-7 place-items-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50">
+              className="grid h-7 w-7 place-items-center rounded-md border border-gray-200 bg-white text-gray-500 dark:text-slate-400 transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
               <X className="h-4 w-4" />
             </button>
+          </div>
+        </div>
+
+        <div className="shrink-0 border-b border-gray-100 px-4 py-3 dark:border-slate-800">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search main tasks"
+              className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-8 text-[13px] text-gray-800 dark:text-slate-100 outline-none transition focus:border-[#4ade80] focus:ring-2 focus:ring-[#4ade80]/15 dark:border-slate-700 dark:bg-slate-950 dark:placeholder:text-slate-500"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 dark:text-slate-500 transition hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Clear task search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -78,19 +117,26 @@ function AddTaskModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 green-scrollbar">
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+              <Loader2 className="h-5 w-5 animate-spin text-gray-400 dark:text-slate-500" />
             </div>
           ) : tasks.length === 0 ? (
-            <p className="py-6 text-center text-[12px] text-gray-500">
+            <p className="py-6 text-center text-[12px] text-gray-500 dark:text-slate-400">
               All available tasks have already been added.
             </p>
+          ) : filteredTasks.length === 0 ? (
+            <p className="py-6 text-center text-[12px] text-gray-500 dark:text-slate-400">
+              No main tasks match your search.
+            </p>
           ) : (
-            <div className="space-y-1.5">
-              {tasks.map((task) => (
+            <div className="space-y-1">
+              {filteredTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 transition hover:bg-gray-50">
-                  <span className="text-[13px] text-gray-800">{task.name}</span>
+                  className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+                >
+                  <span className="text-[13px] text-gray-800 dark:text-slate-100">
+                    {task.name}
+                  </span>
                   <button
                     type="button"
                     onClick={() => onAdd(task)}
@@ -99,7 +145,8 @@ function AddTaskModal({
                       borderColor: ACCENT_BORDER,
                       backgroundColor: ACCENT_SOFT,
                       color: ACCENT,
-                    }}>
+                    }}
+                  >
                     <Plus className="h-3 w-3" />
                     Add
                   </button>
@@ -110,11 +157,12 @@ function AddTaskModal({
         </div>
 
         {/* footer */}
-        <div className="shrink-0 border-t border-gray-200 px-4 py-3">
+        <div className="shrink-0 border-t border-gray-200 px-4 py-3 dark:border-slate-700">
           <button
             type="button"
             onClick={onCreateNew}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 transition hover:bg-gray-50">
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 dark:text-slate-300 transition hover:bg-gray-50"
+          >
             <Plus className="h-3.5 w-3.5" />
             Create New Task
           </button>
@@ -157,6 +205,11 @@ export default function MainTaskAssignment() {
   const [addTaskModalOpen, setAddTaskModalOpen] = useState(false);
   const [isProcessingNext, setIsProcessingNext] = useState(false);
   const [isSavingFromModal, setIsSavingFromModal] = useState(false);
+  const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null);
+  const [selectedTaskIdsForDelete, setSelectedTaskIdsForDelete] = useState<
+    Set<string>
+  >(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   // drag-and-drop
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -212,7 +265,39 @@ export default function MainTaskAssignment() {
     pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
     pushSelectedHistory();
     setSelected((prev) => prev.filter((item) => item.id !== taskId));
+    setSelectedTaskIdsForDelete((prev) => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
     setIsDirty(true);
+  }
+
+  function removeSelectedTasks(taskIds: Set<string>) {
+    if (taskIds.size === 0) return;
+    pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
+    pushSelectedHistory();
+    setSelected((prev) => prev.filter((item) => !taskIds.has(item.id)));
+    setSelectedTaskIdsForDelete(new Set());
+    setIsDirty(true);
+  }
+
+  function toggleTaskDeleteSelection(taskId: string) {
+    setSelectedTaskIdsForDelete((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+
+  function toggleAllTaskDeleteSelection() {
+    const allIds = selected.map((task) => task.id);
+    const allSelected =
+      allIds.length > 0 &&
+      allIds.every((id) => selectedTaskIdsForDelete.has(id));
+
+    setSelectedTaskIdsForDelete(allSelected ? new Set() : new Set(allIds));
   }
 
   function handleOpenAddTaskModal() {
@@ -337,7 +422,9 @@ export default function MainTaskAssignment() {
       setIsDirty(false);
       return true;
     } catch (error: any) {
-      toast.error(error?.message || "Something went wrong while saving main tasks.");
+      toast.error(
+        error?.message || "Something went wrong while saving main tasks.",
+      );
       return false;
     }
   }
@@ -429,7 +516,9 @@ export default function MainTaskAssignment() {
       if (opts?.silent) setRefreshingTasks(true);
       else setLoadingTasks(true);
 
-      const response = await fetch("/api/planning/getMainTasks", { method: "GET" });
+      const response = await fetch("/api/planning/getMainTasks", {
+        method: "GET",
+      });
       const data = await response.json();
 
       if (!response.ok) {
@@ -454,7 +543,9 @@ export default function MainTaskAssignment() {
     }
   }
 
-  useEffect(() => { loadAllMainTasks(); }, []);
+  useEffect(() => {
+    loadAllMainTasks();
+  }, []);
 
   useEffect(() => {
     async function loadProjectMainTasks() {
@@ -484,7 +575,9 @@ export default function MainTaskAssignment() {
         }
 
         const projectRow = data?.project;
-        const projectTasks = Array.isArray(data?.mainTasks) ? data.mainTasks : [];
+        const projectTasks = Array.isArray(data?.mainTasks)
+          ? data.mainTasks
+          : [];
 
         setJobNo(projectRow?.project_code || "");
         setSiteName(projectRow?.title || "");
@@ -548,27 +641,41 @@ export default function MainTaskAssignment() {
     pendingScrollTopRef.current = null;
   }, [selected]);
 
+  useEffect(() => {
+    const validIds = new Set(selected.map((task) => task.id));
+    setSelectedTaskIdsForDelete((prev) => {
+      const next = new Set([...prev].filter((id) => validIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [selected]);
+
   // tasks not yet added (available in the modal)
   const selectedIds = new Set(selected.map((t) => t.id));
   const availableTasks = allTasks.filter((t) => !selectedIds.has(t.id));
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
+    <div className="h-screen w-full overflow-hidden bg-gray-50 text-gray-900 dark:text-slate-100 dark:bg-slate-800">
+      <div className="flex h-full flex-col gap-2 overflow-hidden px-4 pb-3 pt-3 lg:px-5">
         {/* Header */}
-        <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+        <div className="flex items-center gap-2 text-[17px] font-semibold text-gray-900 dark:text-slate-100 whitespace-nowrap">
           <span>Project</span>
-          <ChevronRight className="h-5 w-5 text-gray-300 shrink-0" aria-hidden />
+          <ChevronRight
+            className="h-5 w-5 text-gray-300 shrink-0 dark:text-slate-600"
+            aria-hidden
+          />
           <span>Main Tasks</span>
         </div>
 
-        <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
           {/* Main section */}
-          <section className="min-h-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm flex flex-col">
-            <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
+          <section className="min-h-0 flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/20">
+            <div
+              className="h-1 w-full shrink-0"
+              style={{ backgroundColor: ACCENT }}
+            />
 
             {/* Section header */}
-            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+            <div className="shrink-0 border-b border-gray-200 px-4 py-2.5 dark:border-slate-700">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -577,12 +684,13 @@ export default function MainTaskAssignment() {
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                       Main Task Assignment
                     </p>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600">
-                    Add and order the main tasks for this project. Drag to reorder.
+                  <p className="mt-0.5 text-[13px] text-gray-600 dark:text-slate-400">
+                    Add and order the main tasks for this project. Drag to
+                    reorder.
                   </p>
                 </div>
 
@@ -592,50 +700,85 @@ export default function MainTaskAssignment() {
                     borderColor: ACCENT_BORDER,
                     backgroundColor: ACCENT_SOFT,
                     color: ACCENT,
-                  }}>
+                  }}
+                >
                   Task Setup
                 </div>
               </div>
             </div>
 
             {/* Added Main Tasks panel */}
-            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Panel header */}
-              <div className="shrink-0 flex items-center justify-between border-b border-gray-200 px-5 py-3">
+              <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-gray-200 px-4 py-2.5 dark:border-slate-700">
                 <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-semibold text-gray-700">
+                  {selected.length > 0 ? (
+                    <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-gray-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={
+                          selected.length > 0 &&
+                          selected.every((task) =>
+                            selectedTaskIdsForDelete.has(task.id),
+                          )
+                        }
+                        onChange={toggleAllTaskDeleteSelection}
+                        className="task-checkbox h-4 w-4"
+                        aria-label="Select all main tasks for deletion"
+                      />
+                      Main tasks
+                    </label>
+                  ) : null}
+                  <span className="text-[12px] font-semibold text-gray-700 dark:text-slate-200">
                     Added Main Tasks
                   </span>
                   {selected.length > 0 && (
                     <span
                       className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold"
-                      style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                      style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
+                    >
                       {selected.length}
                     </span>
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleOpenAddTaskModal}
-                  className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-semibold transition hover:brightness-95"
-                  style={{
-                    borderColor: ACCENT_BORDER,
-                    backgroundColor: ACCENT_SOFT,
-                    color: ACCENT,
-                  }}>
-                  <Plus className="h-3.5 w-3.5" />
-                  Add
-                </button>
+                <div className="flex items-center gap-2">
+                  {selectedTaskIdsForDelete.size > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setBulkDeleteOpen(true)}
+                      className="inline-flex items-center justify-center rounded-md border border-rose-300/60 bg-rose-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-500/15 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200 dark:hover:bg-rose-400/15"
+                    >
+                      Remove
+                      <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-100 px-1.5 text-[10px] font-bold text-rose-700 dark:bg-rose-400/15 dark:text-rose-100">
+                        {selectedTaskIdsForDelete.size}
+                      </span>
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={handleOpenAddTaskModal}
+                    className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-semibold transition hover:brightness-95"
+                    style={{
+                      borderColor: ACCENT_BORDER,
+                      backgroundColor: ACCENT_SOFT,
+                      color: ACCENT,
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                </div>
               </div>
 
               {/* Task list */}
               <div
                 ref={listRef}
-                className="flex-1 min-h-0 overflow-y-auto px-5 py-3 green-scrollbar">
+                className="min-h-0 flex-1 overflow-y-auto px-4 py-2 green-scrollbar"
+              >
                 {loadingProject ? (
                   <div className="flex h-full min-h-[200px] items-center justify-center">
-                    <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                    <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
                       <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
                       <span className="text-sm font-medium text-gray-700">
                         Loading project main tasks...
@@ -646,21 +789,24 @@ export default function MainTaskAssignment() {
                   <div className="flex flex-col items-center justify-center py-16 text-center">
                     <div
                       className="mb-3 flex h-10 w-10 items-center justify-center rounded-full"
-                      style={{ backgroundColor: ACCENT_SOFT }}>
+                      style={{ backgroundColor: ACCENT_SOFT }}
+                    >
                       <Plus className="h-5 w-5" style={{ color: ACCENT }} />
                     </div>
                     <p className="text-[13px] font-medium text-gray-700">
                       No tasks added yet
                     </p>
-                    <p className="mt-1 text-[12px] text-gray-500">
-                      Click &quot;Add&quot; above to select main tasks for this project.
+                    <p className="mt-1 text-[12px] text-gray-500 dark:text-slate-400">
+                      Click &quot;Add&quot; above to select main tasks for this
+                      project.
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     {selected.map((task, index) => {
                       const isDragging = dragIndex === index;
-                      const isOver = dragOverIndex === index && dragIndex !== index;
+                      const isOver =
+                        dragOverIndex === index && dragIndex !== index;
 
                       return (
                         <div
@@ -671,41 +817,58 @@ export default function MainTaskAssignment() {
                           onDrop={() => handleDrop(index)}
                           onDragEnd={handleDragEnd}
                           className={[
-                            "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition select-none cursor-grab active:cursor-grabbing",
+                            "flex items-center gap-3 rounded-lg border px-3 py-2 transition select-none cursor-grab active:cursor-grabbing",
                             isDragging
                               ? "opacity-40 border-dashed"
                               : isOver
-                              ? "border-green-400 bg-green-50 shadow-sm"
-                              : "border-gray-200 bg-white hover:bg-gray-50",
-                          ].join(" ")}>
+                                ? "border-[#4ade80] bg-[#4ade80]/10 shadow-sm"
+                                : "border-gray-200 bg-white hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800/80",
+                          ].join(" ")}
+                        >
                           {/* sort order number */}
+                          <label className="inline-flex h-6 w-6 shrink-0 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedTaskIdsForDelete.has(task.id)}
+                              onChange={() =>
+                                toggleTaskDeleteSelection(task.id)
+                              }
+                              className="task-checkbox h-4 w-4"
+                              aria-label={`Select ${task.name} for deletion`}
+                            />
+                          </label>
                           <span
                             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
-                            style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                            style={{
+                              backgroundColor: ACCENT_SOFT,
+                              color: ACCENT,
+                            }}
+                          >
                             {index + 1}
                           </span>
 
                           {/* grip handle */}
-                          <GripVertical className="h-4 w-4 shrink-0 text-gray-300" />
+                          <GripVertical className="h-4 w-4 shrink-0 text-gray-300 dark:text-slate-600" />
 
                           {/* task name */}
-                          <span className="flex-1 truncate text-[13px] font-medium text-gray-800">
+                          <span className="flex-1 truncate text-[13px] font-medium text-gray-800 dark:text-slate-100">
                             {task.name}
                           </span>
 
                           {/* remove button */}
                           <button
                             type="button"
-                            onClick={() => removeSelected(task.id)}
-                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-500 transition hover:bg-red-100"
-                            aria-label={`Remove ${task.name}`}>
+                            onClick={() => setTaskPendingDelete(task)}
+                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-red-200/70 bg-red-50 text-red-500 transition hover:bg-red-100 dark:border-red-400/25 dark:bg-red-400/10 dark:text-red-300 dark:hover:bg-red-400/15"
+                            aria-label={`Remove ${task.name}`}
+                          >
                             <X className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       );
                     })}
 
-                    <div className="h-2" />
+                    <div className="h-1" />
                   </div>
                 )}
               </div>
@@ -713,11 +876,15 @@ export default function MainTaskAssignment() {
           </section>
 
           {/* Sidebar */}
-          <aside className="h-full min-h-0 flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-              <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">{jobNo}</div>
-                <div className="mt-1 text-[12px] text-gray-500">{siteName}</div>
+          <aside className="flex h-full min-h-0 flex-col gap-3">
+            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+              <div className="px-4 py-3">
+                <div className="text-[16px] font-semibold text-gray-900 dark:text-slate-100">
+                  {jobNo}
+                </div>
+                <div className="mt-1 text-[12px] text-gray-500 dark:text-slate-400">
+                  {siteName}
+                </div>
               </div>
             </div>
 
@@ -728,13 +895,14 @@ export default function MainTaskAssignment() {
         </div>
 
         {/* Footer nav */}
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-end gap-2 px-4 pt-1">
           <button
             type="button"
             onClick={handleNext}
             disabled={isProcessingNext}
-            className="inline-flex h-10 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-white transform transition-all duration-150 hover:opacity-85 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
-            style={{ backgroundColor: ACCENT }}>
+            className="inline-flex h-9 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-slate-950 transform transition-all duration-150 hover:opacity-90 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
+            style={{ backgroundColor: ACCENT }}
+          >
             {isProcessingNext ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -749,11 +917,13 @@ export default function MainTaskAssignment() {
 
       {/* Save confirm modal */}
       {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-900">Save changes?</h3>
-              <p className="mt-1 text-sm text-gray-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
+            <div className="border-b border-gray-200 px-5 py-4 dark:border-slate-700">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                Save changes?
+              </h3>
+              <p className="mt-0.5 text-[13px] text-gray-600 dark:text-slate-400">
                 Do you want to save your main task changes before leaving?
               </p>
             </div>
@@ -766,14 +936,16 @@ export default function MainTaskAssignment() {
                   setPendingAction(null);
                   setIsProcessingNext(false);
                 }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
                 Cancel
               </button>
 
               <button
                 type="button"
                 onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
                 Don&apos;t Save
               </button>
 
@@ -781,8 +953,9 @@ export default function MainTaskAssignment() {
                 type="button"
                 onClick={() => handleConfirmSave(true)}
                 disabled={isSavingFromModal}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-70"
-                style={{ backgroundColor: ACCENT }}>
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-slate-950 hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-70"
+                style={{ backgroundColor: ACCENT }}
+              >
                 {isSavingFromModal ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -819,22 +992,138 @@ export default function MainTaskAssignment() {
         onSave={handleCreateTask}
       />
 
+      <div className="confirm-delete-button-friendly">
+        <ConfirmDeleteModal
+          open={Boolean(taskPendingDelete)}
+          title="Remove main task?"
+          description={
+            taskPendingDelete
+              ? `Remove "${taskPendingDelete.name}" from this project?`
+              : "Remove this main task from this project?"
+          }
+          confirmLabel="Remove"
+          onCancel={() => setTaskPendingDelete(null)}
+          onConfirm={() => {
+            if (taskPendingDelete) removeSelected(taskPendingDelete.id);
+            setTaskPendingDelete(null);
+          }}
+        />
+      </div>
+
+      <div className="confirm-delete-button-friendly">
+        <ConfirmDeleteModal
+          open={bulkDeleteOpen}
+          title="Remove selected main tasks?"
+          description={`Remove ${selectedTaskIdsForDelete.size} selected main task${
+            selectedTaskIdsForDelete.size === 1 ? "" : "s"
+          } from this project?`}
+          confirmLabel="Remove selected"
+          onCancel={() => setBulkDeleteOpen(false)}
+          onConfirm={() => {
+            removeSelectedTasks(selectedTaskIdsForDelete);
+            setBulkDeleteOpen(false);
+          }}
+        />
+      </div>
+
       <style jsx global>{`
         .green-scrollbar::-webkit-scrollbar {
           width: 10px;
         }
         .green-scrollbar::-webkit-scrollbar-track {
-          background: #eaf7e4;
+          background: rgba(148, 163, 184, 0.16);
           border-radius: 999px;
         }
         .green-scrollbar::-webkit-scrollbar-thumb {
           background: ${ACCENT};
           border-radius: 999px;
-          border: 2px solid #eaf7e4;
+          border: 2px solid rgba(15, 23, 42, 0.2);
         }
         .green-scrollbar {
-          scrollbar-color: ${ACCENT} #eaf7e4;
+          scrollbar-color: ${ACCENT} rgba(148, 163, 184, 0.16);
           scrollbar-width: thin;
+        }
+        .task-checkbox {
+          appearance: none;
+          -webkit-appearance: none;
+          display: inline-grid;
+          place-content: center;
+          border-radius: 0.25rem;
+          border: 1px solid rgba(100, 116, 139, 0.9);
+          background: transparent;
+          cursor: pointer;
+          transition:
+            border-color 150ms ease,
+            box-shadow 150ms ease,
+            background-color 150ms ease;
+        }
+        .task-checkbox:hover {
+          border-color: ${ACCENT};
+        }
+        .task-checkbox:checked {
+          border-color: ${ACCENT};
+          background-color: transparent;
+          box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.16);
+        }
+        .task-checkbox:checked::before {
+          content: "";
+          width: 0.55rem;
+          height: 0.55rem;
+          background: ${ACCENT};
+          clip-path: polygon(
+            14% 44%,
+            0 60%,
+            39% 100%,
+            100% 18%,
+            84% 6%,
+            36% 72%
+          );
+        }
+
+        .confirm-delete-button-friendly button {
+          border-color: rgb(229 231 235);
+          background-color: rgb(255 255 255);
+          color: rgb(55 65 81);
+          transition:
+            background-color 150ms ease,
+            border-color 150ms ease,
+            color 150ms ease,
+            filter 150ms ease,
+            transform 150ms ease;
+        }
+
+        .confirm-delete-button-friendly button:hover {
+          background-color: rgb(249 250 251);
+        }
+
+        .confirm-delete-button-friendly button:last-of-type {
+          border-color: rgb(254 202 202);
+          background-color: rgb(254 242 242);
+          color: rgb(185 28 28);
+        }
+
+        .confirm-delete-button-friendly button:last-of-type:hover {
+          background-color: rgb(254 226 226);
+        }
+
+        .dark .confirm-delete-button-friendly button {
+          border-color: rgb(51 65 85);
+          background-color: rgb(15 23 42);
+          color: rgb(226 232 240);
+        }
+
+        .dark .confirm-delete-button-friendly button:hover {
+          background-color: rgb(30 41 59);
+        }
+
+        .dark .confirm-delete-button-friendly button:last-of-type {
+          border-color: rgba(251, 113, 133, 0.4);
+          background-color: rgba(244, 63, 94, 0.16);
+          color: rgb(254 205 211);
+        }
+
+        .dark .confirm-delete-button-friendly button:last-of-type:hover {
+          background-color: rgba(244, 63, 94, 0.24);
         }
       `}</style>
     </div>

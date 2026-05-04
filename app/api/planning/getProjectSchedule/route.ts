@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
-import { buildProjectSchedule } from "@/lib/planning/projectScheduling"
+import {
+  buildProjectSchedule,
+  type SchedulingGeneratedMainTask,
+} from "@/lib/planning/projectScheduling"
+import { listManualUnavailableDays } from "@/lib/schedule/unavailableDays"
 
 function isObj(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -165,6 +169,8 @@ export async function POST(req: Request) {
       }
     }
 
+    const unavailableDays = await listManualUnavailableDays()
+
     const schedule = buildProjectSchedule({
       project: {
         scheduled_start_datetime:
@@ -177,8 +183,9 @@ export async function POST(req: Request) {
             : null,
         dimensions: isObj(project.dimensions) ? project.dimensions : null,
       },
-      generatedTasks: generatedTasks as any,
+      generatedTasks: generatedTasks as SchedulingGeneratedMainTask[],
       existingBlocks,
+      unavailableDates: unavailableDays.map((day) => day.blockedDate),
     })
 
     return NextResponse.json(schedule)

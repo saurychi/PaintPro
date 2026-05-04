@@ -1,5 +1,6 @@
 export const MANUAL_UNAVAILABLE_BLOCK_TYPES = [
   "company_blackout",
+  "holiday",
   "manual_block",
   "maintenance",
   "other",

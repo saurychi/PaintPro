@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import SubTaskPickerModal from "@/components/project-creation/SubTaskPickerModal";
 import CreateSubTaskModal from "@/components/project-creation/CreateSubTaskModal";
+import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
 
 type StepStatus = "done" | "active" | "pending";
 
@@ -101,6 +102,23 @@ export default function SubTaskAssignment() {
   const [createSubTaskModalOpen, setCreateSubTaskModalOpen] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
+  const [subTaskPendingDelete, setSubTaskPendingDelete] = useState<{
+    mainTaskId: string;
+    subTaskId: string;
+    title: string;
+  } | null>(null);
+  const [selectedSubTaskKeysForDelete, setSelectedSubTaskKeysForDelete] =
+    useState<Set<string>>(new Set());
+  const [bulkDeleteForGroupId, setBulkDeleteForGroupId] = useState<string | null>(null);
+
+  function getSelectedKeysForGroup(groupId: string) {
+    const prefix = `${groupId}::`;
+    return new Set(
+      Array.from(selectedSubTaskKeysForDelete).filter((key) =>
+        key.startsWith(prefix),
+      ),
+    );
+  }
 
   // drag-and-drop state (tracks group + index)
   const [dragState, setDragState] = useState<{ groupId: string; index: number } | null>(null);
@@ -365,7 +383,37 @@ export default function SubTaskAssignment() {
         return { ...group, children: group.children.filter((child) => child.id !== subTaskId) };
       }),
     );
+    setSelectedSubTaskKeysForDelete((prev) => {
+      const next = new Set(prev);
+      next.delete(`${mainTaskId}::${subTaskId}`);
+      return next;
+    });
     setIsDirty(true);
+  }
+
+  function handleRemoveSelectedSubTasks(keys: Set<string>) {
+    if (keys.size === 0) return;
+    pushServicesHistory();
+    setServices((prev) =>
+      prev.map((group) => ({
+        ...group,
+        children: group.children.filter(
+          (child) => !keys.has(`${group.id}::${child.id}`),
+        ),
+      })),
+    );
+    setSelectedSubTaskKeysForDelete(new Set());
+    setIsDirty(true);
+  }
+
+  function toggleSubTaskDeleteSelection(mainTaskId: string, subTaskId: string) {
+    const key = `${mainTaskId}::${subTaskId}`;
+    setSelectedSubTaskKeysForDelete((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   // ── sub-task picker ────────────────────────────────────────────────────────
@@ -579,21 +627,21 @@ export default function SubTaskAssignment() {
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
+    <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+      <div className="flex h-full flex-col gap-3 overflow-hidden px-6 pt-5 pb-4">
         {/* header */}
-        <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+        <div className="flex items-center gap-2 whitespace-nowrap text-[18px] font-semibold text-slate-900 dark:text-slate-100">
           <span>Project</span>
-          <ChevronRight className="h-5 w-5 text-gray-300 shrink-0" aria-hidden />
+          <ChevronRight className="h-5 w-5 shrink-0 text-slate-300 dark:text-slate-500" aria-hidden />
           <span>Sub Task Assignment</span>
         </div>
 
-        <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
           {/* main section */}
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:bg-slate-900 shadow-sm dark:border-slate-700">
             <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
 
-            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+            <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-slate-700">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -602,49 +650,45 @@ export default function SubTaskAssignment() {
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">Sub Task Assignment</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sub Task Assignment</p>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600">
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                     Add and order the subtasks under each main task. Drag to reorder.
                   </p>
                 </div>
 
                 <div
-                  className="inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-semibold"
-                  style={{
-                    borderColor: ACCENT_BORDER,
-                    backgroundColor: ACCENT_SOFT,
-                    color: ACCENT,
-                  }}>
+                  className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                   Task Setup
                 </div>
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
-              <div className="h-full overflow-y-auto pr-2 green-scrollbar">
+              <div className="green-scrollbar h-full overflow-y-auto pr-2">
                 <div className="space-y-2.5">
                   {loadingSubTasks ? (
                     <div className="flex items-center justify-center py-10">
-                      <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                        <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                        <span className="text-sm font-medium text-gray-700">
+                      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white dark:bg-slate-900 px-5 py-4 shadow-sm dark:border-slate-700">
+                        <Loader2 className="h-5 w-5 animate-spin text-slate-700 dark:text-slate-200" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
                           Loading subtasks...
                         </span>
                       </div>
                     </div>
                   ) : services.length === 0 ? (
-                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                    <div className="rounded-lg border border-slate-200 bg-white dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
                       No subtasks found for this project.
                     </div>
                   ) : (
                     services.map((g) => {
                       const isOpen = expanded.has(g.id);
+                      const selectedForGroup = getSelectedKeysForGroup(g.id);
 
                       return (
                         <div
                           key={g.id}
-                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                          className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-700">
                           {/* group header */}
                           <div
                             role="button"
@@ -657,61 +701,66 @@ export default function SubTaskAssignment() {
                               }
                             }}
                             className={`flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left transition ${
-                              isOpen ? "bg-emerald-50/40" : "bg-white"
+                              isOpen ? "bg-emerald-50/50 dark:bg-emerald-500/10" : "bg-white dark:bg-slate-900"
                             }`}>
                             <div className="flex min-w-0 items-center gap-3">
                               <div
-                                className={`h-9 w-[4px] rounded-full transition ${isOpen ? "opacity-100" : "opacity-0"}`}
+                                className={`h-9 w-1 rounded-full transition ${isOpen ? "opacity-100" : "opacity-0"}`}
                                 style={{ backgroundColor: ACCENT }}
                               />
 
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="truncate text-[13px] font-semibold text-gray-900">
+                                  <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                                     {g.title}
                                   </span>
                                   {isOpen && (
                                     <span
-                                      className="inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold"
-                                      style={{
-                                        borderColor: ACCENT_BORDER,
-                                        backgroundColor: ACCENT_SOFT,
-                                        color: ACCENT,
-                                      }}>
+                                      className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                                       MAIN TASK
                                     </span>
                                   )}
                                 </div>
-                                <div className="mt-[2px] text-[11px] text-gray-500">
+                                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                                   {g.children.length} sub task{g.children.length === 1 ? "" : "s"}
                                 </div>
                               </div>
                             </div>
 
-                            {/* Add button */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenSubTaskPicker(g.id);
-                              }}
-                              className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border px-2.5 text-[12px] font-semibold transition hover:brightness-95"
-                              style={{
-                                borderColor: ACCENT_BORDER,
-                                backgroundColor: ACCENT_SOFT,
-                                color: ACCENT,
-                              }}>
-                              <Plus className="h-3.5 w-3.5" />
-                              Add
-                            </button>
+                            <div className="flex shrink-0 items-center gap-2">
+                              {selectedForGroup.size > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBulkDeleteForGroupId(g.id);
+                                  }}
+                                  className="inline-flex h-8 items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/20"
+                                >
+                                  Remove ({selectedForGroup.size})
+                                </button>
+                              ) : null}
+
+                              {/* Add button */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenSubTaskPicker(g.id);
+                                }}
+                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[12px] font-semibold text-emerald-600 transition hover:brightness-95 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                <Plus className="h-3.5 w-3.5" />
+                                Add
+                              </button>
+                            </div>
                           </div>
 
                           {/* sub-task list */}
                           {isOpen && (
                             <div className="px-5 pb-4">
                               {g.children.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 py-6 text-center">
-                                  <p className="text-[12px] font-medium text-gray-600">
+                                <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 py-6 text-center">
+                                  <p className="text-[12px] font-medium text-slate-600 dark:text-slate-300">
                                     No sub tasks added yet
                                   </p>
                                   <p className="mt-0.5 text-[11px] text-gray-400">
@@ -719,8 +768,8 @@ export default function SubTaskAssignment() {
                                   </p>
                                 </div>
                               ) : (
-                                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-                                  <div className="divide-y divide-gray-100">
+                                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-700">
+                                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
                                     {g.children.map((step, index) => {
                                       const isDragging =
                                         dragState?.groupId === g.id &&
@@ -744,23 +793,35 @@ export default function SubTaskAssignment() {
                                               ? "opacity-40"
                                               : isOver
                                               ? "bg-emerald-50 border-l-2 border-l-green-400"
-                                              : "hover:bg-gray-50",
+                                              : "hover:bg-slate-50 dark:hover:bg-slate-800/80",
                                           ].join(" ")}>
                                           {/* sort number */}
+                                          <label className="inline-flex h-6 w-6 shrink-0 items-center justify-center">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedSubTaskKeysForDelete.has(
+                                                `${g.id}::${step.id}`,
+                                              )}
+                                              onChange={() =>
+                                                toggleSubTaskDeleteSelection(
+                                                  g.id,
+                                                  step.id,
+                                                )
+                                              }
+                                              className="h-4 w-4 rounded border-slate-300 bg-transparent accent-[#00c065] dark:border-slate-600 dark:bg-transparent"
+                                              aria-label={`Select ${step.title} for deletion`}
+                                            />
+                                          </label>
                                           <span
-                                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
-                                            style={{
-                                              backgroundColor: ACCENT_SOFT,
-                                              color: ACCENT,
-                                            }}>
+                                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-[11px] font-bold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                                             {index + 1}
                                           </span>
 
                                           {/* grip */}
-                                          <GripVertical className="h-4 w-4 shrink-0 text-gray-300" />
+                                          <GripVertical className="h-4 w-4 shrink-0 text-slate-300 dark:text-slate-500" />
 
                                           {/* title */}
-                                          <div className="min-w-0 flex-1 truncate text-[13px] font-medium text-gray-800">
+                                          <div className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800 dark:text-slate-100">
                                             {step.title}
                                           </div>
 
@@ -768,9 +829,13 @@ export default function SubTaskAssignment() {
                                           <button
                                             type="button"
                                             onClick={() =>
-                                              handleRemoveSelectedSubTask(g.id, step.id)
+                                              setSubTaskPendingDelete({
+                                                mainTaskId: g.id,
+                                                subTaskId: step.id,
+                                                title: step.title,
+                                              })
                                             }
-                                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-500 transition hover:bg-red-100"
+                                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-500 transition hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
                                             aria-label={`Remove ${step.title}`}>
                                             <X className="h-3.5 w-3.5" />
                                           </button>
@@ -787,20 +852,18 @@ export default function SubTaskAssignment() {
                     })
                   )}
                 </div>
-
-                <div className="h-6" />
               </div>
             </div>
           </section>
 
           {/* sidebar */}
-          <aside className="h-full min-h-0 flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <aside className="flex h-full min-h-0 flex-col gap-4">
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-700">
               <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">
+                <div className="text-[16px] font-semibold text-slate-900 dark:text-slate-100">
                   {projectCode || "Sub Task Assignment"}
                 </div>
-                <div className="mt-1 text-[12px] text-gray-500">
+                <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
                   {projectTitle || "Review and organize subtasks under each main task."}
                 </div>
               </div>
@@ -813,12 +876,12 @@ export default function SubTaskAssignment() {
         </div>
 
         {/* footer nav */}
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleGoBack}
             disabled={isNavigatingBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-700 transition duration-150 hover:bg-slate-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
             {isNavigatingBack ? <Loader2 className="h-4 w-4 animate-spin" /> : "Go Back"}
           </button>
 
@@ -842,11 +905,11 @@ export default function SubTaskAssignment() {
 
       {/* save confirm modal */}
       {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-900">Save changes?</h3>
-              <p className="mt-1 text-sm text-gray-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Save changes?</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                 Do you want to save your sub task changes before leaving this page?
               </p>
             </div>
@@ -859,14 +922,14 @@ export default function SubTaskAssignment() {
                   setPendingAction(null);
                   setIsNavigatingNext(false);
                 }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
                 Cancel
               </button>
 
               <button
                 type="button"
                 onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
                 Don&apos;t Save
               </button>
 
@@ -912,6 +975,43 @@ export default function SubTaskAssignment() {
         onCreate={handleCreateCatalogSubTask}
       />
 
+      <ConfirmDeleteModal
+        open={Boolean(subTaskPendingDelete)}
+        title="Remove subtask?"
+        description={
+          subTaskPendingDelete
+            ? `Remove "${subTaskPendingDelete.title}" from this project?`
+            : "Remove this subtask from this project?"
+        }
+        confirmLabel="Remove"
+        onCancel={() => setSubTaskPendingDelete(null)}
+        onConfirm={() => {
+          if (subTaskPendingDelete) {
+            handleRemoveSelectedSubTask(
+              subTaskPendingDelete.mainTaskId,
+              subTaskPendingDelete.subTaskId,
+            );
+          }
+          setSubTaskPendingDelete(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        open={Boolean(bulkDeleteForGroupId)}
+        title="Remove selected subtasks?"
+        description={`Remove ${bulkDeleteForGroupId ? getSelectedKeysForGroup(bulkDeleteForGroupId).size : 0} selected subtask${
+          (bulkDeleteForGroupId ? getSelectedKeysForGroup(bulkDeleteForGroupId).size : 0) === 1 ? "" : "s"
+        } from this project?`}
+        confirmLabel="Remove selected"
+        onCancel={() => setBulkDeleteForGroupId(null)}
+        onConfirm={() => {
+          if (bulkDeleteForGroupId) {
+            handleRemoveSelectedSubTasks(getSelectedKeysForGroup(bulkDeleteForGroupId));
+          }
+          setBulkDeleteForGroupId(null);
+        }}
+      />
+
       <style jsx global>{`
         .green-scrollbar::-webkit-scrollbar {
           width: 10px;
@@ -920,14 +1020,85 @@ export default function SubTaskAssignment() {
           background: #eaf7e4;
           border-radius: 999px;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-track {
+          background: #0f172a;
+        }
         .green-scrollbar::-webkit-scrollbar-thumb {
           background: ${ACCENT};
           border-radius: 999px;
           border: 2px solid #eaf7e4;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-thumb {
+          border-color: #0f172a;
+        }
         .green-scrollbar {
           scrollbar-color: ${ACCENT} #eaf7e4;
           scrollbar-width: thin;
+        }
+        .dark .green-scrollbar {
+          scrollbar-color: ${ACCENT} #0f172a;
+        }
+
+        /* Dark-mode polish for imported modals used on this page.
+           These are UI-only overrides for modal buttons/controls that still use white classes internally. */
+        .dark .fixed.inset-0 button[class*="bg-white"],
+        .dark .fixed.inset-0 button[class*="border-gray-200"],
+        .dark .fixed.inset-0 button[class*="border-slate-200"] {
+          background-color: #0f172a !important;
+          border-color: #475569 !important;
+          color: #e2e8f0 !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-white"]:hover,
+        .dark .fixed.inset-0 button[class*="border-gray-200"]:hover,
+        .dark .fixed.inset-0 button[class*="border-slate-200"]:hover {
+          background-color: #1e293b !important;
+          color: #f8fafc !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-emerald-50"],
+        .dark .fixed.inset-0 button[class*="text-emerald"],
+        .dark .fixed.inset-0 button[class*="text-green"] {
+          background-color: rgba(16, 185, 129, 0.15) !important;
+          border-color: rgba(16, 185, 129, 0.35) !important;
+          color: #6ee7b7 !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-emerald-50"]:hover,
+        .dark .fixed.inset-0 button[class*="text-emerald"]:hover,
+        .dark .fixed.inset-0 button[class*="text-green"]:hover {
+          background-color: rgba(16, 185, 129, 0.24) !important;
+          color: #a7f3d0 !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-red-50"],
+        .dark .fixed.inset-0 button[class*="bg-rose-50"],
+        .dark .fixed.inset-0 button[class*="text-red"],
+        .dark .fixed.inset-0 button[class*="text-rose"] {
+          background-color: rgba(244, 63, 94, 0.14) !important;
+          border-color: rgba(244, 63, 94, 0.38) !important;
+          color: #fda4af !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-red-50"]:hover,
+        .dark .fixed.inset-0 button[class*="bg-rose-50"]:hover,
+        .dark .fixed.inset-0 button[class*="text-red"]:hover,
+        .dark .fixed.inset-0 button[class*="text-rose"]:hover {
+          background-color: rgba(244, 63, 94, 0.22) !important;
+          color: #fecdd3 !important;
+        }
+
+        .dark .fixed.inset-0 input,
+        .dark .fixed.inset-0 textarea,
+        .dark .fixed.inset-0 select {
+          background-color: #0f172a !important;
+          border-color: #475569 !important;
+          color: #e2e8f0 !important;
+        }
+
+        .dark .fixed.inset-0 input::placeholder,
+        .dark .fixed.inset-0 textarea::placeholder {
+          color: #94a3b8 !important;
         }
       `}</style>
     </div>

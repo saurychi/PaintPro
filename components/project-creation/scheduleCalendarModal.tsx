@@ -15,6 +15,7 @@ type CalendarBackgroundEvent = {
 type ScheduleCalendarModalProps = {
   open: boolean;
   selectedDate: string;
+  initialDate: Date;
   availableDateEvents: CalendarBackgroundEvent[];
   onClose: () => void;
   onSelectDate: (date: string) => void;
@@ -34,9 +35,14 @@ function formatSelectedDate(date: string) {
   });
 }
 
+function toDateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
 export default function ScheduleCalendarModal({
   open,
   selectedDate,
+  initialDate,
   availableDateEvents,
   onClose,
   onSelectDate,
@@ -54,6 +60,7 @@ export default function ScheduleCalendarModal({
   const holidayCount = availableDateEvents.filter(
     (event) => event.className === "fc-holiday-day",
   ).length;
+  const todayKey = toDateKey(initialDate);
 
   return (
     <>
@@ -171,6 +178,27 @@ export default function ScheduleCalendarModal({
           background: #fef9c3 !important;
         }
 
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day {
+          background:
+            repeating-linear-gradient(
+              -45deg,
+              rgba(148, 163, 184, 0.16) 0,
+              rgba(148, 163, 184, 0.16) 1px,
+              transparent 1px,
+              transparent 8px
+            ),
+            #f8fafc !important;
+          color: #94a3b8;
+        }
+
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day .fc-daygrid-day-frame {
+          cursor: not-allowed;
+        }
+
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day .fc-daygrid-day-number {
+          color: #94a3b8;
+        }
+
         .schedule-calendar-modal .fc .fc-daygrid-day:has(.fc-selected-day) {
           background: #dcfce7 !important;
           box-shadow: inset 0 0 0 1px rgba(0, 192, 101, 0.45);
@@ -255,8 +283,10 @@ export default function ScheduleCalendarModal({
             <div className="min-h-0 border-b border-gray-200 p-3 lg:border-b-0 lg:border-r">
               <div className="h-full overflow-hidden rounded-lg border border-gray-200 bg-white p-2">
                 <FullCalendar
+                  key={initialDate.toISOString().slice(0, 10)}
                   plugins={[dayGridPlugin, interactionPlugin]}
                   initialView="dayGridMonth"
+                  initialDate={initialDate}
                   height="100%"
                   contentHeight="100%"
                   expandRows
@@ -266,6 +296,11 @@ export default function ScheduleCalendarModal({
                     center: "title",
                     right: "next",
                   }}
+                  dayCellClassNames={(arg) =>
+                    toDateKey(arg.date) < todayKey
+                      ? ["fc-past-reference-day"]
+                      : []
+                  }
                   events={[
                     ...availableDateEvents,
                     ...(selectedDate
@@ -281,6 +316,8 @@ export default function ScheduleCalendarModal({
                   ]}
                   dateClick={(info) => {
                     const clickedDate = info.dateStr;
+
+                    if (clickedDate < todayKey) return;
 
                     const dayEvents = availableDateEvents.filter(
                       (event) => event.date === clickedDate,

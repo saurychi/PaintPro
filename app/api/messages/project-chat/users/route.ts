@@ -3,7 +3,7 @@ import { cookies } from "next/headers"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
 const CLIENT_COOKIE = "paintpro_client_project_id"
-const ALLOWED_PROJECT_ROLES = ["staff", "manager"] as const
+const ALLOWED_PROJECT_ROLES = ["staff", "manager", "admin"] as const
 
 type ProjectRow = {
   created_by: string | null
@@ -152,15 +152,19 @@ export async function GET() {
         const role = normalizeRole(user.role)
         const assignedTaskSet = userTaskMap.get(user.id)
         const isAssignedStaff = Boolean(assignedTaskSet?.size)
-        const isProjectManager = user.id === project?.created_by && role === "manager"
+        const isProjectCreator =
+          user.id === project?.created_by &&
+          (role === "manager" || role === "admin")
 
-        return isAssignedStaff || isProjectManager
+        return isAssignedStaff || isProjectCreator
       })
       .map((user) => {
         const role = normalizeRole(user.role)
-        const isProjectManager = user.id === project?.created_by && role === "manager"
+        const isProjectCreator =
+          user.id === project?.created_by &&
+          (role === "manager" || role === "admin")
         const taskSet = userTaskMap.get(user.id)
-        const assignedTasks = isProjectManager
+        const assignedTasks = isProjectCreator
           ? "Project Manager"
           : taskSet && taskSet.size > 0
             ? Array.from(taskSet).join(", ")

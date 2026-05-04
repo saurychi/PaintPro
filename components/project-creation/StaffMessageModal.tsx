@@ -1,16 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ClipboardList,
   Loader2,
+  Mail,
   MessageSquare,
   MoreHorizontal,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Trash2,
   UserRound,
+  UsersRound,
+  X,
 } from "lucide-react";
 
 import {
@@ -46,6 +50,13 @@ type StaffConversation = {
   messages: StaffConversationMessage[];
 };
 
+type StaffRecipientOption = {
+  id: string;
+  name: string;
+  email?: string;
+  specialties?: string[];
+};
+
 type StaffMessageModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -61,6 +72,15 @@ type StaffMessageModalProps = {
   specsSentConversationIds?: string[];
 
   onCreateNew?: () => void;
+
+  recipientPickerOpen?: boolean;
+  onRecipientPickerOpenChange?: (open: boolean) => void;
+  recipientOptions?: StaffRecipientOption[];
+  loadingRecipients?: boolean;
+  recipientLoadError?: string | null;
+  onRetryLoadRecipients?: () => void;
+  onSelectRecipient?: (employee: StaffRecipientOption) => void;
+
   onFillSpecs?: () => void;
   onDeleteMessage?: (messageId: string) => Promise<void>;
   onApplyMeasurements?: (
@@ -113,6 +133,13 @@ export default function StaffMessageModal({
   onSelectedConversationIdChange,
   specsSentConversationIds,
   onCreateNew,
+  recipientPickerOpen = false,
+  onRecipientPickerOpenChange,
+  recipientOptions = [],
+  loadingRecipients = false,
+  recipientLoadError,
+  onRetryLoadRecipients,
+  onSelectRecipient,
   onFillSpecs,
   onDeleteMessage,
   onApplyMeasurements,
@@ -129,6 +156,43 @@ export default function StaffMessageModal({
     Boolean(selectedConversation) && Boolean(messageText.trim()) && !sending;
 
   const [deletingMsgId, setDeletingMsgId] = useState<string | null>(null);
+  const [recipientSearch, setRecipientSearch] = useState("");
+
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messageCount = selectedConversation?.messages?.length ?? 0;
+
+  useEffect(() => {
+    if (!open) return;
+
+    const node = messagesContainerRef.current;
+    if (!node) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, selectedConversationId, messageCount]);
+
+  const filteredRecipients = useMemo(() => {
+    const query = recipientSearch.trim().toLowerCase();
+    if (!query) return recipientOptions;
+
+    return recipientOptions.filter((recipient) => {
+      const haystack = [recipient.name, recipient.email]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [recipientOptions, recipientSearch]);
+
+  function handleRecipientSelect(employee: StaffRecipientOption) {
+    onSelectRecipient?.(employee);
+    onRecipientPickerOpenChange?.(false);
+    setRecipientSearch("");
+  }
 
   async function handleDeleteMessage(messageId: string) {
     if (!onDeleteMessage) return;
@@ -145,10 +209,17 @@ export default function StaffMessageModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={[
+          "fixed!",
+          "left-1/2!",
+          "top-1/2!",
+          "bottom-auto!",
+          "-translate-x-1/2!",
+          "-translate-y-1/2!",
+          "relative",
           "flex",
-          "h-[min(80vh,560px)]",
-          "w-[min(92vw,800px)]",
-          "max-w-[800px]!",
+          "h-[min(88vh,680px)]",
+          "w-[min(94vw,980px)]",
+          "max-w-[980px]!",
           "flex-col",
           "overflow-hidden",
           "rounded-2xl",
@@ -156,10 +227,11 @@ export default function StaffMessageModal({
           "bg-white",
           "p-0",
           "shadow-2xl",
-        ].join(" ")}>
+        ].join(" ")}
+      >
         <div className="h-1.5 w-full shrink-0 bg-[#00c065]" />
 
-        <DialogHeader className="shrink-0 border-b border-gray-200 bg-white px-5 py-3">
+        <DialogHeader className="shrink-0 border-b border-gray-200 bg-white px-6 py-4">
           <div className="flex items-center gap-3 pr-8">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-[#00c065]">
               <MessageSquare className="h-4 w-4" />
@@ -175,7 +247,7 @@ export default function StaffMessageModal({
           </div>
         </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-white lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-white lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="min-h-0 overflow-hidden border-b border-gray-200 bg-gray-50 lg:border-b-0 lg:border-r">
             <div className="flex h-full min-h-0 flex-col p-3">
               <div className="flex shrink-0 items-center justify-between gap-2 px-1 pb-3">
@@ -184,8 +256,15 @@ export default function StaffMessageModal({
                 </p>
                 <button
                   type="button"
-                  onClick={onCreateNew}
-                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-[12px] font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
+                  onClick={() => {
+                    if (onCreateNew) {
+                      onCreateNew();
+                      return;
+                    }
+                    onRecipientPickerOpenChange?.(true);
+                  }}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-[12px] font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                >
                   <Plus className="h-3.5 w-3.5" />
                   New
                 </button>
@@ -211,7 +290,8 @@ export default function StaffMessageModal({
                   <button
                     type="button"
                     onClick={onRetryLoadConversations ?? (() => {})}
-                    className="mt-3 inline-flex h-8 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-700 transition hover:bg-red-100">
+                    className="mt-3 inline-flex h-8 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-700 transition hover:bg-red-100"
+                  >
                     <RefreshCw className="h-3.5 w-3.5" />
                     Retry
                   </button>
@@ -250,7 +330,8 @@ export default function StaffMessageModal({
                             : isSpecs
                               ? "border-emerald-200 bg-emerald-50 hover:border-emerald-300"
                               : "border-gray-200 bg-white hover:border-gray-300",
-                        ].join(" ")}>
+                        ].join(" ")}
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-[13px] font-semibold text-gray-900">
@@ -261,11 +342,6 @@ export default function StaffMessageModal({
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-1">
-                            {isSpecs ? (
-                              <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                Specs sent
-                              </span>
-                            ) : null}
                             {conversation.unreadCount ? (
                               <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[#00c065] px-1.5 py-0.5 text-[10px] font-semibold text-white">
                                 {conversation.unreadCount}
@@ -296,7 +372,7 @@ export default function StaffMessageModal({
               </div>
             ) : (
               <div className="flex h-full min-h-0 flex-col">
-                <div className="shrink-0 border-b border-gray-200 px-5 py-4">
+                <div className="shrink-0 border-b border-gray-200 px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-50 text-gray-400">
@@ -323,7 +399,10 @@ export default function StaffMessageModal({
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-5">
+                <div
+                  ref={messagesContainerRef}
+                  className="min-h-0 flex-1 overflow-y-auto bg-white px-6 py-5"
+                >
                   <div className="space-y-4">
                     {!selectedConversation.messages ||
                     selectedConversation.messages.length === 0 ? (
@@ -349,6 +428,58 @@ export default function StaffMessageModal({
                           Boolean(onApplyMeasurements) &&
                           /\d/.test(message.text);
                         const canDelete = isAdmin && Boolean(onDeleteMessage);
+                        const showMenu = canDelete || canApplyMeasurements;
+                        const menuBusy = isDeleting || isApplyingMeasurement;
+
+                        const menu = showMenu ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                disabled={menuBusy}
+                                className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:bg-gray-100 focus-visible:text-gray-600 disabled:cursor-not-allowed disabled:opacity-100"
+                              >
+                                {menuBusy ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+                                ) : (
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align={isAdmin ? "end" : "start"}
+                              side="top"
+                              className="min-w-[180px]"
+                            >
+                              {canApplyMeasurements ? (
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    void onApplyMeasurements?.(message);
+                                  }}
+                                  disabled={isApplyingMeasurement}
+                                  className="text-[12px] text-emerald-700 focus:text-emerald-700"
+                                >
+                                  <ClipboardList className="mr-2 h-3.5 w-3.5" />
+                                  {isApplyingMeasurement
+                                    ? "Applying..."
+                                    : "Apply to Basic Details"}
+                                </DropdownMenuItem>
+                              ) : null}
+                              {canDelete ? (
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    void handleDeleteMessage(message.id);
+                                  }}
+                                  disabled={isDeleting}
+                                  className="text-[12px] text-red-600 focus:text-red-600"
+                                >
+                                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                  Delete
+                                </DropdownMenuItem>
+                              ) : null}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : null;
 
                         return (
                           <div
@@ -356,8 +487,11 @@ export default function StaffMessageModal({
                             className={[
                               "flex w-full items-end gap-1.5",
                               isAdmin ? "justify-end" : "justify-start",
-                            ].join(" ")}>
-                            <div className="max-w-[78%]">
+                            ].join(" ")}
+                          >
+                            {isAdmin && menu}
+
+                            <div className="max-w-[82%]">
                               <div
                                 className={[
                                   "rounded-2xl px-4 py-3 text-[13px] leading-6 shadow-sm",
@@ -365,7 +499,8 @@ export default function StaffMessageModal({
                                     ? "bg-[#00c065] text-white"
                                     : "border border-gray-200 bg-gray-50 text-gray-900",
                                   isDeleting ? "opacity-50" : "",
-                                ].join(" ")}>
+                                ].join(" ")}
+                              >
                                 <p className="whitespace-pre-wrap break-all">
                                   {message.text}
                                 </p>
@@ -374,66 +509,13 @@ export default function StaffMessageModal({
                                 className={[
                                   "mt-1 text-[11px] text-gray-400",
                                   isAdmin ? "text-right" : "text-left",
-                                ].join(" ")}>
+                                ].join(" ")}
+                              >
                                 {formatTime(message.createdAt)}
                               </p>
-
-                              {canApplyMeasurements ? (
-                                <div className="mt-1 flex justify-start">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      void onApplyMeasurements?.(message);
-                                    }}
-                                    disabled={isApplyingMeasurement}
-                                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70">
-                                    {isApplyingMeasurement ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <ClipboardList className="h-3.5 w-3.5" />
-                                    )}
-                                    {isApplyingMeasurement
-                                      ? "Applying..."
-                                      : "Apply to Basic Details"}
-                                  </button>
-                                </div>
-                              ) : null}
                             </div>
 
-                            {canDelete ? (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      isDeleting || isApplyingMeasurement
-                                    }
-                                    className="mb-5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:bg-gray-100 focus-visible:text-gray-600 disabled:cursor-not-allowed disabled:opacity-100">
-                                    {isDeleting || isApplyingMeasurement ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
-                                    ) : (
-                                      <MoreHorizontal className="h-3.5 w-3.5" />
-                                    )}
-                                  </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                  align="start"
-                                  side="top"
-                                  className="min-w-[180px]">
-                                  {canDelete ? (
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        void handleDeleteMessage(message.id);
-                                      }}
-                                      disabled={isDeleting}
-                                      className="text-[12px] text-red-600 focus:text-red-600">
-                                      <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  ) : null}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            ) : null}
+                            {!isAdmin && menu}
                           </div>
                         );
                       })
@@ -441,7 +523,7 @@ export default function StaffMessageModal({
                   </div>
                 </div>
 
-                <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-4">
+                <div className="shrink-0 border-t border-gray-200 bg-white px-6 py-4">
                   <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
                     {onFillSpecs ? (
                       <div className="mb-3 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
@@ -451,7 +533,8 @@ export default function StaffMessageModal({
                         <button
                           type="button"
                           onClick={onFillSpecs}
-                          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                        >
                           <ClipboardList className="h-3.5 w-3.5" />
                           Paste Specs
                         </button>
@@ -471,17 +554,21 @@ export default function StaffMessageModal({
                         onClick={onSend}
                         disabled={!canSend}
                         className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#00c065] px-5 text-[13px] font-semibold text-white shadow-sm transition hover:bg-[#00a054] disabled:cursor-not-allowed disabled:opacity-60"
-                        style={{ backgroundColor: canSend ? ACCENT : undefined }}
+                        style={{
+                          backgroundColor: canSend ? ACCENT : undefined,
+                        }}
                         onMouseEnter={(e) => {
                           if (canSend) {
-                            e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+                            e.currentTarget.style.backgroundColor =
+                              ACCENT_HOVER;
                           }
                         }}
                         onMouseLeave={(e) => {
                           if (canSend) {
                             e.currentTarget.style.backgroundColor = ACCENT;
                           }
-                        }}>
+                        }}
+                      >
                         {sending ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -496,6 +583,140 @@ export default function StaffMessageModal({
             )}
           </main>
         </div>
+
+        {recipientPickerOpen ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-950/35 px-4 py-6 backdrop-blur-[2px]">
+            <div className="flex h-[min(78vh,560px)] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+              <div className="h-1.5 w-full shrink-0 bg-[#00c065]" />
+
+              <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-[#00c065]">
+                    <UsersRound className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-semibold leading-5 text-gray-900">
+                      Pick a recipient
+                    </p>
+                    <p className="mt-1 text-[12px] leading-5 text-gray-500">
+                      Choose the staff member who should receive the measurement
+                      request.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRecipientPickerOpenChange?.(false);
+                    setRecipientSearch("");
+                  }}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="shrink-0 border-b border-gray-100 bg-gray-50 px-5 py-4">
+                <div className="flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 shadow-sm">
+                  <Search className="h-4 w-4 shrink-0 text-gray-400" />
+                  <input
+                    value={recipientSearch}
+                    onChange={(event) => setRecipientSearch(event.target.value)}
+                    placeholder="Search by name or email..."
+                    className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 outline-none placeholder:text-gray-400"
+                  />
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {recipientLoadError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                    <p className="text-[13px] font-semibold text-red-700">
+                      Could not load employees
+                    </p>
+                    <p className="mt-1 text-[12px] leading-5 text-red-600">
+                      {recipientLoadError}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onRetryLoadRecipients ?? (() => {})}
+                      className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-[12px] font-semibold text-red-700 transition hover:bg-red-100"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Retry
+                    </button>
+                  </div>
+                ) : loadingRecipients ? (
+                  <div className="flex h-full min-h-[220px] items-center justify-center text-center">
+                    <div>
+                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-gray-400" />
+                      <p className="mt-3 text-[13px] font-semibold text-gray-900">
+                        Loading employees
+                      </p>
+                      <p className="mt-1 text-[12px] text-gray-500">
+                        Preparing the recipient list.
+                      </p>
+                    </div>
+                  </div>
+                ) : filteredRecipients.length === 0 ? (
+                  <div className="flex h-full min-h-[220px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
+                    <div>
+                      <UserRound className="mx-auto h-8 w-8 text-gray-300" />
+                      <p className="mt-3 text-[13px] font-semibold text-gray-900">
+                        No employees found
+                      </p>
+                      <p className="mt-1 text-[12px] leading-5 text-gray-500">
+                        Try another search term or reload the staff list.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredRecipients.map((employee) => (
+                      <button
+                        key={employee.id}
+                        type="button"
+                        onClick={() => handleRecipientSelect(employee)}
+                        className="group w-full rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-[#00c065] hover:bg-emerald-50/40 hover:ring-1 hover:ring-[#00c065]/15"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-500 transition group-hover:border-emerald-200 group-hover:bg-emerald-50 group-hover:text-[#00c065]">
+                            <UserRound className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-semibold text-gray-900">
+                                  {employee.name}
+                                </p>
+                                {employee.email ? (
+                                  <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px] text-gray-500">
+                                    <Mail className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">
+                                      {employee.email}
+                                    </span>
+                                  </p>
+                                ) : (
+                                  <p className="mt-0.5 text-[11px] text-gray-400">
+                                    No email available
+                                  </p>
+                                )}
+                              </div>
+                              <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-1 text-[10px] font-semibold text-gray-500 transition group-hover:border-emerald-200 group-hover:text-[#00c065]">
+                                Select
+                              </span>
+                            </div>
+
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

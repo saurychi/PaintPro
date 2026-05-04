@@ -70,8 +70,6 @@ type CostEstimationResponse = {
 };
 
 const ACCENT = "#00c065";
-const ACCENT_SOFT = "#e6f9ef";
-const ACCENT_BORDER = "#b7efcf";
 
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
@@ -312,12 +310,12 @@ export default function CostEstimationPage() {
   }, [data, markupInput]);
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
+    <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+      <div className="flex h-full flex-col gap-3 overflow-hidden px-6 pt-5 pb-4">
         {/* page header */}
-        <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+        <div className="flex items-center gap-2 text-[18px] font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
           <span>Project</span>
-          <ChevronRight className="h-5 w-5 text-gray-300 shrink-0" aria-hidden />
+          <ChevronRight className="h-5 w-5 text-slate-300 dark:text-slate-500 shrink-0" aria-hidden />
           <span>Cost Estimation</span>
         </div>
 
@@ -326,22 +324,21 @@ export default function CostEstimationPage() {
           <div className="flex min-h-0 flex-col gap-4">
 
             {/* ── Cost section (compact) ─────────────────────────────────── */}
-            <section className="shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <section className="shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 shadow-sm">
               <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
 
               {/* section header */}
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 px-5 py-3">
                 <div className="flex items-center gap-2">
                   <span
                     className="h-2 w-2 rounded-full"
                     style={{ backgroundColor: ACCENT }}
                     aria-hidden="true"
                   />
-                  <p className="text-sm font-semibold text-gray-900">Cost Summary</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Cost Summary</p>
                 </div>
                 <div
-                  className="inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-semibold"
-                  style={{ borderColor: ACCENT_BORDER, backgroundColor: ACCENT_SOFT, color: ACCENT }}>
+                  className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                   Pricing Review
                 </div>
               </div>
@@ -349,104 +346,95 @@ export default function CostEstimationPage() {
               {/* compact cost row */}
               <div className="px-5 py-3">
                 {loading ? (
-                  <div className="flex items-center gap-2 text-[13px] text-gray-500">
+                  <div className="flex items-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading...
                   </div>
                 ) : !pricingSummary ? (
-                  <div className="text-[13px] text-gray-500">No cost data available.</div>
+                  <div className="text-[13px] text-slate-500 dark:text-slate-400">No cost data available.</div>
                 ) : (
-                  <div className="flex flex-wrap items-center gap-x-0 gap-y-2">
-                    {/* Materials */}
-                    <div className="flex min-w-[130px] flex-col px-4 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                        Materials
-                      </span>
-                      <span className="mt-1 text-[15px] font-semibold text-gray-800">
-                        {formatCurrency(pricingSummary.materialTotal)}
-                      </span>
-                    </div>
+                  <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]">
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_20px_minmax(0,1fr)] items-center gap-3">
+                      {/* Materials */}
+                      <div className="flex min-w-0 flex-col rounded-lg px-3 py-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          Materials
+                        </span>
+                        <span className="mt-1 truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                          {formatCurrency(pricingSummary.materialTotal)}
+                        </span>
+                      </div>
 
-                    <span className="text-[16px] font-light text-gray-300">+</span>
+                      <span className="flex justify-center text-[16px] font-light text-slate-300 dark:text-slate-500">+</span>
 
-                    {/* Labor */}
-                    <div className="flex min-w-[130px] flex-col px-4 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                        Labor
-                      </span>
-                      <span className="mt-1 text-[15px] font-semibold text-gray-800">
-                        {formatCurrency(pricingSummary.laborTotal)}
-                      </span>
-                    </div>
+                      {/* Labor */}
+                      <div className="flex min-w-0 flex-col rounded-lg px-3 py-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          Labor
+                        </span>
+                        <span className="mt-1 truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                          {formatCurrency(pricingSummary.laborTotal)}
+                        </span>
+                      </div>
 
-                    <span className="text-[16px] font-light text-gray-300">=</span>
+                      <span className="flex justify-center text-[16px] font-light text-slate-300 dark:text-slate-500">=</span>
 
-                    {/* Base cost */}
-                    <div
-                      className="flex min-w-[130px] flex-col rounded-lg px-4 py-2"
-                      style={{ backgroundColor: ACCENT_SOFT }}>
-                      <span
-                        className="text-[10px] font-semibold uppercase tracking-wide"
-                        style={{ color: ACCENT }}>
-                        Base Cost
-                      </span>
-                      <span className="mt-1 text-[15px] font-semibold text-gray-900">
-                        {formatCurrency(pricingSummary.baseCost)}
-                      </span>
-                    </div>
-
-                    {/* divider */}
-                    <div className="mx-4 hidden h-10 w-px bg-gray-200 lg:block" />
-
-                    {/* Markup rate input */}
-                    <div className="flex flex-col px-2 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                        Markup Rate
-                      </span>
-                      <div className="relative mt-1">
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={markupInput}
-                          onChange={(e) => {
-                            setMarkupInput(e.target.value);
-                            setIsDirty(true);
-                          }}
-                          className="h-8 w-[76px] rounded-md border border-gray-200 bg-white pl-2.5 pr-6 text-[13px] font-medium text-gray-900 outline-none transition focus:border-emerald-400"
-                        />
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-gray-400">
-                          %
+                      {/* Base cost */}
+                      <div className="flex min-w-0 flex-col rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/15">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                          Base Cost
+                        </span>
+                        <span className="mt-1 truncate text-[15px] font-semibold text-slate-900 dark:text-slate-100">
+                          {formatCurrency(pricingSummary.baseCost)}
                         </span>
                       </div>
                     </div>
 
-                    <span className="text-[16px] font-light text-gray-300">+</span>
+                    <div className="hidden h-10 w-px bg-slate-200 dark:bg-slate-700 xl:block" />
 
-                    {/* Markup amount */}
-                    <div className="flex min-w-[130px] flex-col px-4 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                        Markup Amount
-                      </span>
-                      <span className="mt-1 text-[15px] font-semibold text-gray-800">
-                        {formatCurrency(pricingSummary.markupPrice)}
-                      </span>
-                    </div>
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3">
+                      {/* Markup rate input */}
+                      <div className="flex min-w-0 flex-col py-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          Markup Rate
+                        </span>
+                        <div className="relative mt-1">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={markupInput}
+                            onChange={(e) => {
+                              setMarkupInput(e.target.value);
+                              setIsDirty(true);
+                            }}
+                            className="h-8 w-full max-w-[126px] rounded-md border border-slate-200 bg-white pl-2.5 pr-6 text-[13px] font-medium text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                          />
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-slate-400 dark:text-slate-500">
+                            %
+                          </span>
+                        </div>
+                      </div>
 
-                    <span className="text-[16px] font-light text-gray-300">=</span>
+                      {/* Markup amount */}
+                      <div className="flex min-w-0 flex-col px-3 py-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          Markup Amount
+                        </span>
+                        <span className="mt-1 truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                          {formatCurrency(pricingSummary.markupPrice)}
+                        </span>
+                      </div>
 
-                    {/* Quotation total */}
-                    <div
-                      className="flex min-w-[140px] flex-col rounded-lg px-4 py-2"
-                      style={{ backgroundColor: ACCENT_SOFT }}>
-                      <span
-                        className="text-[10px] font-semibold uppercase tracking-wide"
-                        style={{ color: ACCENT }}>
-                        Quotation Total
-                      </span>
-                      <span className="mt-1 text-[16px] font-bold text-gray-900">
-                        {formatCurrency(pricingSummary.quotationTotal)}
-                      </span>
+                      {/* Quotation total */}
+                      <div className="flex min-w-0 flex-col rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/15">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                          Quotation Total
+                        </span>
+                        <span className="mt-1 truncate text-[16px] font-bold text-slate-900 dark:text-slate-100">
+                          {formatCurrency(pricingSummary.quotationTotal)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -454,19 +442,19 @@ export default function CostEstimationPage() {
             </section>
 
             {/* ── Breakdown section (scrollable) ─────────────────────────── */}
-            <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 shadow-sm">
               <div className="h-1 w-full shrink-0" style={{ backgroundColor: ACCENT }} />
 
-              <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+              <div className="shrink-0 border-b border-slate-200 dark:border-slate-700 px-5 py-3">
                 <div className="flex items-center gap-2">
                   <span
                     className="h-2 w-2 rounded-full"
                     style={{ backgroundColor: ACCENT }}
                     aria-hidden="true"
                   />
-                  <p className="text-sm font-semibold text-gray-900">Main Task Breakdown</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Main Task Breakdown</p>
                 </div>
-                <p className="mt-1 text-sm text-gray-600">
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                   Detailed cost breakdown by main task — materials, equipment, and subtasks.
                 </p>
               </div>
@@ -475,15 +463,15 @@ export default function CostEstimationPage() {
                 <div className="h-full overflow-y-auto pr-2 green-scrollbar space-y-2.5">
                   {loading ? (
                     <div className="flex items-center justify-center py-10">
-                      <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                        <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                        <span className="text-sm font-medium text-gray-700">
+                      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-5 py-4 shadow-sm">
+                        <Loader2 className="h-5 w-5 animate-spin text-slate-700 dark:text-slate-200" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
                           Loading breakdown...
                         </span>
                       </div>
                     </div>
                   ) : !data || data.mainTasks.length === 0 ? (
-                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                    <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                       No task breakdown data found.
                     </div>
                   ) : (
@@ -509,30 +497,30 @@ export default function CostEstimationPage() {
                       return (
                         <div
                           key={task.projectTaskId}
-                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                          className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                           {/* task header */}
                           <button
                             type="button"
                             onClick={() => toggleTask(task.projectTaskId)}
                             className={`w-full px-4 py-3 text-left transition ${
-                              isOpen ? "bg-emerald-50/40" : "bg-white hover:bg-gray-50"
+                              isOpen ? "bg-emerald-50/50 dark:bg-emerald-500/12" : "bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/80"
                             }`}>
                             <div className="flex items-center justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="text-[14px] font-semibold text-gray-900">
+                                <div className="text-[14px] font-semibold text-slate-900 dark:text-slate-100">
                                   {task.title}
                                 </div>
-                                <div className="mt-0.5 text-[11px] text-gray-500">
+                                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                                   Materials: {formatCurrency(task.materialTotal)} &middot; Labor:{" "}
                                   {formatCurrency(task.laborTotal)}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-[13px] font-semibold text-gray-900">
+                                <span className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                                   {formatCurrency(task.totalCost)}
                                 </span>
                                 <ChevronDown
-                                  className={`h-4 w-4 text-gray-400 transition-transform ${
+                                  className={`h-4 w-4 text-slate-400 dark:text-slate-500 transition-transform ${
                                     isOpen ? "rotate-180" : ""
                                   }`}
                                 />
@@ -544,32 +532,32 @@ export default function CostEstimationPage() {
                           {isOpen && (
                             <div className="space-y-2 px-4 pb-3">
                               {/* materials subsection */}
-                              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                                 <button
                                   type="button"
                                   onClick={() =>
                                     toggleSection(task.projectTaskId, "materials")
                                   }
-                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-gray-50">
+                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-[12px] font-semibold text-gray-900">
+                                    <span className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">
                                       Materials
                                     </span>
-                                    <span className="text-[11px] text-gray-400">
+                                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
                                       {task.materials.length} item{task.materials.length === 1 ? "" : "s"}
                                     </span>
                                   </div>
                                   <ChevronDown
-                                    className={`h-3.5 w-3.5 text-gray-400 transition-transform ${
+                                    className={`h-3.5 w-3.5 text-slate-400 dark:text-slate-500 transition-transform ${
                                       materialsOpen ? "rotate-180" : ""
                                     }`}
                                   />
                                 </button>
 
                                 {materialsOpen && (
-                                  <div className="border-t border-gray-200 px-4 py-2.5">
+                                  <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-2.5">
                                     {task.materials.length === 0 ? (
-                                      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-[12px] text-gray-500">
+                                      <div className="rounded-md border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 px-3 py-2.5 text-[12px] text-slate-500 dark:text-slate-400">
                                         No materials assigned.
                                       </div>
                                     ) : (
@@ -577,22 +565,22 @@ export default function CostEstimationPage() {
                                         {task.materials.map((material) => (
                                           <div
                                             key={material.projectTaskMaterialId}
-                                            className="grid grid-cols-[minmax(0,1fr)_80px_100px_100px] items-center gap-2 rounded-md border border-gray-100 bg-white px-3 py-2">
+                                            className="grid grid-cols-[minmax(0,1fr)_80px_100px_100px] items-center gap-2 rounded-md border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/70 px-3 py-2">
                                             <div>
-                                              <div className="text-[12px] font-medium text-gray-900">
+                                              <div className="text-[12px] font-medium text-slate-900 dark:text-slate-100">
                                                 {material.name}
                                               </div>
-                                              <div className="text-[11px] text-gray-400">
+                                              <div className="text-[11px] text-slate-400 dark:text-slate-500">
                                                 {material.unit || "—"}
                                               </div>
                                             </div>
-                                            <div className="text-[11px] text-gray-600 text-right">
+                                            <div className="text-[11px] text-slate-600 dark:text-slate-300 text-right">
                                               Qty {material.estimatedQuantity}
                                             </div>
-                                            <div className="text-[11px] text-gray-600 text-right">
+                                            <div className="text-[11px] text-slate-600 dark:text-slate-300 text-right">
                                               {formatCurrency(material.unitCost)}
                                             </div>
-                                            <div className="text-[12px] font-medium text-gray-800 text-right">
+                                            <div className="text-[12px] font-medium text-slate-800 dark:text-slate-100 text-right">
                                               {formatCurrency(material.estimatedCost)}
                                             </div>
                                           </div>
@@ -604,32 +592,32 @@ export default function CostEstimationPage() {
                               </div>
 
                               {/* equipment subsection */}
-                              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                                 <button
                                   type="button"
                                   onClick={() =>
                                     toggleSection(task.projectTaskId, "equipment")
                                   }
-                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-gray-50">
+                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-[12px] font-semibold text-gray-900">
+                                    <span className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">
                                       Equipment
                                     </span>
-                                    <span className="text-[11px] text-gray-400">
+                                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
                                       {equipmentItems.length} item{equipmentItems.length === 1 ? "" : "s"}
                                     </span>
                                   </div>
                                   <ChevronDown
-                                    className={`h-3.5 w-3.5 text-gray-400 transition-transform ${
+                                    className={`h-3.5 w-3.5 text-slate-400 dark:text-slate-500 transition-transform ${
                                       equipmentOpen ? "rotate-180" : ""
                                     }`}
                                   />
                                 </button>
 
                                 {equipmentOpen && (
-                                  <div className="border-t border-gray-200 px-4 py-2.5">
+                                  <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-2.5">
                                     {equipmentItems.length === 0 ? (
-                                      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-[12px] text-gray-500">
+                                      <div className="rounded-md border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 px-3 py-2.5 text-[12px] text-slate-500 dark:text-slate-400">
                                         No equipment assigned.
                                       </div>
                                     ) : (
@@ -637,19 +625,19 @@ export default function CostEstimationPage() {
                                         {equipmentItems.map((eq) => (
                                           <div
                                             key={`${eq.projectSubTaskId}-${eq.id}`}
-                                            className="grid grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)] items-center gap-2 rounded-md border border-gray-100 bg-white px-3 py-2">
+                                            className="grid grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)] items-center gap-2 rounded-md border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/70 px-3 py-2">
                                             <div>
-                                              <div className="text-[12px] font-medium text-gray-900">
+                                              <div className="text-[12px] font-medium text-slate-900 dark:text-slate-100">
                                                 {eq.name}
                                               </div>
-                                              <div className="text-[11px] text-gray-400">
+                                              <div className="text-[11px] text-slate-400 dark:text-slate-500">
                                                 {eq.subTaskTitle}
                                               </div>
                                             </div>
-                                            <div className="text-[11px] text-gray-600 text-right">
+                                            <div className="text-[11px] text-slate-600 dark:text-slate-300 text-right">
                                               Qty {eq.quantity}
                                             </div>
-                                            <div className="text-[11px] text-gray-500 text-right">
+                                            <div className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
                                               {eq.notes || "—"}
                                             </div>
                                           </div>
@@ -661,32 +649,32 @@ export default function CostEstimationPage() {
                               </div>
 
                               {/* subtasks subsection */}
-                              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                                 <button
                                   type="button"
                                   onClick={() =>
                                     toggleSection(task.projectTaskId, "subtasks")
                                   }
-                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-gray-50">
+                                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-[12px] font-semibold text-gray-900">
+                                    <span className="text-[12px] font-semibold text-slate-900 dark:text-slate-100">
                                       Subtasks
                                     </span>
-                                    <span className="text-[11px] text-gray-400">
+                                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
                                       {task.subtasks.length} item{task.subtasks.length === 1 ? "" : "s"}
                                     </span>
                                   </div>
                                   <ChevronDown
-                                    className={`h-3.5 w-3.5 text-gray-400 transition-transform ${
+                                    className={`h-3.5 w-3.5 text-slate-400 dark:text-slate-500 transition-transform ${
                                       subtasksOpen ? "rotate-180" : ""
                                     }`}
                                   />
                                 </button>
 
                                 {subtasksOpen && (
-                                  <div className="border-t border-gray-200 px-4 py-2.5">
+                                  <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-2.5">
                                     {task.subtasks.length === 0 ? (
-                                      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-[12px] text-gray-500">
+                                      <div className="rounded-md border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 px-3 py-2.5 text-[12px] text-slate-500 dark:text-slate-400">
                                         No subtasks assigned.
                                       </div>
                                     ) : (
@@ -694,11 +682,11 @@ export default function CostEstimationPage() {
                                         {task.subtasks.map((subtask) => (
                                           <div
                                             key={subtask.projectSubTaskId}
-                                            className="rounded-md border border-gray-100 bg-white px-3 py-2">
-                                            <div className="text-[12px] font-medium text-gray-900">
+                                            className="rounded-md border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/70 px-3 py-2">
+                                            <div className="text-[12px] font-medium text-slate-900 dark:text-slate-100">
                                               {subtask.title}
                                             </div>
-                                            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-600">
+                                            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-600 dark:text-slate-300">
                                               <span>Hours: {subtask.estimatedHours}</span>
                                               <span>
                                                 Wage/hr: {formatCurrency(subtask.hourlyWageTotal)}
@@ -707,12 +695,12 @@ export default function CostEstimationPage() {
                                                 Start:{" "}
                                                 {formatDateTime(subtask.scheduledStartDatetime)}
                                               </span>
-                                              <span className="font-medium text-gray-800">
+                                              <span className="font-medium text-slate-800 dark:text-slate-100">
                                                 {formatCurrency(subtask.laborCost)}
                                               </span>
                                             </div>
                                             {subtask.assignedStaff.length > 0 && (
-                                              <div className="mt-1 text-[11px] text-gray-400">
+                                              <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
                                                 Staff:{" "}
                                                 {subtask.assignedStaff
                                                   .map(
@@ -735,7 +723,6 @@ export default function CostEstimationPage() {
                       );
                     })
                   )}
-                  <div className="h-2" />
                 </div>
               </div>
             </section>
@@ -743,10 +730,10 @@ export default function CostEstimationPage() {
 
           {/* sidebar — same pattern as all other job-creation pages */}
           <aside className="h-full min-h-0 flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
               <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">{projectCode}</div>
-                <div className="mt-1 text-[12px] text-gray-500">{projectTitle}</div>
+                <div className="text-[16px] font-semibold text-slate-900 dark:text-slate-100">{projectCode}</div>
+                <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">{projectTitle}</div>
               </div>
             </div>
 
@@ -757,12 +744,12 @@ export default function CostEstimationPage() {
         </div>
 
         {/* footer nav */}
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleGoBack}
             disabled={isNavigating !== null}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-700 transition duration-150 hover:bg-slate-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
             {isNavigating === "back" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -790,11 +777,11 @@ export default function CostEstimationPage() {
 
       {/* save confirm modal */}
       {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-900">Save changes?</h3>
-              <p className="mt-1 text-sm text-gray-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 shadow-sm">
+            <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Save changes?</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                 Do you want to save your cost estimation changes before leaving?
               </p>
             </div>
@@ -807,14 +794,14 @@ export default function CostEstimationPage() {
                   setPendingAction(null);
                   setIsNavigating(null);
                 }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
                 Cancel
               </button>
 
               <button
                 type="button"
                 onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
                 Don&apos;t Save
               </button>
 
@@ -846,14 +833,23 @@ export default function CostEstimationPage() {
           background: #eaf7e4;
           border-radius: 999px;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-track {
+          background: #0f172a;
+        }
         .green-scrollbar::-webkit-scrollbar-thumb {
           background: ${ACCENT};
           border-radius: 999px;
           border: 2px solid #eaf7e4;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-thumb {
+          border-color: #0f172a;
+        }
         .green-scrollbar {
           scrollbar-color: ${ACCENT} #eaf7e4;
           scrollbar-width: thin;
+        }
+        .dark .green-scrollbar {
+          scrollbar-color: ${ACCENT} #0f172a;
         }
       `}</style>
     </div>

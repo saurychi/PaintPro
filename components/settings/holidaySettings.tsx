@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 
 const btnBase =
   "inline-flex items-center justify-center rounded-lg text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25";
 const btnPrimary = `${btnBase} bg-[#00c065] px-3 h-9 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`;
+const btnSecondary = `${btnBase} border border-gray-200 bg-white px-3 h-9 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60`;
 
 type CountryOption = { code: string; name: string };
 
@@ -21,6 +23,8 @@ export default function HolidaySettings() {
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -80,7 +84,29 @@ export default function HolidaySettings() {
     setDraftEnabled((current) => !current);
   };
 
-  const handleSave = () => {
+  async function syncHolidays(args: { enabled: boolean; countryCode: string }) {
+    const response = await fetch("/api/holidays/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const details = typeof data?.details === "string" ? data.details : "";
+      const message = data?.error || "Failed to sync holidays.";
+      throw new Error(details ? `${message} ${details}` : message);
+    }
+
+    return data as {
+      insertedCount?: number;
+      updatedCount?: number;
+      deactivatedCount?: number;
+    };
+  }
+
+  const handleSave = async () => {
     setError(null);
     setMessage(null);
 
@@ -89,16 +115,57 @@ export default function HolidaySettings() {
       return;
     }
 
-    saveSettings({
-      enabled: draftEnabled,
-      countryCode: draftCountry,
-    });
+    try {
+      setSaving(true);
 
-    setMessage(
-      draftEnabled
-        ? "Holidays will now be marked as unavailable on calendars."
-        : "Holidays are no longer applied to the schedule.",
-    );
+      const saved = saveSettings({
+        enabled: draftEnabled,
+        countryCode: draftCountry,
+      });
+
+      const nextSettings = saved ?? {
+        enabled: draftEnabled,
+        countryCode: draftCountry,
+      };
+
+      const syncResult = await syncHolidays(nextSettings);
+
+      setMessage(
+        nextSettings.enabled
+          ? `Holiday sync complete: ${syncResult.insertedCount ?? 0} added, ${syncResult.updatedCount ?? 0} refreshed.`
+          : `Holidays are off. ${syncResult.deactivatedCount ?? 0} synced holiday rows deactivated.`,
+      );
+      toast.success("Holiday settings saved.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save holiday settings.";
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    setError(null);
+    setMessage(null);
+
+    if (!settings.enabled || !settings.countryCode) {
+      setError("Turn holidays on and choose a country before syncing.");
+      return;
+    }
+
+    try {
+      setSyncing(true);
+      const syncResult = await syncHolidays(settings);
+      setMessage(
+        `Holiday sync complete: ${syncResult.insertedCount ?? 0} added, ${syncResult.updatedCount ?? 0} refreshed.`,
+      );
+      toast.success("Holiday sync complete.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to sync holidays.";
+      toast.error(message);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -177,8 +244,21 @@ export default function HolidaySettings() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={handleSave} className={btnPrimary}>
-            Save
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || syncing}
+            className={btnPrimary}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={handleManualSync}
+            disabled={saving || syncing || !settings.enabled}
+            className={btnSecondary}
+          >
+            {syncing ? "Syncing..." : "Sync holidays"}
           </button>
         </div>
 
@@ -190,8 +270,8 @@ export default function HolidaySettings() {
         </div>
 
         <p className="text-xs text-gray-500">
-          Holiday data is fetched from the public Nager.Date API and cached on
-          the server for 24 hours.
+          Holiday data is synced from the public Nager.Date API into unavailable
+          days for the current year and next year.
         </p>
 
         {error ? (

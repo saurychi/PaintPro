@@ -13,6 +13,7 @@ import type { DateClickArg } from "@fullcalendar/interaction";
 import { BriefcaseBusiness, CalendarDays, Loader2 } from "lucide-react";
 
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
+import { useProjectNow } from "@/lib/time/useProjectNow";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -104,8 +105,8 @@ function isFCEvent(event: FCEvent | null): event is FCEvent {
 
 function renderEventContent(info: EventContentArg) {
   return (
-    <div className="flex w-full items-center overflow-hidden px-1.5 py-0.5">
-      <span className="truncate text-[11px] font-semibold leading-tight">
+    <div className="flex w-full items-center overflow-hidden px-1 py-0.5">
+      <span className="truncate text-[10px] font-semibold leading-none">
         {info.event.title}
       </span>
     </div>
@@ -138,6 +139,7 @@ function getUnavailableTypeLabel(day: ScheduleUnavailableDay) {
 }
 
 export default function ClientSchedule() {
+  const { now: projectNow, todayKey } = useProjectNow();
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
   const [fcEvents, setFcEvents] = useState<FCEvent[]>([]);
   const [unavailableDays, setUnavailableDays] = useState<
@@ -184,7 +186,9 @@ export default function ClientSchedule() {
 
         if (cancelled) return;
 
-        const nextProjects: ScheduleProject[] = Array.isArray(projectsData?.projects)
+        const nextProjects: ScheduleProject[] = Array.isArray(
+          projectsData?.projects,
+        )
           ? projectsData.projects
           : [];
 
@@ -195,7 +199,9 @@ export default function ClientSchedule() {
             ? unavailableData.unavailableDays
             : [],
         );
-        setFcEvents(nextProjects.map((project) => toFCEvent(project)).filter(isFCEvent));
+        setFcEvents(
+          nextProjects.map((project) => toFCEvent(project)).filter(isFCEvent),
+        );
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to load client schedule:", error);
@@ -261,7 +267,8 @@ export default function ClientSchedule() {
 
       const cursor = new Date(`${startKey}T00:00:00`);
       const end = new Date(`${endKey}T00:00:00`);
-      if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) continue;
+      if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime()))
+        continue;
 
       while (cursor <= end) {
         const key = cursor.toISOString().slice(0, 10);
@@ -294,9 +301,10 @@ export default function ClientSchedule() {
     ? (unavailableByDate.get(selectedDate) ?? [])
     : [];
   const upcomingUnavailableDays = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return unavailableDays.filter((day) => day.blockedDate >= today).slice(0, 8);
-  }, [unavailableDays]);
+    return unavailableDays
+      .filter((day) => day.blockedDate >= todayKey)
+      .slice(0, 8);
+  }, [unavailableDays, todayKey]);
 
   const handleEventClick = (info: EventClickArg) => {
     const dateKey = (info.event.startStr || "").slice(0, 10);
@@ -310,120 +318,198 @@ export default function ClientSchedule() {
   return (
     <>
       <style>{`
-        .fc {
-          --fc-border-color: #f3f4f6;
-          --fc-today-bg-color: #f0fdf4;
+        .client-schedule-page .fc {
+          --fc-border-color: #e5e7eb;
+          --fc-today-bg-color: #ecfdf5;
           --fc-page-bg-color: #ffffff;
           --fc-neutral-bg-color: #f9fafb;
           font-family: inherit;
           height: 100%;
         }
 
-        .fc .fc-toolbar-title {
-          font-size: 1.05rem;
+        .client-schedule-page .fc .fc-toolbar-title {
+          font-size: 0.95rem;
           font-weight: 600;
           color: #111827;
         }
 
-        .fc .fc-button {
+        .client-schedule-page .fc .fc-button {
           background: #ffffff !important;
           border: 1px solid #e5e7eb !important;
           color: #374151 !important;
           box-shadow: 0 1px 2px rgba(0,0,0,.05) !important;
-          border-radius: 0.75rem !important;
-          padding: 0.42rem 0.7rem !important;
-          font-size: 0.8rem !important;
+          border-radius: 0.65rem !important;
+          padding: 0.3rem 0.58rem !important;
+          font-size: 0.72rem !important;
           font-weight: 600 !important;
-          transition: background 0.15s !important;
+          transition: background 0.15s, border-color 0.15s !important;
         }
 
-        .fc .fc-button:hover {
+        .client-schedule-page .fc .fc-button:hover {
           background: #f9fafb !important;
+          border-color: #d1d5db !important;
         }
 
-        .fc .fc-button:focus {
+        .client-schedule-page .fc .fc-button:focus {
           box-shadow: none !important;
         }
 
-        .fc .fc-col-header-cell {
-          padding: 6px 0;
-          font-size: 11px;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-          color: #9ca3af;
+        .client-schedule-page .fc .fc-toolbar.fc-header-toolbar {
+          margin-bottom: 0.45rem;
+        }
+
+        .client-schedule-page .fc .fc-col-header-cell {
+          padding: 0.3rem 0;
+          font-size: 0.65rem;
+          font-weight: 700;
+          letter-spacing: 0.06em;
+          color: #6b7280;
           text-transform: uppercase;
-          border-color: #f3f4f6;
+          border-color: #e5e7eb;
+          background: #f9fafb;
+        }
+
+        .client-schedule-page .fc .fc-daygrid-day {
           background: #ffffff;
         }
 
-        .fc .fc-daygrid-day-number {
-          font-size: 12px;
+        .client-schedule-page .fc .fc-daygrid-day-frame {
+          min-height: 0 !important;
+          padding: 0.12rem;
+        }
+
+        .client-schedule-page .fc .fc-daygrid-day-top {
+          min-height: 1.25rem;
+        }
+
+        .client-schedule-page .fc .fc-daygrid-day-number {
+          font-size: 0.67rem;
           font-weight: 600;
-          color: #374151;
-          padding: 6px 8px;
+          color: #4b5563;
+          padding: 0.18rem 0.32rem;
         }
 
-        .fc .fc-day_other .fc-daygrid-day-number {
-          color: #d1d5db;
+        .client-schedule-page .fc .fc-day_other {
+          background: #f9fafb;
         }
 
-        .fc .fc-daygrid-day.fc-day-today {
-          background-color: #f0fdf4 !important;
+        .client-schedule-page .fc .fc-day_other .fc-daygrid-day-number {
+          color: #cbd5e1;
         }
 
-        .fc .fc-event {
-          border-radius: 6px !important;
+        .client-schedule-page .fc .fc-daygrid-day.fc-day-today {
+          background-color: #ecfdf5 !important;
+        }
+
+        .client-schedule-page .fc .fc-daygrid-day-events {
+          margin: 0 0.1rem 0.1rem;
+        }
+
+        .client-schedule-page .fc .fc-daygrid-event-harness {
+          margin-top: 0.08rem;
+        }
+
+        .client-schedule-page .fc .fc-event {
+          border-radius: 0.35rem !important;
           cursor: pointer;
+          min-height: 1.05rem;
         }
 
-        .fc .fc-event:hover {
-          filter: brightness(0.95);
+        .client-schedule-page .fc .fc-event:hover {
+          filter: brightness(0.97);
         }
 
-        .fc .fc-daygrid-event-harness {
-          margin-top: 2px;
-        }
-
-        .fc .fc-toolbar.fc-header-toolbar {
-          margin-bottom: 12px;
-        }
-
-        .fc .fc-scrollgrid,
-        .fc .fc-scrollgrid table {
-          border-radius: 0.75rem;
+        .client-schedule-page .fc .fc-scrollgrid,
+        .client-schedule-page .fc .fc-scrollgrid table {
+          border-radius: 0.7rem;
           overflow: hidden;
         }
 
-        .fc .fc-event.fc-client-holiday-event {
-          border-radius: 6px !important;
+        .client-schedule-page .fc .fc-scroller {
+          overflow: hidden !important;
+        }
+
+        .client-schedule-page .fc .fc-event.fc-client-holiday-event {
+          border-radius: 0.35rem !important;
           border: 1px solid #fde68a !important;
+        }
+
+        .dark .client-schedule-page .fc {
+          --fc-border-color: #334155;
+          --fc-today-bg-color: rgba(0, 192, 101, 0.12);
+          --fc-page-bg-color: #111827;
+          --fc-neutral-bg-color: #1f2937;
+        }
+
+        .dark .client-schedule-page .fc .fc-toolbar-title {
+          color: #f8fafc;
+        }
+
+        .dark .client-schedule-page .fc .fc-button {
+          background: #111827 !important;
+          border-color: #334155 !important;
+          color: #e5e7eb !important;
+          box-shadow: none !important;
+        }
+
+        .dark .client-schedule-page .fc .fc-button:hover {
+          background: #1f2937 !important;
+          border-color: #475569 !important;
+        }
+
+        .dark .client-schedule-page .fc .fc-col-header-cell {
+          background: #111827;
+          border-color: #334155;
+          color: #94a3b8;
+        }
+
+        .dark .client-schedule-page .fc .fc-daygrid-day {
+          background: #111827;
+        }
+
+        .dark .client-schedule-page .fc .fc-day_other {
+          background: #0f172a;
+        }
+
+        .dark .client-schedule-page .fc .fc-daygrid-day-number {
+          color: #cbd5e1;
+        }
+
+        .dark .client-schedule-page .fc .fc-day_other .fc-daygrid-day-number {
+          color: #64748b;
+        }
+
+        .dark .client-schedule-page .fc .fc-daygrid-day.fc-day-today {
+          background-color: rgba(0, 192, 101, 0.12) !important;
         }
       `}</style>
 
-      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden">
-        <h1 className="text-xl font-semibold text-gray-900">Schedule</h1>
+      <div className="client-schedule-page h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden p-4 text-gray-900 dark:text-gray-100">
+        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
+          Schedule
+        </h1>
 
-        <div className="mt-4 min-h-0 h-[calc(100%-2.75rem)]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="min-h-0 flex-1 overflow-hidden p-4">
+        <div className="mt-3 min-h-0 h-[calc(100%-2.25rem)]">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="min-h-0 flex-1 overflow-hidden p-3">
               {loading ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
                     <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                    <span className="text-sm font-medium text-gray-700">
+                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                       Loading schedule...
                     </span>
                   </div>
                 </div>
               ) : (
                 <div className="grid h-full min-h-0 grid-cols-12 gap-3">
-                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:col-span-9">
-                    <div className="mb-4 flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-9">
+                    <div className="mb-2.5 flex items-start justify-between gap-3 border-b border-gray-200 pb-2.5 dark:border-slate-700">
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                           Monthly Schedule
                         </p>
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                           Calendar view of your scheduled projects, holidays,
                           and blocked dates.
                         </p>
@@ -446,7 +532,7 @@ export default function ClientSchedule() {
                               className="inline-block h-2.5 w-2.5 rounded-full"
                               style={{ backgroundColor: item.color }}
                             />
-                            <span className="text-[11px] font-medium text-gray-600">
+                            <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">
                               {item.label}
                             </span>
                           </div>
@@ -454,12 +540,13 @@ export default function ClientSchedule() {
                       </div>
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white p-2.5">
+                    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-950">
                       <div className="h-full min-h-0">
                         <FullCalendar
+                          key={todayKey}
                           plugins={[dayGridPlugin, interactionPlugin]}
                           initialView="dayGridMonth"
-                          initialDate={new Date()}
+                          initialDate={projectNow}
                           events={[...fcEvents, ...unavailableEvents]}
                           eventClick={handleEventClick}
                           dateClick={handleDateClick}
@@ -473,20 +560,22 @@ export default function ClientSchedule() {
                           height="100%"
                           contentHeight="100%"
                           expandRows={true}
-                          dayMaxEvents={2}
+                          dayMaxEvents={1}
+                          fixedWeekCount={false}
+                          moreLinkClick="popover"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <aside className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:col-span-3">
-                    <section className="shrink-0 pb-5">
-                      <p className="text-sm font-semibold text-gray-900">
+                  <aside className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-3">
+                    <section className="shrink-0 pb-3">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                         Current Project Status
                       </p>
 
-                      <div className="mt-3 space-y-3">
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-300">
                           <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
                           <span>
                             Status:{" "}
@@ -495,39 +584,39 @@ export default function ClientSchedule() {
                         </div>
 
                         <div>
-                          <div className="text-base font-bold text-gray-900">
+                          <div className="text-sm font-bold text-gray-900 dark:text-gray-50">
                             {currentProject?.projectCode ?? "â€”"}
                           </div>
-                          <div className="mt-1 text-sm leading-5 text-gray-600">
+                          <div className="mt-0.5 text-xs leading-4 text-gray-600 dark:text-gray-400">
                             {currentProject?.title ?? "No project selected"}
                           </div>
                         </div>
                       </div>
                     </section>
 
-                    <div className="border-t border-gray-200" />
+                    <div className="border-t border-gray-200 dark:border-slate-700" />
 
-                    <section className="flex min-h-0 basis-[34%] flex-col pt-5">
-                      <p className="text-sm font-semibold text-gray-900">
+                    <section className="flex min-h-0 basis-[34%] flex-col pt-3">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                         Unavailable Days
                       </p>
 
-                      <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-                        <div className="divide-y divide-gray-200">
+                      <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+                        <div className="divide-y divide-gray-200 dark:divide-slate-700">
                           {upcomingUnavailableDays.length ? (
                             upcomingUnavailableDays.map((day) => (
                               <button
                                 key={day.id}
                                 type="button"
-                                className="block w-full px-1 py-3 text-left transition hover:bg-gray-50"
+                                className="block w-full rounded-lg px-1.5 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800/70"
                                 onClick={() => setSelectedDate(day.blockedDate)}
                               >
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                    <div className="text-xs font-medium text-gray-500">
+                                    <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
                                       {formatShortDate(day.blockedDate)}
                                     </div>
-                                    <div className="mt-1 text-sm font-semibold leading-5 text-gray-900">
+                                    <div className="mt-0.5 text-xs font-semibold leading-4 text-gray-900 dark:text-gray-50">
                                       {day.reason}
                                     </div>
                                   </div>
@@ -535,8 +624,8 @@ export default function ClientSchedule() {
                                     className={[
                                       "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
                                       day.source === "holiday"
-                                        ? "border border-amber-200 bg-amber-50 text-amber-800"
-                                        : "border border-red-200 bg-red-50 text-red-700",
+                                        ? "border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-400/15 text-amber-800 dark:border-amber-500/40 dark:bg-amber-400/15 dark:text-amber-200"
+                                        : "border border-red-200 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-200",
                                     ].join(" ")}
                                   >
                                     {getUnavailableTypeLabel(day)}
@@ -545,7 +634,7 @@ export default function ClientSchedule() {
                               </button>
                             ))
                           ) : (
-                            <div className="flex h-full min-h-[110px] items-center justify-center text-center text-sm text-gray-500">
+                            <div className="flex h-full min-h-[110px] items-center justify-center text-center text-xs text-gray-500 dark:text-gray-400">
                               No unavailable days yet.
                             </div>
                           )}
@@ -553,38 +642,42 @@ export default function ClientSchedule() {
                       </div>
                     </section>
 
-                    <div className="border-t border-gray-200" />
+                    <div className="border-t border-gray-200 dark:border-slate-700" />
 
-                    <section className="flex min-h-0 flex-1 flex-col pt-5">
-                      <p className="text-sm font-semibold text-gray-900">
+                    <section className="flex min-h-0 flex-1 flex-col pt-3">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                         Projects
                       </p>
 
-                      <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-                        <div className="divide-y divide-gray-200">
+                      <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+                        <div className="divide-y divide-gray-200 dark:divide-slate-700">
                           {projects.length ? (
                             projects.map((project) => (
                               <button
                                 key={project.id}
                                 type="button"
-                                className="block w-full px-1 py-3 text-left transition hover:bg-gray-50"
+                                className="block w-full rounded-lg px-1.5 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800/70"
                                 onClick={() => {
-                                  const startKey = project.scheduledStartDatetime
-                                    ? project.scheduledStartDatetime.slice(0, 10)
-                                    : "";
+                                  const startKey =
+                                    project.scheduledStartDatetime
+                                      ? project.scheduledStartDatetime.slice(
+                                          0,
+                                          10,
+                                        )
+                                      : "";
                                   if (startKey) setSelectedDate(startKey);
                                 }}
                               >
-                                <div className="text-xs font-medium text-gray-500">
+                                <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
                                   {project.dateLabel}
                                 </div>
-                                <div className="mt-1 text-sm font-semibold leading-5 text-gray-900">
+                                <div className="mt-0.5 text-xs font-semibold leading-4 text-gray-900 dark:text-gray-50">
                                   {project.title}
                                 </div>
                               </button>
                             ))
                           ) : (
-                            <div className="flex h-full min-h-[140px] items-center justify-center text-center text-sm text-gray-500">
+                            <div className="flex h-full min-h-[140px] items-center justify-center text-center text-xs text-gray-500 dark:text-gray-400">
                               No projects yet.
                             </div>
                           )}
@@ -604,16 +697,16 @@ export default function ClientSchedule() {
             onClick={() => setSelectedDate(null)}
           >
             <div
-              className="w-[92%] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+              className="w-[92%] max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="border-b border-gray-200 px-5 py-4">
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                       Day Details
                     </p>
-                    <h3 className="mt-2 text-lg font-bold text-gray-900">
+                    <h3 className="mt-1 text-base font-bold text-gray-900 dark:text-gray-50">
                       {formatLongDate(selectedDate)}
                     </h3>
                   </div>
@@ -621,7 +714,7 @@ export default function ClientSchedule() {
                   <button
                     type="button"
                     onClick={() => setSelectedDate(null)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-300 dark:hover:bg-slate-700 dark:hover:text-gray-100"
                     aria-label="Close"
                   >
                     x
@@ -629,17 +722,17 @@ export default function ClientSchedule() {
                 </div>
               </div>
 
-              <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
-                <div className="grid gap-4">
+              <div className="max-h-[60vh] overflow-y-auto px-4 py-3">
+                <div className="grid gap-3">
                   <div>
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       <BriefcaseBusiness className="h-4 w-4" />
                       Projects
                     </div>
 
                     <div className="mt-2 grid gap-2">
                       {selectedDayProjects.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">
+                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-400">
                           No projects scheduled.
                         </div>
                       ) : (
@@ -648,7 +741,7 @@ export default function ClientSchedule() {
                           return (
                             <div
                               key={project.id}
-                              className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 text-left shadow-sm"
+                              className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800"
                             >
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -656,15 +749,16 @@ export default function ClientSchedule() {
                                     className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
                                     style={{ backgroundColor: colors.bg }}
                                   />
-                                  <p className="truncate text-sm font-semibold text-gray-900">
+                                  <p className="truncate text-xs font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                                     {project.title}
                                   </p>
                                 </div>
-                                <p className="mt-1 text-xs text-gray-500">
-                                  {project.projectCode ?? "â€”"} · {project.dateLabel}
+                                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                  {project.projectCode ?? "â€”"} ·{" "}
+                                  {project.dateLabel}
                                 </p>
                               </div>
-                              <span className="shrink-0 text-xs font-medium capitalize text-gray-700">
+                              <span className="shrink-0 text-[11px] font-medium capitalize text-gray-700 dark:text-gray-300">
                                 {project.status}
                               </span>
                             </div>
@@ -675,14 +769,14 @@ export default function ClientSchedule() {
                   </div>
 
                   <div>
-                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       <CalendarDays className="h-4 w-4" />
                       Unavailable Days
                     </div>
 
                     <div className="mt-2 grid gap-2">
                       {selectedDayUnavailableDays.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">
+                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-400">
                           No unavailable days recorded.
                         </div>
                       ) : (
@@ -690,16 +784,16 @@ export default function ClientSchedule() {
                           <div
                             key={day.id}
                             className={[
-                              "rounded-xl border px-3 py-3",
+                              "rounded-lg border px-3 py-2.5",
                               day.source === "holiday"
-                                ? "border-amber-200 bg-amber-50"
-                                : "border-red-200 bg-red-50/60",
+                                ? "border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-400/15"
+                                : "border-red-200 bg-red-50/60 dark:border-red-500/40 dark:bg-red-500/15",
                             ].join(" ")}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold text-gray-900">
+                                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                                     {day.reason}
                                   </p>
                                   <span
@@ -714,7 +808,7 @@ export default function ClientSchedule() {
                                   </span>
                                 </div>
                                 {day.notes ? (
-                                  <p className="mt-1 text-xs text-gray-600">
+                                  <p className="mt-0.5 text-[11px] text-gray-600 dark:text-gray-300">
                                     {day.notes}
                                   </p>
                                 ) : null}
@@ -728,10 +822,10 @@ export default function ClientSchedule() {
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 px-5 py-4 flex justify-end gap-3">
+              <div className="border-t border-gray-200 dark:border-slate-700 px-5 py-4 flex justify-end gap-3">
                 <button
                   onClick={() => setSelectedDate(null)}
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200"
+                  className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all duration-200"
                   style={{ backgroundColor: ACCENT }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = ACCENT_HOVER;

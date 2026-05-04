@@ -80,15 +80,19 @@ export async function listManualUnavailableDays() {
     throw new Error(error.message || "Failed to load unavailable days.");
   }
 
-  return ((data ?? []) as UnavailableDayRow[]).map((row) => ({
-    id: row.unavailable_day_id,
-    blockedDate: row.blocked_date,
-    reason: String(row.reason ?? "").trim() || "Unavailable day",
-    blockType: String(row.block_type ?? "").trim() || "other",
-    notes: row.notes,
-    source: "manual" as const,
-    isEditable: true,
-  }));
+  return ((data ?? []) as UnavailableDayRow[]).map((row) => {
+    const blockType = String(row.block_type ?? "").trim() || "other";
+
+    return {
+      id: row.unavailable_day_id,
+      blockedDate: row.blocked_date,
+      reason: String(row.reason ?? "").trim() || "Unavailable day",
+      blockType,
+      notes: row.notes,
+      source: blockType === "holiday" ? "holiday" as const : "manual" as const,
+      isEditable: blockType !== "holiday",
+    };
+  });
 }
 
 export async function listScheduleUnavailableDays(cookieString?: string | null) {
@@ -99,7 +103,13 @@ export async function listScheduleUnavailableDays(cookieString?: string | null) 
     fetchHolidayUnavailableDays(holidaySettings),
   ]);
 
-  return [...manualDays, ...holidayDays].sort((left, right) => {
+  const dedupedDays = new Map<string, ScheduleUnavailableDay>();
+
+  for (const day of [...holidayDays, ...manualDays]) {
+    dedupedDays.set(`${day.blockedDate}::${day.blockType}`, day);
+  }
+
+  return Array.from(dedupedDays.values()).sort((left, right) => {
     if (left.blockedDate !== right.blockedDate) {
       return left.blockedDate.localeCompare(right.blockedDate);
     }

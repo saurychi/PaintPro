@@ -65,7 +65,7 @@ function SectionTitle({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span
@@ -73,10 +73,10 @@ function SectionTitle({
             style={{ backgroundColor: ACCENT }}
             aria-hidden="true"
           />
-          <p className="text-sm font-semibold text-gray-900">{title}</p>
+          <p className="text-[13px] font-semibold leading-5 text-gray-900">{title}</p>
         </div>
         {subtitle ? (
-          <p className="mt-1 text-sm text-gray-600">{subtitle}</p>
+          <p className="mt-0.5 text-xs leading-5 text-gray-500">{subtitle}</p>
         ) : null}
       </div>
       {right ? <div className="shrink-0">{right}</div> : null}
@@ -85,10 +85,10 @@ function SectionTitle({
 }
 
 const btnBase =
-  "inline-flex items-center justify-center rounded-lg text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25";
-const btnNeutral = `${btnBase} border border-gray-200 bg-white px-3 h-9 text-gray-900 hover:bg-gray-50 hover:shadow-md`;
-const btnPrimary = `${btnBase} bg-[#00c065] px-3 h-9 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`;
-const btnDanger = `${btnBase} border border-red-200 bg-white px-4 py-2 text-red-600 hover:bg-red-50 hover:shadow-md`;
+  "inline-flex items-center justify-center rounded-md text-xs font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25";
+const btnNeutral = `${btnBase} border border-gray-200 bg-white px-2.5 h-8 text-gray-900 hover:bg-gray-50 hover:shadow-md`;
+const btnPrimary = `${btnBase} bg-[#00c065] px-2.5 h-8 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`;
+const btnDanger = `${btnBase} border border-red-200 bg-white px-3 h-8 text-red-600 hover:bg-red-50 hover:shadow-md`;
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -418,36 +418,36 @@ export default function AdminSettings() {
   }
 
   const phoneSelectClass =
-    "h-10 w-full rounded-lg border border-gray-200 bg-white px-2 pr-8 text-sm font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20";
+    "h-9 w-full rounded-md border border-gray-200 bg-white px-2 pr-7 text-xs font-semibold text-gray-900 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20";
   const phoneInputClass = [
-    "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm outline-none",
+    "h-9 w-full rounded-md border border-gray-200 bg-white px-2.5 text-xs text-gray-700 shadow-sm outline-none",
     "focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20",
-    "sm:max-w-[260px]",
+    "sm:max-w-[240px]",
   ].join(" ");
 
   return (
-    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-6">
-      <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
+    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-4">
+      <h1 className="text-xl font-semibold tracking-tight text-gray-900">Settings</h1>
 
-      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+      <div className="mt-4 h-[calc(100%-2.75rem)] overflow-hidden">
         <div className="h-full overflow-y-auto pr-1">
           <Card>
-            <div className="grid gap-6">
+            <div className="grid gap-3">
               {loadErr ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs font-semibold text-red-700">
                   {loadErr}
                 </div>
               ) : null}
 
               {/* Profile */}
-              <div className="grid gap-4">
+              <div className="grid gap-3">
                 <SectionTitle
                   title="Profile"
                   subtitle="Account details"
                   right={
                     <span
                       className={[
-                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold",
                         rolePill(profile.role),
                       ].join(" ")}>
                       {roleLabel(profile.role)}
@@ -456,12 +456,12 @@ export default function AdminSettings() {
                 />
 
                 <div className="rounded-lg border border-gray-200 bg-white">
-                  <div className="px-4 py-4">
-                    <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
-                      <div className="text-sm font-semibold text-gray-900">
+                  <div className="px-3 py-3">
+                    <div className="grid max-w-[520px] grid-cols-[130px_1fr] gap-2.5">
+                      <div className="text-xs font-medium text-gray-500">
                         Username
                       </div>
-                      <div className="text-sm font-semibold text-gray-900">
+                      <div className="text-[13px] font-semibold text-gray-900">
                         {profile.username || ""}
                       </div>
                     </div>
@@ -470,25 +470,25 @@ export default function AdminSettings() {
                   <div className="h-px w-full bg-gray-200" />
 
                   {/* Signature */}
-                  <div className="px-4 py-4">
+                  <div className="px-3 py-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-[13px] font-semibold leading-5 text-gray-900">
                           Signature
                         </p>
-                        <p className="mt-0.5 text-xs text-gray-500">
+                        <p className="mt-0.5 text-[11px] leading-4 text-gray-500">
                           Used on generated documents
                         </p>
                       </div>
 
-                      <div className="flex items-center rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs font-semibold">
+                      <div className="flex items-center rounded-md border border-gray-200 bg-gray-50 p-0.5 text-[11px] font-semibold">
                         {(["draw", "upload"] as const).map((mode) => (
                           <button
                             key={mode}
                             type="button"
                             onClick={() => setSignatureMode(mode)}
                             className={[
-                              "rounded-md px-3 py-1 capitalize transition-colors",
+                              "rounded px-2.5 py-1 capitalize transition-colors",
                               signatureMode === mode
                                 ? "bg-white text-gray-900 shadow-sm"
                                 : "text-gray-500 hover:text-gray-700",
@@ -499,7 +499,7 @@ export default function AdminSettings() {
                       </div>
                     </div>
 
-                    <div className="mt-3 flex gap-3">
+                    <div className="mt-2.5 flex gap-3">
                       <div className="min-w-0 flex-1">
                         {signatureMode === "draw" ? (
                           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -507,14 +507,14 @@ export default function AdminSettings() {
                               ref={signatureRef}
                               penColor="black"
                               canvasProps={{
-                                className: "h-[100px] w-full bg-white",
+                                className: "h-[84px] w-full bg-white",
                               }}
                             />
                           </div>
                         ) : (
-                          <label className="flex h-[100px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-200 bg-white transition hover:bg-gray-50">
-                            <Upload className="h-5 w-5 text-gray-300" />
-                            <span className="px-4 text-center text-xs text-gray-500">
+                          <label className="flex h-[84px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-200 bg-white transition hover:bg-gray-50">
+                            <Upload className="h-4 w-4 text-gray-300" />
+                            <span className="px-3 text-center text-[11px] text-gray-500">
                               {uploadFileName ?? "Click to upload PNG / JPG"}
                             </span>
                             <input
@@ -526,7 +526,7 @@ export default function AdminSettings() {
                           </label>
                         )}
 
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           {signatureMode === "draw" ? (
                             <button
                               type="button"
@@ -555,22 +555,22 @@ export default function AdminSettings() {
                         </div>
 
                         {signatureErr ? (
-                          <p className="mt-1.5 text-xs font-semibold text-red-600">
+                          <p className="mt-1.5 text-[11px] font-semibold text-red-600">
                             {signatureErr}
                           </p>
                         ) : null}
                         {signatureMsg ? (
-                          <p className="mt-1.5 text-xs font-semibold text-emerald-700">
+                          <p className="mt-1.5 text-[11px] font-semibold text-emerald-700">
                             {signatureMsg}
                           </p>
                         ) : null}
                       </div>
 
-                      <div className="w-[110px] shrink-0">
-                        <p className="mb-1.5 text-xs font-medium text-gray-500">
+                      <div className="w-[104px] shrink-0">
+                        <p className="mb-1 text-[11px] font-medium text-gray-500">
                           Current
                         </p>
-                        <div className="flex h-[100px] items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-2">
+                        <div className="flex h-[84px] items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-2">
                           {signaturePreviewUrl ? (
                             <img
                               src={signaturePreviewUrl}
@@ -589,12 +589,12 @@ export default function AdminSettings() {
 
                   <div className="h-px w-full bg-gray-200" />
 
-                  <div className="px-4 py-4">
-                    <div className="grid max-w-[560px] grid-cols-[160px_1fr] gap-3">
-                      <div className="text-sm font-semibold text-gray-900">
+                  <div className="px-3 py-3">
+                    <div className="grid max-w-[520px] grid-cols-[130px_1fr] gap-2.5">
+                      <div className="text-xs font-medium text-gray-500">
                         Email
                       </div>
-                      <div className="text-sm font-semibold text-gray-900">
+                      <div className="text-[13px] font-semibold text-gray-900">
                         {profile.email || ""}
                       </div>
                     </div>
@@ -603,13 +603,13 @@ export default function AdminSettings() {
                   <div className="h-px w-full bg-gray-200" />
 
                   {/* Phone */}
-                  <div className="px-4 py-4">
+                  <div className="px-3 py-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-[13px] font-semibold leading-5 text-gray-900">
                           Phone
                         </p>
-                        <p className="mt-1 text-sm text-gray-600">
+                        <p className="mt-0.5 text-xs leading-5 text-gray-500">
                           Used for contact and job updates
                         </p>
                       </div>
@@ -641,7 +641,7 @@ export default function AdminSettings() {
                       )}
                     </div>
 
-                    <div className="mt-3 grid gap-2">
+                    <div className="mt-2.5 grid gap-2">
                       {/* SAME controls in both modes so width and look match */}
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_1fr]">
                         <select
@@ -679,12 +679,12 @@ export default function AdminSettings() {
                       </div>
 
                       {phoneErr ? (
-                        <p className="text-sm font-semibold text-red-600">
+                        <p className="text-[11px] font-semibold text-red-600">
                           {phoneErr}
                         </p>
                       ) : null}
                       {phoneMsg ? (
-                        <p className="text-sm font-semibold text-emerald-700">
+                        <p className="text-[11px] font-semibold text-emerald-700">
                           {phoneMsg}
                         </p>
                       ) : null}
@@ -694,41 +694,45 @@ export default function AdminSettings() {
               </div>
 
               {/* Project Time */}
-              <div className="pt-2">
+              <div className="pt-1">
                 <div className="h-px w-full bg-gray-200" />
-                <div className="mt-5 grid gap-3">
+                <div className="mt-4 grid gap-2.5">
                   <SectionTitle
                     title="Project Time"
                     subtitle="Choose whether project progress uses live time or a simulated reference."
                   />
 
-                  <ProjectTimeReferenceSettings />
+                  <div className="settings-compact-scope">
+                    <ProjectTimeReferenceSettings />
+                  </div>
                 </div>
               </div>
 
               {/* Schedule */}
-              <div className="pt-2">
+              <div className="pt-1">
                 <div className="h-px w-full bg-gray-200" />
-                <div className="mt-5 grid gap-3">
+                <div className="mt-4 grid gap-2.5">
                   <SectionTitle
                     title="Schedule"
                     subtitle="Configure how the schedule and project schedule modal treat non-working days."
                   />
 
-                  <HolidaySettings />
+                  <div className="settings-compact-scope">
+                    <HolidaySettings />
+                  </div>
                 </div>
               </div>
 
               {/* Advanced Settings */}
-              <div className="pt-2">
+              <div className="pt-1">
                 <div className="h-px w-full bg-gray-200" />
-                <div className="mt-5 grid gap-3">
+                <div className="mt-4 grid gap-2.5">
                   <SectionTitle
                     title="Advanced Settings"
                     subtitle="Manage workflow configuration and estimation rules used across admin planning."
                   />
 
-                  <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="grid gap-2.5 lg:grid-cols-2">
                     <SettingsNavigationCard
                       title="Task Management"
                       description="Update main tasks, subtasks, replacements, and default resources."
@@ -751,20 +755,20 @@ export default function AdminSettings() {
               </div>
 
               {/* Appearance */}
-              <div className="pt-2">
+              <div className="pt-1">
                 <div className="h-px w-full bg-gray-200" />
-                <div className="mt-5 grid gap-3">
+                <div className="mt-4 grid gap-2.5">
                   <SectionTitle
                     title="Appearance"
                     subtitle="Control the look and feel of the interface."
                   />
 
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">
+                      <p className="text-[13px] font-semibold leading-5 text-gray-900">
                         Dark mode
                       </p>
-                      <p className="mt-1 text-sm text-gray-600">
+                      <p className="mt-0.5 text-xs leading-5 text-gray-500">
                         Switch between light and dark interface.
                       </p>
                     </div>
@@ -779,9 +783,9 @@ export default function AdminSettings() {
               </div>
 
               {/* Session */}
-              <div className="pt-2">
+              <div className="pt-1">
                 <div className="h-px w-full bg-gray-200" />
-                <div className="mt-5 grid gap-3">
+                <div className="mt-4 grid gap-2.5">
                   <SectionTitle
                     title="Session"
                     subtitle="Sign out of your account on this device."
@@ -806,6 +810,98 @@ export default function AdminSettings() {
         canvas {
           touch-action: none;
         }
+
+        .settings-compact-scope > div {
+          padding: 0.75rem !important;
+          border-radius: 0.5rem !important;
+        }
+
+        .settings-compact-scope [class~="p-6"],
+        .settings-compact-scope [class~="p-5"],
+        .settings-compact-scope [class~="p-4"] {
+          padding: 0.75rem !important;
+        }
+
+        .settings-compact-scope [class~="px-6"],
+        .settings-compact-scope [class~="px-5"],
+        .settings-compact-scope [class~="px-4"] {
+          padding-left: 0.75rem !important;
+          padding-right: 0.75rem !important;
+        }
+
+        .settings-compact-scope [class~="py-5"],
+        .settings-compact-scope [class~="py-4"] {
+          padding-top: 0.6rem !important;
+          padding-bottom: 0.6rem !important;
+        }
+
+        .settings-compact-scope [class~="gap-5"],
+        .settings-compact-scope [class~="gap-4"] {
+          gap: 0.65rem !important;
+        }
+
+        .settings-compact-scope [class~="mt-5"],
+        .settings-compact-scope [class~="mt-4"] {
+          margin-top: 0.65rem !important;
+        }
+
+        .settings-compact-scope h1,
+        .settings-compact-scope h2,
+        .settings-compact-scope h3,
+        .settings-compact-scope h4,
+        .settings-compact-scope [class~="text-lg"],
+        .settings-compact-scope [class~="text-xl"] {
+          font-size: 0.875rem !important;
+          line-height: 1.2rem !important;
+        }
+
+        .settings-compact-scope p,
+        .settings-compact-scope span,
+        .settings-compact-scope label,
+        .settings-compact-scope button,
+        .settings-compact-scope input {
+          font-size: 0.75rem !important;
+          line-height: 1rem !important;
+        }
+
+        .settings-compact-scope [class~="text-sm"] {
+          font-size: 0.75rem !important;
+          line-height: 1rem !important;
+        }
+
+        .settings-compact-scope [class~="text-xs"] {
+          font-size: 0.6875rem !important;
+          line-height: 0.95rem !important;
+        }
+
+        .settings-compact-scope input,
+        .settings-compact-scope select,
+        .settings-compact-scope button {
+          min-height: 0 !important;
+        }
+
+        .settings-compact-scope input,
+        .settings-compact-scope select {
+          height: 2rem !important;
+          padding-top: 0.3rem !important;
+          padding-bottom: 0.3rem !important;
+        }
+
+        .settings-compact-scope button {
+          height: 2rem !important;
+          padding-top: 0.3rem !important;
+          padding-bottom: 0.3rem !important;
+        }
+
+        .settings-compact-scope .h-12,
+        .settings-compact-scope [class~="h-12"] {
+          height: 2rem !important;
+        }
+
+        .settings-compact-scope .h-10,
+        .settings-compact-scope [class~="h-10"] {
+          height: 1.875rem !important;
+        }
       `}</style>
     </div>
   );
@@ -815,7 +911,7 @@ function Card({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
-      <div className="p-4">{children}</div>
+      <div className="p-3.5">{children}</div>
     </div>
   );
 }
@@ -835,17 +931,17 @@ function SettingsNavigationCard({
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#00c065]/30 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#00c065]/20">
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#00c065]">
-        <Icon className="h-5 w-5" />
+      className="group flex w-full items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#00c065]/30 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#00c065]/20">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[#00c065]">
+        <Icon className="h-4 w-4" />
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-900">{title}</p>
-        <p className="mt-1 text-sm text-gray-600">{description}</p>
+        <p className="text-[13px] font-semibold leading-5 text-gray-900">{title}</p>
+        <p className="mt-0.5 text-xs leading-5 text-gray-500">{description}</p>
       </div>
 
-      <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#00c065]" />
+      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#00c065]" />
     </button>
   );
 }
