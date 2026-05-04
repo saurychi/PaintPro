@@ -20,6 +20,7 @@ import { toast } from "sonner";
 
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { supabase } from "@/lib/supabaseClient";
+import { useProjectNow } from "@/lib/time/useProjectNow";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -215,6 +216,7 @@ async function getAccessToken() {
 
 export default function StaffSchedulePage() {
   const router = useRouter();
+  const { now: projectNow, todayKey } = useProjectNow();
 
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
   const [currentProject, setCurrentProject] = useState<ScheduleProject | null>(
@@ -442,9 +444,8 @@ export default function StaffSchedulePage() {
     : [];
 
   const upcomingUnavailableItems = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return allUnavailableItems.filter((item) => item.date >= today).slice(0, 8);
-  }, [allUnavailableItems]);
+    return allUnavailableItems.filter((item) => item.date >= todayKey).slice(0, 8);
+  }, [allUnavailableItems, todayKey]);
 
   const handleEventClick = (info: EventClickArg) => {
     const dateKey = (info.event.startStr || "").slice(0, 10);
@@ -619,9 +620,10 @@ export default function StaffSchedulePage() {
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
+                          key={todayKey}
                           plugins={[dayGridPlugin, interactionPlugin]}
                           initialView="dayGridMonth"
-                          initialDate={new Date()}
+                          initialDate={projectNow}
                           events={[...fcEvents, ...unavailableEvents]}
                           eventClick={handleEventClick}
                           dateClick={handleDateClick}

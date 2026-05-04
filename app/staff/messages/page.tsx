@@ -388,10 +388,12 @@ export default function AdminMessages() {
         bodyClassName="overflow-hidden"
       >
         <div className="flex h-full gap-6 overflow-hidden">
-          <aside className="flex min-w-[260px] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:w-1/4 xl:w-1/5">
-            <p className="mb-3 shrink-0 text-sm font-semibold text-gray-900">Conversations</p>
+          <aside className="flex min-w-[260px] w-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:w-1/4 xl:w-1/5 dark:border-slate-700 dark:bg-slate-900">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
+              <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
+            </div>
             <div className="flex flex-1 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+              <Loader2 className="h-5 w-5 animate-spin text-gray-300 dark:text-slate-500" />
             </div>
           </aside>
           <div className="flex min-w-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -411,44 +413,67 @@ export default function AdminMessages() {
       <div className="flex h-full gap-6 overflow-hidden">
 
           {/* Conversation Sidebar */}
-          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
-            <div className="flex items-center justify-between mb-3 shrink-0">
-              <p className="text-sm font-semibold text-gray-900">Conversations</p>
+          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
+                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">Recent message threads</p>
+              </div>
               <button
                 onClick={handleOpenNewChat}
                 aria-label="Start new message"
                 title="Start new message"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00c065] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-[#00c065]/50 dark:hover:bg-[#00c065]/10 dark:hover:text-[#00c065]"
               >
                 <UserPlus className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="space-y-2 overflow-y-auto pr-1 min-h-0 custom-scrollbar">
-              {conversations.map((chat) => (
-                <button
-                  key={chat.id}
-                  onClick={() => setActiveChatId(chat.id)}
-                  className={[
-                    "w-full text-left rounded-lg border bg-white p-3 shadow-sm transition-colors hover:bg-gray-50",
-                    activeChatId === chat.id ? "border-[#00c065]" : "border-gray-200",
-                  ].join(" ")}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {chat.unread ? <span className="h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" /> : null}
-                        <p className="text-sm font-semibold text-gray-900 truncate">{chat.name}</p>
+            <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
+              {conversations.map((chat) => {
+                const isActive = activeChatId === chat.id
+
+                return (
+                  <button
+                    key={chat.id}
+                    onClick={() => setActiveChatId(chat.id)}
+                    className={[
+                      "group relative w-full text-left border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 dark:border-slate-800",
+                      isActive
+                        ? "bg-emerald-50/70 dark:bg-[#00c065]/10"
+                        : "bg-white hover:bg-gray-50 dark:bg-slate-900 dark:hover:bg-slate-800/70",
+                    ].join(" ")}
+                  >
+                    <span
+                      className={[
+                        "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-opacity",
+                        isActive ? "opacity-100 bg-[#00c065]" : "opacity-0 bg-transparent",
+                      ].join(" ")}
+                    />
+                    <div className="flex items-start gap-3 pl-1">
+                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {chat.profile_image_url ? (
+                          <img src={chat.profile_image_url} alt={chat.name} className="h-full w-full rounded-full object-cover" />
+                        ) : (
+                          <span>{chat.name.slice(0, 2).toUpperCase()}</span>
+                        )}
+                        {chat.unread ? <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900" /> : null}
                       </div>
-                      <p className={`mt-1 text-xs line-clamp-1 ${chat.unread ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
-                        {chat.lastMessage}
-                      </p>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{chat.name}</p>
+                        </div>
+                        <p className={`mt-1 line-clamp-1 text-xs leading-5 ${chat.unread ? 'font-semibold text-gray-900 dark:text-slate-100' : 'text-gray-500 dark:text-slate-400'}`}>
+                          {chat.lastMessage}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                )
+              })}
               {conversations.length === 0 && (
-                <div className="text-sm text-gray-400 mt-4 text-center">No active chats</div>
+                <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-slate-500">No active chats</div>
               )}
             </div>
           </aside>

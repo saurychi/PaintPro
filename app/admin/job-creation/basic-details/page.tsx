@@ -17,12 +17,6 @@ import MeasurementModal, {
   type MeasurementRow,
 } from "@/components/project-creation/MeasurementModal";
 import StaffMessageModal from "@/components/project-creation/StaffMessageModal";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type {
   ScaleBandKey,
   ScalePresetKey,
@@ -36,6 +30,7 @@ import {
 import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
+import { useProjectNow } from "@/lib/time/useProjectNow";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
@@ -105,8 +100,8 @@ type StaffUsersResponse = {
   staffUsers?: Array<{
     id: string | number | null;
     username?: string | null;
-      email?: string | null;
-      specialties?: unknown;
+    email?: string | null;
+    specialties?: unknown;
   }>;
 };
 
@@ -408,6 +403,7 @@ export default function BasicDetails() {
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get("projectId") || "";
   const { settings: holidaySettings } = useHolidaySettings();
+  const { now: projectNow } = useProjectNow();
 
   const [projectCode, setProjectCode] = useState(() => generateProjectCode());
   const [projectName, setProjectName] = useState("");
@@ -459,8 +455,23 @@ export default function BasicDetails() {
     email: string;
     specialties: string[];
   };
-  type StaffConvMessage = { id: string; senderId: string; senderType: "admin" | "employee"; text: string; createdAt: string; };
-  type StaffConvData = { id: string; employeeId: string; employeeName: string; employeeEmail?: string; employeeRole?: string; employeeAvatarUrl?: string | null; lastMessage?: string; messages: StaffConvMessage[]; };
+  type StaffConvMessage = {
+    id: string;
+    senderId: string;
+    senderType: "admin" | "employee";
+    text: string;
+    createdAt: string;
+  };
+  type StaffConvData = {
+    id: string;
+    employeeId: string;
+    employeeName: string;
+    employeeEmail?: string;
+    employeeRole?: string;
+    employeeAvatarUrl?: string | null;
+    lastMessage?: string;
+    messages: StaffConvMessage[];
+  };
 
   const [surfaceMsgOpen, setSurfaceMsgOpen] = useState(false);
   const [surfaceMsgEmployees, setSurfaceMsgEmployees] = useState<
@@ -477,10 +488,16 @@ export default function BasicDetails() {
   const [surfaceMsgApplyingMeasurementId, setSurfaceMsgApplyingMeasurementId] =
     useState<string | null>(null);
   const [recipientPickerOpen, setRecipientPickerOpen] = useState(false);
-  const [surfaceMsgConversations, setSurfaceMsgConversations] = useState<StaffConvData[]>([]);
-  const [surfaceMsgConversationsLoading, setSurfaceMsgConversationsLoading] = useState(false);
-  const [surfaceMsgConversationError, setSurfaceMsgConversationError] = useState<string | null>(null);
-  const [surfaceMsgSpecsEmployeeIds, setSurfaceMsgSpecsEmployeeIds] = useState<string[]>([]);
+  const [surfaceMsgConversations, setSurfaceMsgConversations] = useState<
+    StaffConvData[]
+  >([]);
+  const [surfaceMsgConversationsLoading, setSurfaceMsgConversationsLoading] =
+    useState(false);
+  const [surfaceMsgConversationError, setSurfaceMsgConversationError] =
+    useState<string | null>(null);
+  const [surfaceMsgSpecsEmployeeIds, setSurfaceMsgSpecsEmployeeIds] = useState<
+    string[]
+  >([]);
   const surfaceMsgEmployeesLoadedRef = useRef(false);
   const surfaceMsgConversationsLoadedRef = useRef(false);
 
@@ -703,7 +720,9 @@ export default function BasicDetails() {
       surfaceMsgEmployeeId &&
       !convs.some((c) => c.employeeId === surfaceMsgEmployeeId)
     ) {
-      const emp = surfaceMsgEmployees.find((e) => e.id === surfaceMsgEmployeeId);
+      const emp = surfaceMsgEmployees.find(
+        (e) => e.id === surfaceMsgEmployeeId,
+      );
       if (emp) {
         convs = [
           {
@@ -733,12 +752,19 @@ export default function BasicDetails() {
     }
 
     return convs;
-  }, [surfaceMsgEmployeeId, surfaceMsgConversations, surfaceMsgEmployees, surfaceMsgSpecsEmployeeIds]);
+  }, [
+    surfaceMsgEmployeeId,
+    surfaceMsgConversations,
+    surfaceMsgEmployees,
+    surfaceMsgSpecsEmployeeIds,
+  ]);
 
   const surfaceMsgSpecsConvIds = useMemo(
     () =>
       surfaceMsgSpecsEmployeeIds.map((empId) => {
-        const real = surfaceMsgConversations.find((c) => c.employeeId === empId);
+        const real = surfaceMsgConversations.find(
+          (c) => c.employeeId === empId,
+        );
         return real?.id ?? empId;
       }),
     [surfaceMsgSpecsEmployeeIds, surfaceMsgConversations],
@@ -841,9 +867,10 @@ export default function BasicDetails() {
       return {
         ...row,
         sizeBand: nextBand,
-        estimatedValue: row.isManualOverride && !row.isMeasurementPending
-          ? row.estimatedValue
-          : preset.bands[nextBand].suggested,
+        estimatedValue:
+          row.isManualOverride && !row.isMeasurementPending
+            ? row.estimatedValue
+            : preset.bands[nextBand].suggested,
         isMeasurementPending: false,
       };
     });
@@ -1144,7 +1171,9 @@ export default function BasicDetails() {
 
       if (surfaceKeys.length > 0) {
         setMeasurementRows(
-          surfaceKeys.map((key) => makeRecommendedSurfaceRow(surfacePresets, key)),
+          surfaceKeys.map((key) =>
+            makeRecommendedSurfaceRow(surfacePresets, key),
+          ),
         );
       }
 
@@ -1738,7 +1767,7 @@ export default function BasicDetails() {
         let holidayDates: Set<string> = new Set();
 
         if (holidaySettings.enabled && holidaySettings.countryCode) {
-          const today = new Date();
+          const today = projectNow;
           const years = Array.from(
             new Set([today.getFullYear(), today.getFullYear() + 1]),
           );
@@ -1769,7 +1798,7 @@ export default function BasicDetails() {
 
         if (cancelled) return;
 
-        const today = new Date();
+        const today = projectNow;
         const events: Array<{
           title: string;
           date: string;
@@ -1821,7 +1850,7 @@ export default function BasicDetails() {
     return () => {
       cancelled = true;
     };
-  }, [holidaySettings.enabled, holidaySettings.countryCode]);
+  }, [holidaySettings.enabled, holidaySettings.countryCode, projectNow]);
 
   const isBusy = saving || loading;
 
@@ -1960,7 +1989,9 @@ export default function BasicDetails() {
       surfaceMsgConversationsLoadedRef.current = true;
     } catch (error) {
       setSurfaceMsgConversationError(
-        error instanceof Error ? error.message : "Failed to load conversations.",
+        error instanceof Error
+          ? error.message
+          : "Failed to load conversations.",
       );
       surfaceMsgConversationsLoadedRef.current = false;
     } finally {
@@ -2065,10 +2096,9 @@ export default function BasicDetails() {
         }),
       });
 
-      const data =
-        (await response.json().catch(() => null)) as
-          | ExtractSurfaceMeasurementsApiResponse
-          | null;
+      const data = (await response
+        .json()
+        .catch(() => null)) as ExtractSurfaceMeasurementsApiResponse | null;
 
       if (!response.ok) {
         throw new Error(
@@ -2207,7 +2237,8 @@ export default function BasicDetails() {
                             if (!isGeneratingProjectName) {
                               e.currentTarget.style.backgroundColor = ACCENT;
                             }
-                          }}>
+                          }}
+                        >
                           {isGeneratingProjectName ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
@@ -2236,7 +2267,8 @@ export default function BasicDetails() {
                       <button
                         type="button"
                         onClick={() => setIsScheduleCalendarOpen(true)}
-                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50`}>
+                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50`}
+                      >
                         {scheduledStart || "Select start date"}
                       </button>
 
@@ -2285,7 +2317,8 @@ export default function BasicDetails() {
                         onChange={(e) => handleClientSelect(e.target.value)}
                         className={`mt-1.5 h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
                         style={{ ["--tw-ring-color" as any]: ACCENT }}
-                        disabled={clientsLoading}>
+                        disabled={clientsLoading}
+                      >
                         <option value="">
                           {clientsLoading
                             ? "Loading clients..."
@@ -2294,7 +2327,8 @@ export default function BasicDetails() {
                         {clients.map((client) => (
                           <option
                             key={client.client_id}
-                            value={client.client_id}>
+                            value={client.client_id}
+                          >
                             {client.full_name || "Unnamed Client"}
                           </option>
                         ))}
@@ -2315,7 +2349,8 @@ export default function BasicDetails() {
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = ACCENT;
-                        }}>
+                        }}
+                      >
                         Create New Client
                       </button>
                     </div>
@@ -2336,7 +2371,8 @@ export default function BasicDetails() {
                         </div>
 
                         <div
-                          className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm`}>
+                          className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm`}
+                        >
                           <span className="shrink-0 px-3 text-sm text-gray-500">
                             {selectedPhoneCountry}
                           </span>
@@ -2404,7 +2440,8 @@ export default function BasicDetails() {
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = ACCENT;
-                        }}>
+                        }}
+                      >
                         {isGeneratingTasks ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -2418,7 +2455,8 @@ export default function BasicDetails() {
 
                     {/* Configured surfaces */}
                     <div
-                      className={`rounded-xl border ${BORDER} bg-gray-50 p-2`}>
+                      className={`rounded-xl border ${BORDER} bg-gray-50 p-2`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                           Configured Surfaces
@@ -2428,7 +2466,8 @@ export default function BasicDetails() {
                             <button
                               type="button"
                               onClick={handleOpenSurfaceMsg}
-                              className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100">
+                              className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+                            >
                               <MessageSquare className="h-3 w-3" />
                               Message Employee
                             </button>
@@ -2444,7 +2483,8 @@ export default function BasicDetails() {
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.backgroundColor = ACCENT;
-                            }}>
+                            }}
+                          >
                             <Settings2 className="h-3 w-3" />
                             Edit
                           </button>
@@ -2461,7 +2501,8 @@ export default function BasicDetails() {
                             {summaryChips.slice(0, 6).map((chip) => (
                               <span
                                 key={chip.id}
-                                className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                                className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700"
+                              >
                                 {chip.label}
                               </span>
                             ))}
@@ -2486,7 +2527,8 @@ export default function BasicDetails() {
                     type="button"
                     className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={handleRemoveDraft}
-                    disabled={isBusy || !hasChanges}>
+                    disabled={isBusy || !hasChanges}
+                  >
                     Remove Changes
                   </button>
                 </div>
@@ -2495,7 +2537,8 @@ export default function BasicDetails() {
                     type="button"
                     className="w-[140px] rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-300"
                     onClick={() => router.back()}
-                    disabled={isBusy}>
+                    disabled={isBusy}
+                  >
                     Go Back
                   </button>
                   <button
@@ -2513,7 +2556,8 @@ export default function BasicDetails() {
                       if (!isBusy) {
                         e.currentTarget.style.backgroundColor = ACCENT;
                       }
-                    }}>
+                    }}
+                  >
                     {isBusy ? "Processing..." : "Generate"}
                   </button>
                 </div>
@@ -2584,6 +2628,26 @@ export default function BasicDetails() {
         applyingMeasurementMessageId={surfaceMsgApplyingMeasurementId}
         onSend={handleSendSurfaceMsg}
         onCreateNew={handleOpenSurfaceMsgRecipientPicker}
+        recipientPickerOpen={recipientPickerOpen}
+        onRecipientPickerOpenChange={setRecipientPickerOpen}
+        recipientOptions={surfaceMsgEmployees}
+        loadingRecipients={surfaceMsgLoadingEmployees}
+        recipientLoadError={surfaceMsgLoadError}
+        onRetryLoadRecipients={() => {
+          void handleSurfaceMsgProceed(true);
+        }}
+        onSelectRecipient={(emp) => {
+          const hasExisting = surfaceMsgConversations.some(
+            (c) => c.employeeId === emp.id,
+          );
+          if (!hasExisting) {
+            setSurfaceMsgText(formatSurfaceMessage());
+            setSurfaceMsgSpecsEmployeeIds((prev) =>
+              prev.includes(emp.id) ? prev : [...prev, emp.id],
+            );
+          }
+          setSurfaceMsgEmployeeId(emp.id);
+        }}
         onFillSpecs={() => {
           setSurfaceMsgText(formatSurfaceMessage());
           if (surfaceMsgEmployeeId) {
@@ -2608,62 +2672,6 @@ export default function BasicDetails() {
           void loadStaffConversations(false);
         }}
       />
-
-      {/* Recipient Picker Modal */}
-      <Dialog open={recipientPickerOpen} onOpenChange={setRecipientPickerOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Pick a recipient</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2">
-            {surfaceMsgLoadError ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                <p className="font-semibold">Could not load employees</p>
-                <p className="mt-1 text-xs leading-5">{surfaceMsgLoadError}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleSurfaceMsgProceed(true);
-                  }}
-                  className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 transition hover:bg-red-100">
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Retry
-                </button>
-              </div>
-            ) : null}
-            {surfaceMsgEmployees.length === 0 &&
-              !surfaceMsgLoadingEmployees && (
-                <div className="text-gray-500 text-sm">
-                  No employees available.
-                </div>
-              )}
-            {surfaceMsgLoadingEmployees && (
-              <div className="text-gray-500 text-sm">Loading employees...</div>
-            )}
-            {surfaceMsgEmployees.map((emp) => (
-              <button
-                key={emp.id}
-                className="w-full rounded border px-4 py-2 text-left hover:bg-gray-100"
-                onClick={() => {
-                  const hasExisting = surfaceMsgConversations.some(
-                    (c) => c.employeeId === emp.id,
-                  );
-                  if (!hasExisting) {
-                    setSurfaceMsgText(formatSurfaceMessage());
-                    setSurfaceMsgSpecsEmployeeIds((prev) =>
-                      prev.includes(emp.id) ? prev : [...prev, emp.id],
-                    );
-                  }
-                  setSurfaceMsgEmployeeId(emp.id);
-                  setRecipientPickerOpen(false);
-                }}>
-                {emp.name}{" "}
-                <span className="text-xs text-gray-400">{emp.email}</span>
-              </button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {loading ? (
         <div className="fixed inset-0 z-80 flex items-center justify-center bg-white/80 backdrop-blur-sm">
@@ -2696,6 +2704,7 @@ export default function BasicDetails() {
       <ScheduleCalendarModal
         open={isScheduleCalendarOpen}
         selectedDate={scheduledStart}
+        initialDate={projectNow}
         availableDateEvents={availableDateEvents}
         onClose={() => setIsScheduleCalendarOpen(false)}
         onSelectDate={(date) => {

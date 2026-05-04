@@ -1350,6 +1350,7 @@ export default function DashboardPage() {
               onRefresh={handleRefresh}
               canEditGeneratedTasks
               reviewSummary={reviewSummary}
+              emptyProjectState="no-projects-today"
             />
           </div>
 

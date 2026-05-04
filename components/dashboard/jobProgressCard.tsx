@@ -4,7 +4,7 @@ import React, { memo, useState, useEffect, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
-import { ChevronDown, ChevronRight, Pencil, RefreshCw } from "lucide-react";
+import { BarChart3, ChevronDown, ChevronRight, Pencil, RefreshCw } from "lucide-react";
 import DownpaymentModal from "@/components/project-creation/DownpaymentModal";
 import ProjectReviewModal from "@/components/dashboard/ProjectReviewModal";
 import GeneratedTaskEditModal, {
@@ -67,11 +67,13 @@ type Props = {
   currentUserId?: string | null;
   employeeReviewItems?: EmployeeReviewItem[];
   reviewSummary?: ProjectReviewSummary | null;
+  emptyProjectState?: "select-project" | "no-projects-today";
   className?: string;
 };
 
-const GREEN = "#7ED957";
-const SCROLL_TRACK = "#EAF7E4";
+const GREEN = "#00c065";
+const SCROLL_TRACK = "#E6F8EF";
+const SCROLL_TRACK_DARK = "#1f2937";
 
 const JOB_CREATION_CHILD_ROUTES: Record<string, string> = {
   "workflow-main-task": "/admin/job-creation/main-task-assignment",
@@ -224,7 +226,7 @@ function StatusLabelTag({
       <span
         className={[
           "shrink-0 text-xs",
-          dim ? "text-gray-200" : "text-gray-400",
+          dim ? "text-gray-200" : "text-gray-400 dark:text-slate-500",
         ].join(" ")}>
         {label}
       </span>
@@ -232,7 +234,7 @@ function StatusLabelTag({
   }
 
   const toneClasses: Record<string, string> = {
-    early: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    early: "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a]",
     "on-time": "border-sky-200 bg-sky-50 text-sky-700",
     late: "border-rose-200 bg-rose-50 text-rose-700",
   };
@@ -262,14 +264,14 @@ function StepIcon({ status }: { status: StepVisualStatus }) {
   if (status === "active") {
     return (
       <span
-        className="h-5 w-5 rounded-full border-2 bg-white"
+        className="h-5 w-5 rounded-full border-2 bg-white dark:bg-slate-900"
         style={{ borderColor: GREEN }}
       />
     );
   }
 
   return (
-    <span className="h-5 w-5 rounded-full border-2 border-gray-300 bg-white" />
+    <span className="h-5 w-5 rounded-full border-2 border-gray-300 bg-white dark:border-slate-600 dark:bg-slate-900" />
   );
 }
 
@@ -552,6 +554,44 @@ function ProgressSkeleton() {
   );
 }
 
+function NoProjectEmptyState({
+  mode,
+  onGoToReports,
+}: {
+  mode: "select-project" | "no-projects-today";
+  onGoToReports: () => void;
+}) {
+  if (mode === "no-projects-today") {
+    return (
+      <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center">
+        <div className="max-w-sm">
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-[#00c065]/20 bg-[#00c065]/10 text-[#00c065]">
+            <BarChart3 className="h-5 w-5" />
+          </div>
+          <h3 className="mt-3 text-sm font-semibold text-gray-900 dark:text-slate-100">
+            No projects today
+          </h3>
+          <p className="mt-1 text-sm leading-5 text-gray-500 dark:text-slate-400">
+            There are no scheduled projects for the selected day.
+          </p>
+          <button
+            type="button"
+            onClick={onGoToReports}
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-lg bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
+            Go to reports
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-gray-500 dark:text-slate-400">
+      Select a project to view its process flow.
+    </div>
+  );
+}
+
 function JobProgressCard({
   title = "Progress",
   selectedProject,
@@ -569,6 +609,7 @@ function JobProgressCard({
   currentUserId,
   employeeReviewItems = [],
   reviewSummary = null,
+  emptyProjectState = "select-project",
   className = "",
 }: Props) {
   const router = useRouter();
@@ -932,37 +973,22 @@ function JobProgressCard({
     "cancelled",
   ].includes(effectiveProjectStatus);
 
-  const jobCreationDone =
-    processItems.some(
-      (item) =>
-        (item.id === "job-creation" ||
-          item.title.toLowerCase().trim() === "job creation") &&
-        item.status === "done",
-    ) ||
-    [
-      "ready_to_start",
-      "in_progress",
-      ...END_OF_WORK_STATUS_ORDER,
-      "completed",
-      "cancelled",
-    ].includes(effectiveProjectStatus);
-
   return (
     <section
       className={[
-        "flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm",
+        "flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900",
         className,
       ].join(" ")}>
       <div className="h-1 w-full shrink-0 rounded-t-xl bg-[#00c065]" />
 
-      <div className="shrink-0 border-b border-gray-200 px-5 py-4">
+      <div className="shrink-0 border-b border-gray-200 px-5 py-4 dark:border-slate-700">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-[17px] font-semibold leading-5 text-gray-900">
+            <h2 className="text-[17px] font-semibold leading-5 text-gray-900 dark:text-slate-100">
               {title}
             </h2>
 
-            <p className="mt-1 text-[12px] leading-5 text-gray-500">
+            <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-slate-400">
               Track service flow, scheduled dates, and task completion.
             </p>
           </div>
@@ -972,7 +998,7 @@ function JobProgressCard({
               type="button"
               onClick={onRefresh}
               disabled={loadingDetails}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50">
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 dark:text-slate-400 transition hover:bg-gray-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700">
               <RefreshCw
                 className={[
                   "h-3.5 w-3.5",
@@ -984,7 +1010,7 @@ function JobProgressCard({
         </div>
       </div>
 
-      <div className="hidden shrink-0 grid-cols-12 gap-3 border-b border-gray-200 px-4 py-4 text-[11px] font-medium uppercase tracking-[0.12em] text-gray-400 md:grid">
+      <div className="hidden shrink-0 grid-cols-12 gap-3 border-b border-gray-200 px-4 py-4 text-[11px] font-medium uppercase tracking-[0.12em] text-gray-400 dark:text-slate-500 md:grid dark:border-slate-700">
         <div className="col-span-1">Status</div>
         <div className="col-span-5">Service</div>
         <div className="col-span-3">Scheduled Date &amp; Time</div>
@@ -992,29 +1018,39 @@ function JobProgressCard({
       </div>
 
       <div className="min-h-0 flex-1 p-3">
-        <div className="flex h-full min-h-0 flex-col rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="flex h-full min-h-0 flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div
             className={[
               "min-h-0 flex-1 overflow-y-auto",
               "px-3 py-3",
+              "[--job-progress-scrollbar-track:#E6F8EF] dark:[--job-progress-scrollbar-track:#0f172a]",
               "[&::-webkit-scrollbar]:w-2",
+              "[&::-webkit-scrollbar]:bg-[#E6F8EF]",
+              "dark:[&::-webkit-scrollbar]:bg-slate-900",
               "[&::-webkit-scrollbar-track]:rounded-full",
-              "[&::-webkit-scrollbar-track]:bg-[#EAF7E4]",
+              "[&::-webkit-scrollbar-track]:bg-[#E6F8EF]",
+              "dark:[&::-webkit-scrollbar-track]:bg-slate-900",
+              "[&::-webkit-scrollbar-button]:bg-[#E6F8EF]",
+              "dark:[&::-webkit-scrollbar-button]:bg-slate-900",
+              "[&::-webkit-scrollbar-corner]:bg-[#E6F8EF]",
+              "dark:[&::-webkit-scrollbar-corner]:bg-slate-900",
               "[&::-webkit-scrollbar-thumb]:rounded-full",
-              "[&::-webkit-scrollbar-thumb]:bg-[#7ED957]",
+              "[&::-webkit-scrollbar-thumb]:bg-[#00c065]",
+              "dark:[&::-webkit-scrollbar-thumb]:bg-[#00c065]",
             ].join(" ")}
             style={{
               scrollbarWidth: "thin",
-              scrollbarColor: `${GREEN} ${SCROLL_TRACK}`,
-            }}>
+              scrollbarColor: `#00c065 var(--job-progress-scrollbar-track)`,
+            } as React.CSSProperties}>
             {!selectedProject ? (
-              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-gray-500">
-                Select a project to view its process flow.
-              </div>
+              <NoProjectEmptyState
+                mode={emptyProjectState}
+                onGoToReports={() => router.push("/admin/report")}
+              />
             ) : loadingDetails ? (
               <ProgressSkeleton />
             ) : processItems.length === 0 ? (
-              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-gray-500">
+              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-gray-500 dark:text-slate-400">
                 No progress steps yet.
               </div>
             ) : (
@@ -1074,8 +1110,8 @@ function JobProgressCard({
                         "py-2",
                         !isLastGroup
                           ? isJobCreationGroup
-                            ? "border-b border-gray-100/40"
-                            : "border-b border-gray-100"
+                            ? "border-b border-gray-100 dark:border-slate-800/60"
+                            : "border-b border-gray-100 dark:border-slate-800"
                           : "",
                       ].join(" ")}>
                       <button
@@ -1087,9 +1123,9 @@ function JobProgressCard({
                           }
                         }}
                         className={[
-                          "w-full rounded-lg px-3 py-3 text-left hover:bg-gray-50",
+                          "w-full rounded-lg px-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800/70",
                           hasChildren ? "cursor-pointer" : "cursor-default",
-                          "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                          "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900",
                         ].join(" ")}
                         style={
                           hasChildren
@@ -1116,7 +1152,7 @@ function JobProgressCard({
                               {hasChildren ? (
                                 <ChevronDown
                                   className={[
-                                    "mt-0.5 h-4 w-4 text-gray-300 transition-transform",
+                                    "mt-0.5 h-4 w-4 text-gray-300 transition-transform dark:text-slate-600",
                                     open ? "rotate-0" : "-rotate-90",
                                   ].join(" ")}
                                   aria-hidden
@@ -1131,8 +1167,8 @@ function JobProgressCard({
                                     className={[
                                       "truncate text-sm font-medium",
                                       effectiveGroupStatus === "pending"
-                                        ? "text-gray-700"
-                                        : "text-gray-900",
+                                        ? "text-gray-700 dark:text-slate-300"
+                                        : "text-gray-900 dark:text-slate-100",
                                     ].join(" ")}>
                                     {group.title}
                                   </div>
@@ -1147,13 +1183,13 @@ function JobProgressCard({
                           </div>
 
                           <div className="md:col-span-3">
-                            <div className="text-xs text-gray-900">
+                            <div className="text-xs text-gray-900 dark:text-slate-100">
                               {group.startLabel || "-"}
                             </div>
                           </div>
 
                           <div className="md:col-span-3">
-                            <div className="text-xs text-gray-900">
+                            <div className="text-xs text-gray-900 dark:text-slate-100">
                               {group.endLabel || "-"}
                             </div>
                           </div>
@@ -1215,12 +1251,12 @@ function JobProgressCard({
                                 <div key={child.id} className="relative">
                                   {isJobCreationGroup ? (
                                     /* ── Job-creation child: div wrapper so we can put a real button inside ── */
-                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="grid grid-cols-12 items-center gap-3">
                                         {/* Status icon */}
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
-                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
                                               />
@@ -1236,7 +1272,7 @@ function JobProgressCard({
                                                 "truncate text-sm font-medium",
                                                 dim
                                                   ? "text-gray-300"
-                                                  : "text-gray-800",
+                                                  : "text-gray-800 dark:text-slate-200",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
@@ -1265,8 +1301,8 @@ function JobProgressCard({
                                               className={[
                                                 "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
                                                 dim || isPastJobCreation
-                                                  ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
-                                                  : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
+                                                  ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600"
+                                                  : "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a] hover:border-[#00c065]/40 hover:bg-[#00c065]/15",
                                               ].join(" ")}>
                                               Open
                                             </button>
@@ -1275,11 +1311,11 @@ function JobProgressCard({
                                       </div>
                                     </div>
                                   ) : child.id === "manage-downpayment" ? (
-                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="grid grid-cols-12 items-center gap-3">
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
-                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
                                               />
@@ -1293,7 +1329,7 @@ function JobProgressCard({
                                                 "truncate text-sm font-medium",
                                                 dim
                                                   ? "text-gray-300"
-                                                  : "text-gray-800",
+                                                  : "text-gray-800 dark:text-slate-200",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
@@ -1322,8 +1358,8 @@ function JobProgressCard({
                                               effectiveProjectStatus ===
                                                 "downpayment_pending" &&
                                               effectiveProjectId
-                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
-                                                : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300",
+                                                ? "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a] hover:border-[#00c065]/40 hover:bg-[#00c065]/15"
+                                                : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600",
                                             ].join(" ")}>
                                             Manage
                                           </button>
@@ -1331,11 +1367,11 @@ function JobProgressCard({
                                       </div>
                                     </div>
                                   ) : child.id === "project-kickoff" ? (
-                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="grid grid-cols-12 items-center gap-3">
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
-                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
                                               />
@@ -1350,7 +1386,7 @@ function JobProgressCard({
                                                 "truncate text-sm font-medium",
                                                 dim
                                                   ? "text-gray-300"
-                                                  : "text-gray-800",
+                                                  : "text-gray-800 dark:text-slate-200",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
@@ -1376,8 +1412,8 @@ function JobProgressCard({
                                               effectiveProjectStatus === "ready_to_start" &&
                                               !startingProject &&
                                               effectiveProjectId
-                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
-                                                : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300",
+                                                ? "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a] hover:border-[#00c065]/40 hover:bg-[#00c065]/15"
+                                                : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600",
                                             ].join(" ")}>
                                             {startingProject
                                               ? "Starting..."
@@ -1389,11 +1425,11 @@ function JobProgressCard({
                                       </div>
                                     </div>
                                   ) : isEndOfWorkChild ? (
-                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50">
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="grid grid-cols-12 items-center gap-3">
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
-                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
                                               />
@@ -1408,7 +1444,7 @@ function JobProgressCard({
                                                 "truncate text-sm font-medium",
                                                 dim
                                                   ? "text-gray-300"
-                                                  : "text-gray-800",
+                                                  : "text-gray-800 dark:text-slate-200",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
@@ -1501,8 +1537,8 @@ function JobProgressCard({
                                                 className={[
                                                   "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
                                                   actionDisabled
-                                                    ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
-                                                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
+                                                    ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600"
+                                                    : "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a] hover:border-[#00c065]/40 hover:bg-[#00c065]/15",
                                                 ].join(" ")}>
                                                 {updatingEndOfWorkStepId ===
                                                 child.id
@@ -1521,14 +1557,14 @@ function JobProgressCard({
                                           toggleSubtaskRow(child.id);
                                       }}
                                       className={[
-                                        "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50",
+                                        "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800/70",
                                         hasDetail ? "cursor-pointer" : "",
                                       ].join(" ")}>
                                       <div className="grid grid-cols-12 items-center gap-3">
                                         {/* Status icon */}
                                         <div className="col-span-1">
                                           <div className="relative flex h-full w-10 items-center justify-center">
-                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
                                               />
@@ -1544,7 +1580,7 @@ function JobProgressCard({
                                                 "truncate text-sm font-medium",
                                                 dim
                                                   ? "text-gray-300"
-                                                  : "text-gray-800",
+                                                  : "text-gray-800 dark:text-slate-200",
                                               ].join(" ")}>
                                               {child.title}
                                             </div>
@@ -1563,7 +1599,7 @@ function JobProgressCard({
                                               "text-xs",
                                               dim
                                                 ? "text-gray-200"
-                                                : "text-gray-700",
+                                                : "text-gray-700 dark:text-slate-300",
                                             ].join(" ")}>
                                             {child.startLabel || "-"}
                                           </div>
@@ -1576,13 +1612,13 @@ function JobProgressCard({
                                               "flex items-center justify-end gap-2 text-xs",
                                               dim
                                                 ? "text-gray-200"
-                                                : "text-gray-700",
+                                                : "text-gray-700 dark:text-slate-300",
                                             ].join(" ")}>
                                             <span>{child.endLabel || "-"}</span>
                                             {hasDetail ? (
                                               <ChevronRight
                                                 className={[
-                                                  "h-4 w-4 shrink-0 text-gray-300 transition-transform",
+                                                  "h-4 w-4 shrink-0 text-gray-300 transition-transform dark:text-slate-600",
                                                   childOpen ? "rotate-90" : "",
                                                 ].join(" ")}
                                                 aria-hidden
@@ -1608,22 +1644,22 @@ function JobProgressCard({
                                       <div className="relative col-span-1" />
 
                                       <div className="col-span-11">
-                                        <div className="rounded-lg border border-gray-200 bg-white p-2">
+                                        <div className="rounded-lg border border-gray-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
                                           <div className="flex min-w-0 flex-wrap items-center gap-2">
                                             <span
                                               className={[
-                                                "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs",
+                                                "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs dark:border-slate-700 dark:bg-slate-800",
                                                 dim
-                                                  ? "text-gray-400 opacity-70"
-                                                  : "text-gray-700",
+                                                  ? "text-gray-400 dark:text-slate-500 opacity-70"
+                                                  : "text-gray-700 dark:text-slate-300",
                                               ].join(" ")}>
                                               Assigned to:{" "}
                                               <span
                                                 className={[
                                                   "font-semibold",
                                                   dim
-                                                    ? "text-gray-400 opacity-70"
-                                                    : "text-gray-900",
+                                                    ? "text-gray-400 dark:text-slate-500 opacity-70"
+                                                    : "text-gray-900 dark:text-slate-100",
                                                 ].join(" ")}>
                                                 {child.detail?.employees?.length
                                                   ? child.detail.employees.join(
@@ -1635,18 +1671,18 @@ function JobProgressCard({
 
                                             <span
                                               className={[
-                                                "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs",
+                                                "rounded-full border border-gray-200 bg-white px-3 py-1 text-xs dark:border-slate-700 dark:bg-slate-800",
                                                 dim
-                                                  ? "text-gray-400 opacity-70"
-                                                  : "text-gray-700",
+                                                  ? "text-gray-400 dark:text-slate-500 opacity-70"
+                                                  : "text-gray-700 dark:text-slate-300",
                                               ].join(" ")}>
                                               Estimated Duration:{" "}
                                               <span
                                                 className={[
                                                   "font-semibold",
                                                   dim
-                                                    ? "text-gray-400 opacity-70"
-                                                    : "text-gray-900",
+                                                    ? "text-gray-400 dark:text-slate-500 opacity-70"
+                                                    : "text-gray-900 dark:text-slate-100",
                                                 ].join(" ")}>
                                                 {child.detail?.estimatedHours ||
                                                   "0 hrs"}
@@ -1726,8 +1762,8 @@ function JobProgressCard({
                                                     ? ""
                                                     : "ml-auto",
                                                   isPreviousTaskDone
-                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
-                                                    : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300",
+                                                    ? "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a] hover:border-[#00c065]/40 hover:bg-[#00c065]/15"
+                                                    : "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600",
                                                 ].join(" ")}>
                                                 Finish
                                               </button>
@@ -1839,13 +1875,13 @@ function JobProgressCard({
       {/* Finish subtask confirmation modal */}
       {confirmingFinishId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl">
-            <h3 className="text-base font-semibold text-gray-900">
+          <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100">
               Mark subtask as done?
             </h3>
-            <p className="mt-2 text-sm text-gray-600">
+            <p className="mt-2 text-sm text-gray-600 dark:text-slate-400">
               Are you sure you want to finish{" "}
-              <span className="font-medium text-gray-900">
+              <span className="font-medium text-gray-900 dark:text-slate-100">
                 {confirmingFinishTitle}
               </span>
               ? This will mark it as completed.
@@ -1855,7 +1891,7 @@ function JobProgressCard({
                 type="button"
                 onClick={() => setConfirmingFinishId(null)}
                 disabled={finishing}
-                className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50">
+                className="rounded-lg border border-gray-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800 text-sm font-semibold text-gray-700 dark:text-slate-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/70 disabled:opacity-50">
                 Cancel
               </button>
               <button

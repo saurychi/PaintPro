@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Plus, X } from "lucide-react";
+import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
 import type {
   ScaleBandKey,
   ScalePresetKey,
@@ -64,6 +65,13 @@ export default function MeasurementModal({
   const [isAddSurfaceModalOpen, setIsAddSurfaceModalOpen] = useState(false);
   const [newSurfacePresetKey, setNewSurfacePresetKey] =
     useState<ScalePresetKey>(allPresetKeys[0] ?? "interior_wall_area_m2");
+  const [measurementPendingDelete, setMeasurementPendingDelete] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+  const [selectedMeasurementIdsForDelete, setSelectedMeasurementIdsForDelete] =
+    useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   function openAddSurfaceModal() {
     const firstPresetKey = allPresetKeys[0];
@@ -76,6 +84,20 @@ export default function MeasurementModal({
 
   function closeAddSurfaceModal() {
     setIsAddSurfaceModalOpen(false);
+  }
+
+  function toggleMeasurementDeleteSelection(id: string) {
+    setSelectedMeasurementIdsForDelete((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function removeSelectedMeasurements(ids: Set<string>) {
+    ids.forEach((id) => onRemove(id));
+    setSelectedMeasurementIdsForDelete(new Set());
   }
 
   function confirmAddSurface() {
@@ -122,14 +144,25 @@ export default function MeasurementModal({
               {rows.length} measurement{rows.length === 1 ? "" : "s"} added
             </div>
 
-            <button
-              type="button"
-              onClick={openAddSurfaceModal}
-              disabled={loadingPresets || allPresetKeys.length === 0}
-              className="inline-flex items-center gap-2 rounded-full bg-[#00c065] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
-              <Plus className="h-4 w-4" />
-              Add Measurement
-            </button>
+            <div className="flex items-center gap-2">
+              {selectedMeasurementIdsForDelete.size > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100"
+                >
+                  Remove ({selectedMeasurementIdsForDelete.size})
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={openAddSurfaceModal}
+                disabled={loadingPresets || allPresetKeys.length === 0}
+                className="inline-flex items-center gap-2 rounded-full bg-[#00c065] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
+                <Plus className="h-4 w-4" />
+                Add Measurement
+              </button>
+            </div>
           </div>
 
           <div
@@ -177,7 +210,18 @@ export default function MeasurementModal({
                     <div
                       key={row.id}
                       className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(220px,0.7fr)_auto]">
+                      <div className="grid gap-4 xl:grid-cols-[32px_minmax(0,1.25fr)_minmax(220px,0.7fr)_auto]">
+                        <label className="flex h-9 items-center xl:justify-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedMeasurementIdsForDelete.has(row.id)}
+                            onChange={() =>
+                              toggleMeasurementDeleteSelection(row.id)
+                            }
+                            className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
+                            aria-label={`Select ${preset.label} for deletion`}
+                          />
+                        </label>
                         <div className="min-w-0">
                           <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                             Surface Type
@@ -284,7 +328,12 @@ export default function MeasurementModal({
                         <div className="flex items-start justify-end">
                           <button
                             type="button"
-                            onClick={() => onRemove(row.id)}
+                            onClick={() =>
+                              setMeasurementPendingDelete({
+                                id: row.id,
+                                label: preset.label,
+                              })
+                            }
                             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                             aria-label="Remove measurement">
                             <X className="h-4 w-4" />
@@ -380,6 +429,36 @@ export default function MeasurementModal({
           </div>
         ) : null}
       </div>
+
+      <ConfirmDeleteModal
+        open={Boolean(measurementPendingDelete)}
+        title="Remove measurement?"
+        description={
+          measurementPendingDelete
+            ? `Remove "${measurementPendingDelete.label}" from this project?`
+            : "Remove this measurement from this project?"
+        }
+        confirmLabel="Remove"
+        onCancel={() => setMeasurementPendingDelete(null)}
+        onConfirm={() => {
+          if (measurementPendingDelete) onRemove(measurementPendingDelete.id);
+          setMeasurementPendingDelete(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        open={bulkDeleteOpen}
+        title="Remove selected measurements?"
+        description={`Remove ${selectedMeasurementIdsForDelete.size} selected measurement${
+          selectedMeasurementIdsForDelete.size === 1 ? "" : "s"
+        } from this project?`}
+        confirmLabel="Remove selected"
+        onCancel={() => setBulkDeleteOpen(false)}
+        onConfirm={() => {
+          removeSelectedMeasurements(selectedMeasurementIdsForDelete);
+          setBulkDeleteOpen(false);
+        }}
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
 } from "@/lib/planning/materialEstimator";
 import { normalizeEquipmentUsageForStorage } from "@/lib/planning/equipmentUsage";
 import { buildProjectSchedule } from "@/lib/planning/projectScheduling";
+import { listManualUnavailableDays } from "@/lib/schedule/unavailableDays";
 import {
   calculateProjectCostEstimation,
   type CostEstimationMainTask,
@@ -642,14 +643,17 @@ export async function POST(req: Request) {
 
   const projectCode = requestedProjectCode || (await generateProjectCode());
 
+  const unavailableDays = await listManualUnavailableDays();
+
   const fallbackProjectSchedule = buildProjectSchedule({
     project: {
       scheduled_start_datetime: scheduledStartDatetime,
       scheduled_end_datetime: scheduledEndDatetime,
       dimensions: projectDimensions,
     },
-    generatedTasks: generatedTasks as any,
+    generatedTasks,
     existingBlocks: [],
+    unavailableDates: unavailableDays.map((day) => day.blockedDate),
   });
 
   const resolvedScheduledEndDatetime =

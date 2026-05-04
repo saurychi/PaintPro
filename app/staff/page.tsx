@@ -60,66 +60,10 @@ type OverviewResponse = {
   details?: string;
 };
 
-const END_OF_WORK_STATUS_ORDER = [
-  "review_pending",
-  "invoice_pending",
-  "payment_pending",
-  "employee_management_pending",
-  "conclude_job_pending",
-] as const;
-
-const END_OF_WORK_STEP_CONFIG = [
-  {
-    id: "review-and-final-checks",
-    title: "Review and Final Checks",
-    pendingStatus: "review_pending",
-  },
-  {
-    id: "invoice-generation",
-    title: "Invoice Generation",
-    pendingStatus: "invoice_pending",
-  },
-  {
-    id: "receive-payment",
-    title: "Receive Payment",
-    pendingStatus: "payment_pending",
-  },
-  {
-    id: "employee-management",
-    title: "Employee Management",
-    pendingStatus: "employee_management_pending",
-  },
-  {
-    id: "conclude-job",
-    title: "Conclude Job",
-    pendingStatus: "conclude_job_pending",
-  },
-] as const;
-
-
 function normalizeStatus(value?: string | null) {
   return String(value || "")
     .trim()
     .toLowerCase();
-}
-
-function getEndOfWorkChildStatus(
-  projectStatus: string,
-  stepIndex: number,
-): StepVisualStatus {
-  const normalized = normalizeStatus(projectStatus);
-
-  if (normalized === "completed" || normalized === "cancelled") return "done";
-  if (normalized === "in_progress") return stepIndex === 0 ? "active" : "pending";
-
-  const activeIndex = END_OF_WORK_STATUS_ORDER.indexOf(
-    normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
-  );
-
-  if (activeIndex === -1) return "pending";
-  if (stepIndex < activeIndex) return "done";
-  if (stepIndex === activeIndex) return "active";
-  return "pending";
 }
 
 function asArray<T = unknown>(value: unknown): T[] {
@@ -714,53 +658,6 @@ function buildProcessItems(args: {
             ],
     });
   }
-
-  const manageEndChildren: ProcessItem[] = END_OF_WORK_STEP_CONFIG.map(
-    (step, stepIndex) => {
-      const status = getEndOfWorkChildStatus(normalized, stepIndex);
-
-      return {
-        id: step.id,
-        title: step.title,
-        status,
-        startLabel: formatDateTime(projectEnd),
-        endLabel:
-          status === "done"
-            ? normalized === "cancelled" && step.id === "conclude-job"
-              ? "Cancelled"
-              : normalized === "completed" && step.id === "conclude-job"
-                ? "Completed"
-                : formatDateTime(projectEnd)
-            : status === "active"
-              ? "Working on it..."
-              : "-",
-      };
-    },
-  );
-
-  const manageEndStatus: StepVisualStatus = manageEndChildren.every(
-    (child) => child.status === "done",
-  )
-    ? "done"
-    : manageEndChildren.some((child) => child.status !== "pending")
-      ? "active"
-      : "pending";
-
-  items.push({
-    id: "manage-end-of-work",
-    title: "Manage End of Work",
-    status: manageEndStatus,
-    startLabel: formatDateTime(projectEnd),
-    endLabel:
-      normalized === "completed"
-        ? formatDateTime(projectEnd)
-        : normalized === "cancelled"
-          ? "Cancelled"
-          : manageEndStatus === "active"
-            ? "Working on it..."
-            : "-",
-    children: manageEndChildren,
-  });
 
   return items;
 }

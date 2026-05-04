@@ -4,6 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
   Home,
   Users,
@@ -17,6 +18,8 @@ import {
   ChevronRight,
   ChevronDown,
   Menu,
+  Moon,
+  Sun,
   X,
 } from "lucide-react";
 
@@ -333,6 +336,18 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const menuItems = ITEMS_BY_ROLE[role];
   const desktopScrollRef = React.useRef<HTMLDivElement | null>(null);
   const resolvedUser = user ?? FALLBACK_SIDEBAR_USER;
+  const { resolvedTheme, setTheme } = useTheme();
+  const [themeMounted, setThemeMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setThemeMounted(true);
+  }, []);
+
+  const isDark = themeMounted && resolvedTheme === "dark";
+
+  function toggleTheme() {
+    setTheme(isDark ? "light" : "dark");
+  }
 
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [desktopScrollFade, setDesktopScrollFade] = React.useState({
@@ -634,6 +649,49 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                   <div className="truncate text-xs text-gray-500">
                     {resolvedUser.email || ""}
                   </div>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                        roleBadgeClass(effectiveRole),
+                      )}
+                    >
+                      {effectiveRole.toUpperCase()}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      className={cn(
+                        "relative inline-flex h-8 w-[58px] shrink-0 items-center rounded-full border px-1 transition-all duration-300",
+                        isDark
+                          ? "border-slate-700 bg-slate-900"
+                          : "border-amber-200 bg-amber-50",
+                      )}
+                    >
+                      <span className="absolute left-2 text-amber-500">
+                        <Sun className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="absolute right-2 text-slate-400">
+                        <Moon className="h-3.5 w-3.5" />
+                      </span>
+                      <span
+                        className={cn(
+                          "relative z-10 grid h-6 w-6 place-items-center rounded-full bg-white shadow-sm transition-transform duration-300",
+                          isDark ? "translate-x-6" : "translate-x-0",
+                        )}
+                      >
+                        {isDark ? (
+                          <Moon className="h-3.5 w-3.5 text-slate-700" />
+                        ) : (
+                          <Sun className="h-3.5 w-3.5 text-amber-500" />
+                        )}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -893,6 +951,27 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                 )}
               </div>
 
+              {!open && (
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                  title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                  className={cn(
+                    "mt-2 relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-all duration-300",
+                    isDark
+                      ? "border-slate-700 bg-slate-900 text-slate-200"
+                      : "border-amber-200 bg-amber-50 text-amber-500",
+                  )}
+                >
+                  {isDark ? (
+                    <Moon className="h-3.5 w-3.5" />
+                  ) : (
+                    <Sun className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
+
               {open && (
                 <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-gray-900">
@@ -902,7 +981,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                   {resolvedUser.email || ""}
                 </div>
 
-                  <div className="mt-2">
+                  <div className="mt-2 flex items-center gap-2">
                     <span
                       className={cn(
                         "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
@@ -911,6 +990,38 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                     >
                       {effectiveRole.toUpperCase()}
                     </span>
+
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      className={cn(
+                        "relative inline-flex h-8 w-[58px] shrink-0 items-center rounded-full border px-1 transition-all duration-300",
+                        isDark
+                          ? "border-slate-700 bg-slate-900"
+                          : "border-amber-200 bg-amber-50",
+                      )}
+                    >
+                      <span className="absolute left-2 text-amber-500">
+                        <Sun className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="absolute right-2 text-slate-400">
+                        <Moon className="h-3.5 w-3.5" />
+                      </span>
+                      <span
+                        className={cn(
+                          "relative z-10 grid h-6 w-6 place-items-center rounded-full bg-white shadow-sm transition-transform duration-300",
+                          isDark ? "translate-x-6" : "translate-x-0",
+                        )}
+                      >
+                        {isDark ? (
+                          <Moon className="h-3.5 w-3.5 text-slate-700" />
+                        ) : (
+                          <Sun className="h-3.5 w-3.5 text-amber-500" />
+                        )}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}
