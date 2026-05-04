@@ -1,7 +1,20 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { ChevronRight, Loader2, Plus, X } from "lucide-react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  Loader2,
+  Plus,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
@@ -18,6 +31,8 @@ type MaterialItem = {
   quantity: number;
   unitCost: number;
   estimatedCost: number;
+  currentStock: number;
+  reorderPoint: number;
 };
 
 type ServiceGroup = {
@@ -32,6 +47,8 @@ type MaterialOption = {
   id: string;
   name: string;
   unitCost: number;
+  currentStock: number;
+  reorderPoint: number;
 };
 
 const ACCENT = "#00c065";
@@ -79,9 +96,111 @@ export default function MaterialsAssignment() {
   const [selectedMaterialKeysForDelete, setSelectedMaterialKeysForDelete] =
     useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleteGroupId, setBulkDeleteGroupId] = useState<string | null>(
+    null,
+  );
 
   const undoStackRef = useRef<ServiceGroup[][]>([]);
   const redoStackRef = useRef<ServiceGroup[][]>([]);
+
+  // For each unique material across the project, compare the project's total
+  // planned quantity to the current inventory stock. Anything where the plan
+  // exceeds stock is a "shortage" — the user must restock OR lower the plan
+  // before they can move past this step.
+  const shortageByMaterialId = useMemo(() => {
+    const totals = new Map<
+      string,
+      {
+        materialId: string;
+        name: string;
+        planned: number;
+        currentStock: number;
+        reorderPoint: number;
+      }
+    >();
+
+    for (const group of services) {
+      for (const item of group.children) {
+        if (!item.materialId) continue;
+        const existing = totals.get(item.materialId);
+        if (existing) {
+          existing.planned += Number(item.quantity ?? 0);
+        } else {
+          totals.set(item.materialId, {
+            materialId: item.materialId,
+            name: item.name,
+            planned: Number(item.quantity ?? 0),
+            currentStock: Number(item.currentStock ?? 0),
+            reorderPoint: Number(item.reorderPoint ?? 0),
+          });
+        }
+      }
+    }
+
+    const shortMap = new Map<
+      string,
+      {
+        materialId: string;
+        name: string;
+        planned: number;
+        currentStock: number;
+        deficit: number;
+      }
+    >();
+
+    for (const entry of totals.values()) {
+      const deficit = entry.planned - entry.currentStock;
+      if (deficit > 0) {
+        shortMap.set(entry.materialId, {
+          materialId: entry.materialId,
+          name: entry.name,
+          planned: entry.planned,
+          currentStock: entry.currentStock,
+          deficit,
+        });
+      }
+    }
+
+    return shortMap;
+  }, [services]);
+
+  const shortages = useMemo(
+    () => Array.from(shortageByMaterialId.values()),
+    [shortageByMaterialId],
+  );
+  const hasShortage = shortages.length > 0;
+
+  // If any shortage material has zero stock, the user can't redistribute their
+  // way out — there's literally nothing to spread across the rows. They have
+  // to restock first (or remove the material from the project).
+  const hasZeroStockShortage = shortages.some(
+    (shortage) => shortage.currentStock <= 0,
+  );
+  const canDisregard = hasShortage && !hasZeroStockShortage;
+
+  const [requestingRestock, setRequestingRestock] = useState(false);
+  const [restockRequestedAt, setRestockRequestedAt] = useState<number | null>(
+    null,
+  );
+
+  // Bulk-delete selections are scoped per main task: we group the selected
+  // "groupId::rowId" keys by their groupId so each main task's "Remove (N)"
+  // button only counts and removes its own children.
+  const selectedKeysByGroup = useMemo(() => {
+    const byGroup = new Map<string, Set<string>>();
+    for (const key of selectedMaterialKeysForDelete) {
+      const [groupId] = key.split("::");
+      if (!groupId) continue;
+      const set = byGroup.get(groupId) ?? new Set<string>();
+      set.add(key);
+      byGroup.set(groupId, set);
+    }
+    return byGroup;
+  }, [selectedMaterialKeysForDelete]);
+
+  const bulkDeleteKeys = bulkDeleteGroupId
+    ? (selectedKeysByGroup.get(bulkDeleteGroupId) ?? new Set<string>())
+    : new Set<string>();
 
   function cloneServicesState(value: ServiceGroup[]) {
     return value.map((group) => ({
@@ -121,94 +240,129 @@ export default function MaterialsAssignment() {
     });
   }
 
-  useEffect(() => {
-    async function loadProjectTaskMaterials() {
-      if (!projectId) {
-        setLoadingMaterials(false);
-        return;
+  const loadProjectTaskMaterials = useCallback(async () => {
+    if (!projectId) {
+      setLoadingMaterials(false);
+      return;
+    }
+
+    try {
+      setLoadingMaterials(true);
+
+      const response = await fetch(
+        `/api/planning/getProjectTaskMaterials?projectId=${projectId}`,
+        { cache: "no-store" },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to load project materials.");
       }
 
-      try {
-        setLoadingMaterials(true);
+      setJobNo(data?.project?.project_code || "N/A");
+      setSiteName(data?.project?.title || "Project details unavailable");
 
-        const response = await fetch(
-          `/api/planning/getProjectTaskMaterials?projectId=${projectId}`,
-        );
-        const data = await response.json();
+      const rows = Array.isArray(data?.materials) ? data.materials : [];
+      const projectTasks = Array.isArray(data?.projectTasks)
+        ? data.projectTasks
+        : [];
 
-        if (!response.ok) {
-          throw new Error(data?.error || "Failed to load project materials.");
-        }
+      const groupedMap = new Map<string, ServiceGroup>();
 
-        setJobNo(data?.project?.project_code || "N/A");
-        setSiteName(data?.project?.title || "Project details unavailable");
+      for (const row of projectTasks) {
+        const groupId = row.main_task_id || row.project_task_id;
 
-        const rows = Array.isArray(data?.materials) ? data.materials : [];
-        const projectTasks = Array.isArray(data?.projectTasks)
-          ? data.projectTasks
-          : [];
+        groupedMap.set(groupId, {
+          id: groupId,
+          title: row.main_task_name || "Main Task",
+          status: "pending",
+          projectTaskId: row.project_task_id,
+          children: [],
+        });
+      }
 
-        const groupedMap = new Map<string, ServiceGroup>();
+      for (const row of rows) {
+        const groupId = row.main_task_id || row.project_task_id;
+        const existingGroup = groupedMap.get(groupId);
 
-        for (const row of projectTasks) {
-          const groupId = row.main_task_id || row.project_task_id;
-
-          groupedMap.set(groupId, {
-            id: groupId,
-            title: row.main_task_name || "Main Task",
-            status: "pending",
-            projectTaskId: row.project_task_id,
-            children: [],
+        if (existingGroup) {
+          existingGroup.children.push({
+            id: row.project_task_material_id,
+            materialId: row.material_id ?? "",
+            name: row.material_name,
+            quantity: Number(row.quantity ?? 0),
+            unitCost: Number(row.material_unit_cost ?? 0),
+            estimatedCost: Number(row.estimated_cost ?? 0),
+            currentStock: Number(row.material_current_stock ?? 0),
+            reorderPoint: Number(row.material_reorder_point ?? 0),
           });
+          continue;
         }
 
-        for (const row of rows) {
-          const groupId = row.main_task_id || row.project_task_id;
-          const existingGroup = groupedMap.get(groupId);
-
-          if (existingGroup) {
-            existingGroup.children.push({
+        groupedMap.set(groupId, {
+          id: groupId,
+          title: row.main_task_name || "Main Task",
+          status: "pending",
+          projectTaskId: row.project_task_id,
+          children: [
+            {
               id: row.project_task_material_id,
               materialId: row.material_id ?? "",
               name: row.material_name,
               quantity: Number(row.quantity ?? 0),
               unitCost: Number(row.material_unit_cost ?? 0),
               estimatedCost: Number(row.estimated_cost ?? 0),
-            });
-            continue;
-          }
-
-          groupedMap.set(groupId, {
-            id: groupId,
-            title: row.main_task_name || "Main Task",
-            status: "pending",
-            projectTaskId: row.project_task_id,
-            children: [
-              {
-                id: row.project_task_material_id,
-                materialId: row.material_id ?? "",
-                name: row.material_name,
-                quantity: Number(row.quantity ?? 0),
-                unitCost: Number(row.material_unit_cost ?? 0),
-                estimatedCost: Number(row.estimated_cost ?? 0),
-              },
-            ],
-          });
-        }
-
-        const groupedServices = Array.from(groupedMap.values());
-
-        setServices(groupedServices);
-        setExpanded(new Set(groupedServices.map((group) => group.id)));
-      } catch (error: any) {
-        toast.error(error?.message || "Failed to load project materials.");
-      } finally {
-        setLoadingMaterials(false);
+              currentStock: Number(row.material_current_stock ?? 0),
+              reorderPoint: Number(row.material_reorder_point ?? 0),
+            },
+          ],
+        });
       }
-    }
 
-    loadProjectTaskMaterials();
+      const groupedServices = Array.from(groupedMap.values());
+
+      setServices(groupedServices);
+      setExpanded(new Set(groupedServices.map((group) => group.id)));
+      // Reload is a fresh source-of-truth: drop any pending dirty edits, undo
+      // history, and bulk-delete selections so the page reflects the server.
+      setIsDirty(false);
+      setSelectedMaterialKeysForDelete(new Set());
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load project materials.");
+      throw error;
+    } finally {
+      setLoadingMaterials(false);
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    void loadProjectTaskMaterials();
+  }, [loadProjectTaskMaterials]);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    if (
+      isDirty &&
+      !window.confirm(
+        "You have unsaved changes. Refresh anyway and discard them?",
+      )
+    ) {
+      return;
+    }
+    setRefreshing(true);
+    try {
+      await loadProjectTaskMaterials();
+      toast.success("Materials refreshed.");
+    } catch {
+      // toast already shown in loader
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -287,6 +441,8 @@ export default function MaterialsAssignment() {
             id: item.id,
             name: item.name,
             unitCost: Number(item.unit_cost ?? 0),
+            currentStock: Number(item.current_in_stock ?? 0),
+            reorderPoint: Number(item.reorder_point ?? 0),
           }))
         : [];
 
@@ -352,6 +508,8 @@ export default function MaterialsAssignment() {
               quantity: safeQuantity,
               unitCost: Number(material.unitCost || 0),
               estimatedCost,
+              currentStock: Number(material.currentStock || 0),
+              reorderPoint: Number(material.reorderPoint || 0),
             },
           ],
         };
@@ -427,7 +585,14 @@ export default function MaterialsAssignment() {
       })),
     );
 
-    setSelectedMaterialKeysForDelete(new Set());
+    // Drop only the keys we just deleted from the global selection — leave
+    // selections in other main tasks intact so each group keeps its own
+    // bulk-delete scope.
+    setSelectedMaterialKeysForDelete((prev) => {
+      const next = new Set(prev);
+      for (const key of keys) next.delete(key);
+      return next;
+    });
     setIsDirty(true);
     toast.success("Selected materials removed.");
   }
@@ -440,6 +605,100 @@ export default function MaterialsAssignment() {
       else next.add(key);
       return next;
     });
+  }
+
+  // Mark every shortage material as needing reorder so the inventory team can
+  // act on it. Doesn't change the project's planned quantities — the user must
+  // still restock or redistribute before they can move past this step.
+  async function handleRequestRestock() {
+    if (requestingRestock || shortages.length === 0) return;
+    setRequestingRestock(true);
+    try {
+      const response = await fetch("/api/materials/markForReorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: shortages.map((shortage) => ({
+            materialId: shortage.materialId,
+            stockNeeded: shortage.deficit,
+          })),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok && response.status !== 207) {
+        throw new Error(data?.error || "Failed to request restock.");
+      }
+
+      setRestockRequestedAt(Date.now());
+      toast.success(
+        `Requested restock for ${shortages.length} material${
+          shortages.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to request restock.",
+      );
+    } finally {
+      setRequestingRestock(false);
+    }
+  }
+
+  // Distribute the available stock evenly across every row that uses a short
+  // material. Each row gets floor(stock / rowCount), with the remainder going
+  // to the first few rows so the totals add up exactly. Disabled when any
+  // short material has zero stock — there's nothing to split.
+  function handleUseAvailable() {
+    if (!canDisregard) return;
+
+    // Build a per-material list of {groupId, rowId, currentStock}.
+    const rowsByMaterial = new Map<
+      string,
+      Array<{ groupId: string; rowId: string }>
+    >();
+    for (const group of services) {
+      for (const item of group.children) {
+        if (!item.materialId) continue;
+        if (!shortageByMaterialId.has(item.materialId)) continue;
+        const list = rowsByMaterial.get(item.materialId) ?? [];
+        list.push({ groupId: group.id, rowId: item.id });
+        rowsByMaterial.set(item.materialId, list);
+      }
+    }
+
+    // For each material, compute the new per-row quantity.
+    const newQuantityByKey = new Map<string, number>();
+    for (const shortage of shortages) {
+      const rows = rowsByMaterial.get(shortage.materialId) ?? [];
+      if (rows.length === 0) continue;
+      const stock = Math.max(0, shortage.currentStock);
+      const baseQty = Math.floor(stock / rows.length);
+      const remainder = stock - baseQty * rows.length;
+      rows.forEach((row, index) => {
+        const qty = baseQty + (index < remainder ? 1 : 0);
+        newQuantityByKey.set(`${row.groupId}::${row.rowId}`, qty);
+      });
+    }
+
+    updateServicesWithHistory((prev) =>
+      prev.map((group) => ({
+        ...group,
+        children: group.children.map((item) => {
+          const next = newQuantityByKey.get(`${group.id}::${item.id}`);
+          if (next === undefined) return item;
+          return {
+            ...item,
+            quantity: next,
+            estimatedCost: Number(item.unitCost || 0) * next,
+          };
+        }),
+      })),
+    );
+
+    setIsDirty(true);
+    toast.success("Quantities redistributed to fit available stock.");
   }
 
   async function updateProjectStatus(status: string) {
@@ -618,14 +877,106 @@ export default function MaterialsAssignment() {
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
-                  Task Setup
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleRefresh()}
+                    disabled={refreshing || loadingMaterials}
+                    title={
+                      isDirty
+                        ? "Refresh will discard unsaved changes."
+                        : undefined
+                    }
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                    />
+                    Refresh
+                  </button>
+
+                  <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    Task Setup
+                  </div>
                 </div>
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
               <div className="h-full overflow-y-auto pr-2 green-scrollbar">
+                {hasShortage ? (
+                  <div className="mb-2.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[13px] text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold">
+                          Not enough stock to start this project
+                        </div>
+                        <div className="mt-1 text-[12px] leading-5">
+                          {hasZeroStockShortage
+                            ? "Some materials have zero stock — restock them before continuing. Lowering the project quantity won't help here."
+                            : "Restock these materials, lower the planned quantity, or use the actions below to resolve."}
+                        </div>
+                        <ul className="mt-1.5 space-y-0.5 text-[12px] leading-5">
+                          {shortages.map((shortage) => (
+                            <li
+                              key={shortage.materialId}
+                              className="flex flex-wrap items-center gap-x-2"
+                            >
+                              <span className="font-medium">
+                                {shortage.name}
+                              </span>
+                              <span className="text-red-700 dark:text-red-300">
+                                — needs {shortage.deficit} more (planned{" "}
+                                {shortage.planned}, in stock{" "}
+                                {shortage.currentStock})
+                              </span>
+                              {shortage.currentStock <= 0 ? (
+                                <span className="rounded-full border border-red-300 bg-white/60 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:border-red-400/40 dark:bg-red-500/10 dark:text-red-200">
+                                  zero stock
+                                </span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleRequestRestock()}
+                            disabled={requestingRestock}
+                            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-red-300 bg-white px-3 text-[12px] font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/50 dark:bg-slate-900 dark:text-red-200 dark:hover:bg-red-500/15"
+                          >
+                            {requestingRestock ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            Request restock
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleUseAvailable}
+                            disabled={!canDisregard}
+                            title={
+                              !canDisregard
+                                ? "Can't redistribute — at least one short material has zero stock."
+                                : "Spread the available stock evenly across rows that use each short material."
+                            }
+                            className="inline-flex h-8 items-center justify-center rounded-md border border-red-300 bg-white px-3 text-[12px] font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/50 dark:bg-slate-900 dark:text-red-200 dark:hover:bg-red-500/15"
+                          >
+                            Use available stock
+                          </button>
+
+                          {restockRequestedAt ? (
+                            <span className="text-[11px] font-medium text-red-600 dark:text-red-300">
+                              Restock requested.
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="space-y-2.5">
                   {loadingMaterials ? (
                     <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
@@ -688,16 +1039,20 @@ export default function MaterialsAssignment() {
                               </div>
 
                               <div className="flex shrink-0 items-center gap-2">
-                                {selectedMaterialKeysForDelete.size > 0 ? (
+                                {(selectedKeysByGroup.get(group.id)?.size ?? 0) >
+                                0 ? (
                                   <button
                                     type="button"
                                     onClick={(event) => {
                                       event.stopPropagation();
+                                      setBulkDeleteGroupId(group.id);
                                       setBulkDeleteOpen(true);
                                     }}
                                     className="inline-flex h-8 items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/20"
                                   >
-                                    Remove ({selectedMaterialKeysForDelete.size})
+                                    Remove (
+                                    {selectedKeysByGroup.get(group.id)?.size ?? 0}
+                                    )
                                   </button>
                                 ) : null}
                                 <button
@@ -747,8 +1102,51 @@ export default function MaterialsAssignment() {
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                                               Material
                                             </div>
-                                            <div className="truncate font-medium text-slate-900 dark:text-slate-100">
-                                              {item.name}
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <span className="truncate font-medium text-slate-900 dark:text-slate-100">
+                                                {item.name}
+                                              </span>
+                                              {(() => {
+                                                const shortage =
+                                                  item.materialId
+                                                    ? shortageByMaterialId.get(
+                                                        item.materialId,
+                                                      )
+                                                    : undefined;
+                                                if (shortage) {
+                                                  return (
+                                                    <span
+                                                      className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700"
+                                                      title={`Project plans ${shortage.planned} but only ${shortage.currentStock} in stock. Restock ${shortage.deficit} or lower the planned quantity.`}
+                                                    >
+                                                      Needs {shortage.deficit}{" "}
+                                                      more (stock{" "}
+                                                      {shortage.currentStock})
+                                                    </span>
+                                                  );
+                                                }
+                                                const stock = item.currentStock;
+                                                const reorder =
+                                                  item.reorderPoint;
+                                                if (
+                                                  reorder > 0 &&
+                                                  stock <= reorder
+                                                ) {
+                                                  return (
+                                                    <span
+                                                      className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                                                      title={`Stock ${stock} at or below reorder point ${reorder}.`}
+                                                    >
+                                                      Low stock ({stock})
+                                                    </span>
+                                                  );
+                                                }
+                                                return (
+                                                  <span className="text-[10px] text-slate-400">
+                                                    Stock {stock}
+                                                  </span>
+                                                );
+                                              })()}
                                             </div>
                                           </div>
 
@@ -869,7 +1267,12 @@ export default function MaterialsAssignment() {
           <button
             type="button"
             onClick={handleNext}
-            disabled={isNavigatingNext}
+            disabled={isNavigatingNext || hasShortage}
+            title={
+              hasShortage
+                ? "Resolve the material shortage above before continuing."
+                : undefined
+            }
             className="inline-flex h-10 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-white transition duration-150 hover:opacity-85 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70"
             style={{ backgroundColor: ACCENT }}
           >
@@ -978,14 +1381,18 @@ export default function MaterialsAssignment() {
       <ConfirmDeleteModal
         open={bulkDeleteOpen}
         title="Remove selected materials?"
-        description={`Remove ${selectedMaterialKeysForDelete.size} selected material${
-          selectedMaterialKeysForDelete.size === 1 ? "" : "s"
-        } from this project?`}
+        description={`Remove ${bulkDeleteKeys.size} selected material${
+          bulkDeleteKeys.size === 1 ? "" : "s"
+        } from this main task?`}
         confirmLabel="Remove selected"
-        onCancel={() => setBulkDeleteOpen(false)}
-        onConfirm={() => {
-          handleRemoveSelectedMaterials(selectedMaterialKeysForDelete);
+        onCancel={() => {
           setBulkDeleteOpen(false);
+          setBulkDeleteGroupId(null);
+        }}
+        onConfirm={() => {
+          handleRemoveSelectedMaterials(bulkDeleteKeys);
+          setBulkDeleteOpen(false);
+          setBulkDeleteGroupId(null);
         }}
       />
 

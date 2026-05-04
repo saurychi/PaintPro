@@ -76,7 +76,9 @@ export async function GET(request: NextRequest) {
             material:material_id (
             material_id,
             name,
-            unit_cost
+            unit_cost,
+            current_in_stock,
+            reorder_point
             ),
             project_task:project_task_id (
             project_task_id,
@@ -107,6 +109,8 @@ export async function GET(request: NextRequest) {
         material_id: row.material?.material_id ?? "",
         material_name: row.material?.name ?? "",
         material_unit_cost: Number(row.material?.unit_cost ?? 0),
+        material_current_stock: Number(row.material?.current_in_stock ?? 0),
+        material_reorder_point: Number(row.material?.reorder_point ?? 0),
         quantity: row.estimated_quantity ?? 0,
         estimated_cost: row.estimated_cost ?? 0,
     }));

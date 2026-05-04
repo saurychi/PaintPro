@@ -3,6 +3,7 @@
 import React, { createContext, useContext } from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
+import { SidebarBadgesProvider } from "@/components/sidebar-badges"
 import { cn } from "@/lib/utils"
 
 type Role = "client" | "staff" | "manager" | "admin"
@@ -60,7 +61,9 @@ export default function ClientShellClient({
   return (
     <ClientProjectContext.Provider value={{ projectId }}>
       <SidebarProvider>
-        <ClientShell role={role} user={user}>{children}</ClientShell>
+        <SidebarBadgesProvider>
+          <ClientShell role={role} user={user}>{children}</ClientShell>
+        </SidebarBadgesProvider>
       </SidebarProvider>
     </ClientProjectContext.Provider>
   )

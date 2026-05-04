@@ -7,7 +7,7 @@ import {
 } from "@/lib/planning/materialEstimator";
 import { normalizeEquipmentUsageForStorage } from "@/lib/planning/equipmentUsage";
 import { buildProjectSchedule } from "@/lib/planning/projectScheduling";
-import { listManualUnavailableDays } from "@/lib/schedule/unavailableDays";
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays";
 import {
   calculateProjectCostEstimation,
   type CostEstimationMainTask,
@@ -643,7 +643,11 @@ export async function POST(req: Request) {
 
   const projectCode = requestedProjectCode || (await generateProjectCode());
 
-  const unavailableDays = await listManualUnavailableDays();
+  // Same set the schedule pages render — manual blocks + public holidays —
+  // so the fallback recompute on save also lands on a valid working day.
+  const unavailableDays = await listScheduleUnavailableDays(
+    req.headers.get("cookie"),
+  );
 
   const fallbackProjectSchedule = buildProjectSchedule({
     project: {
@@ -1041,6 +1045,13 @@ export async function POST(req: Request) {
       }
     }
   }
+
+  // (Stock decrement intentionally NOT done at draft/creation time. The
+  // materials-assignment page compares each project's planned quantity to
+  // current_in_stock and blocks "Next" when the project would over-consume
+  // — at which point the user either restocks or lowers the planned quantity.
+  // Actual stock consumption can be wired into the project lifecycle later,
+  // e.g. when the project moves into in_progress.)
 
   const insertedStaffUserIds = uniqueStrings(
     insertedProjectSubTaskStaffForCost.map((row) => row.user_id)

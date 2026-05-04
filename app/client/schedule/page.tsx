@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -10,7 +10,8 @@ import type {
   EventInput,
 } from "@fullcalendar/core";
 import type { DateClickArg } from "@fullcalendar/interaction";
-import { BriefcaseBusiness, CalendarDays, Loader2 } from "lucide-react";
+import { BriefcaseBusiness, CalendarDays, Loader2, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { useProjectNow } from "@/lib/time/useProjectNow";
@@ -28,6 +29,7 @@ type ScheduleProject = {
   status: ProjectStatus;
   rawStatus: string;
   dateLabel: string;
+  activeDays?: string[];
 };
 
 type FCEvent = {
@@ -61,46 +63,54 @@ const STATUS_COLORS: Record<
   pending: { bg: "#facc15", border: "#eab308", text: "#1f2937" },
 };
 
-function toFCEvent(project: ScheduleProject): FCEvent | null {
-  if (!project.scheduledStartDatetime) return null;
-
-  const start = new Date(project.scheduledStartDatetime);
-  if (Number.isNaN(start.getTime())) return null;
-
-  const colors = STATUS_COLORS[project.status];
-  const startDateStr = project.scheduledStartDatetime.slice(0, 10);
-
-  const event: FCEvent = {
-    id: project.id,
-    title: project.title,
-    start: startDateStr,
-    backgroundColor: colors.bg,
-    borderColor: colors.border,
-    textColor: colors.text,
-    extendedProps: {
-      status: project.status,
-      type: "project",
-      projectCode: project.projectCode,
-      rawStatus: project.rawStatus,
-      scheduledStartDatetime: project.scheduledStartDatetime,
-      scheduledEndDatetime: project.scheduledEndDatetime,
-    },
-  };
-
-  if (project.scheduledEndDatetime) {
-    const end = new Date(project.scheduledEndDatetime);
-    if (!Number.isNaN(end.getTime())) {
-      const inclusiveEnd = new Date(end);
-      inclusiveEnd.setDate(inclusiveEnd.getDate() + 1);
-      event.end = inclusiveEnd.toISOString().slice(0, 10);
-    }
-  }
-
-  return event;
+function addUtcDays(yyyymmdd: string, days: number) {
+  const d = new Date(`${yyyymmdd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
-function isFCEvent(event: FCEvent | null): event is FCEvent {
-  return Boolean(event);
+function toFCEventSegments(project: ScheduleProject): FCEvent[] {
+  const days = Array.from(new Set(project.activeDays ?? [])).sort();
+  if (days.length === 0) return [];
+
+  const colors = STATUS_COLORS[project.status];
+  const segments: FCEvent[] = [];
+
+  let segmentStart = days[0];
+  let segmentEnd = days[0];
+
+  function pushSegment() {
+    segments.push({
+      id: `${project.id}-seg${segments.length}`,
+      title: project.title,
+      start: segmentStart,
+      end: addUtcDays(segmentEnd, 1),
+      backgroundColor: colors.bg,
+      borderColor: colors.border,
+      textColor: colors.text,
+      extendedProps: {
+        status: project.status,
+        type: "project",
+        projectCode: project.projectCode,
+        rawStatus: project.rawStatus,
+        scheduledStartDatetime: project.scheduledStartDatetime,
+        scheduledEndDatetime: project.scheduledEndDatetime,
+      },
+    });
+  }
+
+  for (let i = 1; i < days.length; i += 1) {
+    if (days[i] === addUtcDays(segmentEnd, 1)) {
+      segmentEnd = days[i];
+    } else {
+      pushSegment();
+      segmentStart = days[i];
+      segmentEnd = days[i];
+    }
+  }
+  pushSegment();
+
+  return segments;
 }
 
 function renderEventContent(info: EventContentArg) {
@@ -141,7 +151,6 @@ function getUnavailableTypeLabel(day: ScheduleUnavailableDay) {
 export default function ClientSchedule() {
   const { now: projectNow, todayKey } = useProjectNow();
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
-  const [fcEvents, setFcEvents] = useState<FCEvent[]>([]);
   const [unavailableDays, setUnavailableDays] = useState<
     ScheduleUnavailableDay[]
   >([]);
@@ -150,76 +159,85 @@ export default function ClientSchedule() {
   );
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const [projectsResponse, unavailableResponse] = await Promise.all([
+        fetch("/api/schedule/getProjects", {
+          method: "GET",
+          cache: "no-store",
+        }),
+        fetch("/api/schedule/unavailable-days", {
+          method: "GET",
+          cache: "no-store",
+        }),
+      ]);
+
+      const projectsData = await projectsResponse.json();
+      const unavailableData = await unavailableResponse.json();
+
+      if (!projectsResponse.ok) {
+        throw new Error(
+          projectsData?.error || "Failed to load schedule projects.",
+        );
+      }
+
+      if (!unavailableResponse.ok) {
+        throw new Error(
+          unavailableData?.error || "Failed to load unavailable days.",
+        );
+      }
+
+      const nextProjects: ScheduleProject[] = Array.isArray(
+        projectsData?.projects,
+      )
+        ? projectsData.projects
+        : [];
+
+      setProjects(nextProjects);
+      setCurrentProject(projectsData?.currentProject ?? null);
+      setUnavailableDays(
+        Array.isArray(unavailableData?.unavailableDays)
+          ? unavailableData.unavailableDays
+          : [],
+      );
+    } catch (error) {
+      console.error("Failed to load client schedule:", error);
+      setProjects([]);
+      setCurrentProject(null);
+      setUnavailableDays([]);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadData() {
-      try {
-        setLoading(true);
-
-        const [projectsResponse, unavailableResponse] = await Promise.all([
-          fetch("/api/schedule/getProjects", {
-            method: "GET",
-            cache: "no-store",
-          }),
-          fetch("/api/schedule/unavailable-days", {
-            method: "GET",
-            cache: "no-store",
-          }),
-        ]);
-
-        const projectsData = await projectsResponse.json();
-        const unavailableData = await unavailableResponse.json();
-
-        if (!projectsResponse.ok) {
-          throw new Error(
-            projectsData?.error || "Failed to load schedule projects.",
-          );
-        }
-
-        if (!unavailableResponse.ok) {
-          throw new Error(
-            unavailableData?.error || "Failed to load unavailable days.",
-          );
-        }
-
-        if (cancelled) return;
-
-        const nextProjects: ScheduleProject[] = Array.isArray(
-          projectsData?.projects,
-        )
-          ? projectsData.projects
-          : [];
-
-        setProjects(nextProjects);
-        setCurrentProject(projectsData?.currentProject ?? null);
-        setUnavailableDays(
-          Array.isArray(unavailableData?.unavailableDays)
-            ? unavailableData.unavailableDays
-            : [],
-        );
-        setFcEvents(
-          nextProjects.map((project) => toFCEvent(project)).filter(isFCEvent),
-        );
-      } catch (error) {
-        if (cancelled) return;
-        console.error("Failed to load client schedule:", error);
-        setProjects([]);
-        setCurrentProject(null);
-        setUnavailableDays([]);
-        setFcEvents([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
     void loadData();
+  }, [loadData]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadData();
+      toast.success("Schedule refreshed.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to refresh schedule.",
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  const fcEvents = useMemo<FCEvent[]>(
+    () => projects.flatMap((project) => toFCEventSegments(project)),
+    [projects],
+  );
 
   const unavailableEvents = useMemo<EventInput[]>(() => {
     return unavailableDays.map((day) => {
@@ -259,23 +277,10 @@ export default function ClientSchedule() {
     const map = new Map<string, ScheduleProject[]>();
 
     for (const project of projects) {
-      if (!project.scheduledStartDatetime) continue;
-      const startKey = project.scheduledStartDatetime.slice(0, 10);
-      const endKey = project.scheduledEndDatetime
-        ? project.scheduledEndDatetime.slice(0, 10)
-        : startKey;
-
-      const cursor = new Date(`${startKey}T00:00:00`);
-      const end = new Date(`${endKey}T00:00:00`);
-      if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime()))
-        continue;
-
-      while (cursor <= end) {
-        const key = cursor.toISOString().slice(0, 10);
+      for (const key of project.activeDays ?? []) {
         const list = map.get(key) ?? [];
         list.push(project);
         map.set(key, list);
-        cursor.setDate(cursor.getDate() + 1);
       }
     }
 
@@ -537,6 +542,18 @@ export default function ClientSchedule() {
                             </span>
                           </div>
                         ))}
+
+                        <button
+                          type="button"
+                          onClick={() => void handleRefresh()}
+                          disabled={refreshing}
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          <RefreshCw
+                            className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                          />
+                          Refresh
+                        </button>
                       </div>
                     </div>
 

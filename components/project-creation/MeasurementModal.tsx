@@ -114,17 +114,17 @@ export default function MeasurementModal({
       <div className="relative flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
         <div className="h-1.5 w-full shrink-0 bg-[#00c065]" />
 
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 bg-linear-to-r from-emerald-950/50 via-slate-900 to-slate-900 px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4">
           <div className="min-w-0">
-            <div className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-300">
+            <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-[#00a054]">
               Project Measurements
             </div>
 
-            <h2 className="mt-3 text-lg font-semibold text-white">
+            <h2 className="mt-3 text-lg font-semibold text-gray-900">
               Edit Measurements
             </h2>
 
-            <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-300">
+            <p className="mt-1 max-w-2xl text-sm leading-5 text-gray-500">
               Select the surface type, choose a quick size scale, then refine
               the exact measurement if needed.
             </p>
@@ -367,16 +367,16 @@ export default function MeasurementModal({
         </div>
 
         {isAddSurfaceModalOpen ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 px-4 backdrop-blur-[1px]">
-            <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-950/30 px-4 backdrop-blur-[1px]">
+            <div className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
               <div className="h-1.5 w-full bg-[#00c065]" />
 
-              <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-linear-to-r from-emerald-950/50 via-slate-900 to-slate-900 px-5 py-4">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4">
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-white">
+                  <h3 className="text-base font-semibold text-gray-900">
                     Add Measurement
                   </h3>
-                  <p className="mt-1 text-sm leading-5 text-slate-300">
+                  <p className="mt-1 text-sm leading-5 text-gray-500">
                     Choose the surface type. The new row will start at medium
                     scale.
                   </p>
@@ -385,13 +385,13 @@ export default function MeasurementModal({
                 <button
                   type="button"
                   onClick={closeAddSurfaceModal}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-800 text-slate-300 shadow-sm transition hover:bg-slate-700 hover:text-white">
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:bg-gray-50 hover:text-gray-700">
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
               <div className="px-5 py-4">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                   Surface Type
                 </label>
 
@@ -400,7 +400,7 @@ export default function MeasurementModal({
                   onChange={(e) =>
                     setNewSurfacePresetKey(e.target.value as ScalePresetKey)
                   }
-                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-slate-800 px-3 text-sm text-white outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-900/40">
+                  className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100">
                   {allPresetKeys.map((key) => (
                     <option key={key} value={key}>
                       {surfacePresets[key].label}
@@ -409,7 +409,7 @@ export default function MeasurementModal({
                 </select>
               </div>
 
-              <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
+              <div className="flex items-center justify-end gap-3 border-t border-gray-100 px-5 py-4">
                 <button
                   type="button"
                   onClick={closeAddSurfaceModal}

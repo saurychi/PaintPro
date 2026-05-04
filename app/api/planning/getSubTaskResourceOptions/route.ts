@@ -20,7 +20,7 @@ export async function GET() {
 
     const { data: materials, error: materialsError } = await supabaseAdmin
       .from("materials")
-      .select("material_id, name, unit_cost")
+      .select("material_id, name, unit_cost, current_in_stock, reorder_point")
       .order("name", { ascending: true });
 
     if (materialsError) {
@@ -45,6 +45,8 @@ export async function GET() {
           id: item.material_id,
           name: item.name,
           unit_cost: Number(item.unit_cost ?? 0),
+          current_in_stock: Number(item.current_in_stock ?? 0),
+          reorder_point: Number(item.reorder_point ?? 0),
         })) ?? [],
     });
   } catch (error: any) {

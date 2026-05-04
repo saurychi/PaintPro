@@ -82,7 +82,6 @@ type UserRow = {
 type EquipmentRow = {
   equipment_id: string;
   name: string | null;
-  unit_cost: number | null;
 };
 
 type ClientRow = {
@@ -298,7 +297,7 @@ export async function GET(request: Request) {
       const { data: equipmentRowsById, error: equipmentByIdError } =
         await supabaseAdmin
           .from("equipment")
-          .select("equipment_id, name, unit_cost")
+          .select("equipment_id, name")
           .in("equipment_id", equipmentIds)
           .returns<EquipmentRow[]>();
 
@@ -321,7 +320,7 @@ export async function GET(request: Request) {
       const { data: equipmentRowsByName, error: equipmentByNameError } =
         await supabaseAdmin
           .from("equipment")
-          .select("equipment_id, name, unit_cost")
+          .select("equipment_id, name")
           .in("name", equipmentNames)
           .returns<EquipmentRow[]>();
 
@@ -451,7 +450,7 @@ export async function GET(request: Request) {
             equipmentId: resolvedEquipmentId || null,
             name: resolvedName,
             quantity: item.quantity,
-            unitCost: Number(equipment?.unit_cost ?? 0),
+            unitCost: 0,
             notes: item.notes,
           };
         }),
