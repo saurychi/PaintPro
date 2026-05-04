@@ -98,11 +98,21 @@ export default function InventoryModal({
             <Input disabled={!isEditing} value={formData.name || ''} onChange={e => handleChange('name', e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Unit Cost (₱)</Label>
-              <Input type="number" disabled={!isEditing} value={formData.unit_cost || ''} onChange={e => handleChange('unit_cost', parseFloat(e.target.value))} />
+          {type === 'materials' ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Unit Cost (₱)</Label>
+                <Input type="number" disabled={!isEditing} value={formData.unit_cost || ''} onChange={e => handleChange('unit_cost', parseFloat(e.target.value))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Location</Label>
+                <Input disabled={!isEditing} list="locations-list" value={formData.location || ''} onChange={e => handleChange('location', e.target.value)} placeholder="Select or type new..." />
+                <datalist id="locations-list">
+                  {uniqueLocations.map(loc => <option key={loc} value={loc} />)}
+                </datalist>
+              </div>
             </div>
+          ) : (
             <div className="space-y-2">
               <Label>Location</Label>
               <Input disabled={!isEditing} list="locations-list" value={formData.location || ''} onChange={e => handleChange('location', e.target.value)} placeholder="Select or type new..." />
@@ -110,7 +120,7 @@ export default function InventoryModal({
                 {uniqueLocations.map(loc => <option key={loc} value={loc} />)}
               </datalist>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

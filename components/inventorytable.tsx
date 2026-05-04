@@ -99,7 +99,9 @@ export default function InventoryTable({
             <th className="px-5 py-3.5 font-semibold">
               {type === "materials" ? "Stock Details" : "Condition / Status"}
             </th>
-            <th className="px-5 py-3.5 font-semibold text-right">Unit Cost</th>
+            {type === "materials" ? (
+              <th className="px-5 py-3.5 font-semibold text-right">Unit Cost</th>
+            ) : null}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -178,12 +180,14 @@ export default function InventoryTable({
                     </div>
                   )}
                 </td>
-                <td className="px-5 py-3 text-right font-semibold text-gray-900">
-                  PHP{" "}
-                  {getUnitCost(item).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                  })}
-                </td>
+                {type === "materials" ? (
+                  <td className="px-5 py-3 text-right font-semibold text-gray-900">
+                    PHP{" "}
+                    {getUnitCost(item).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                    })}
+                  </td>
+                ) : null}
               </tr>
             )
           })}

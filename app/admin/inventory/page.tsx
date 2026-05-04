@@ -116,7 +116,16 @@ export default function AdminInventory() {
         delete payload.unit
         delete payload.date_purchased
         delete payload.notes
-        delete payload.material_id 
+        delete payload.unit_cost
+        delete payload.material_id
+      }
+
+      let previousUnitCost: number | null = null
+      if (mode === 'edit' && type === 'materials' && payload.material_id) {
+        const previousMaterial = materials.find(
+          (m) => m.material_id === payload.material_id,
+        )
+        previousUnitCost = Number(previousMaterial?.unit_cost ?? 0)
       }
 
       if (mode === 'add') {
@@ -127,12 +136,79 @@ export default function AdminInventory() {
         const { error } = await supabase.from(table).update(payload).eq(idField, payload[idField])
         if (error) throw error
       }
-      
+
+      // Reprice the project_task_material rows for any non-finished projects
+      // that use this material when its unit_cost actually changed. Locked
+      // projects (completed / cancelled) keep their historical cost.
+      if (
+        mode === 'edit' &&
+        type === 'materials' &&
+        payload.material_id &&
+        previousUnitCost !== null
+      ) {
+        const newUnitCost = Number(payload.unit_cost ?? 0)
+        if (Number.isFinite(newUnitCost) && newUnitCost !== previousUnitCost) {
+          await repriceProjectsUsingMaterial(payload.material_id, newUnitCost)
+        }
+      }
+
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
     } catch (error) {
       console.error(`Error saving to ${table}:`, error)
       alert(`Failed to save item. Check console for details.`)
+    }
+  }
+
+  async function repriceProjectsUsingMaterial(
+    materialId: string,
+    newUnitCost: number,
+  ) {
+    const { data: rows, error } = await supabase
+      .from('project_task_material')
+      .select(
+        'project_task_material_id, estimated_quantity, project_task:project_task_id(project:project_id(status))',
+      )
+      .eq('material_id', materialId)
+
+    if (error) {
+      console.error('Failed to load project materials for repricing:', error)
+      return
+    }
+
+    const LOCKED_STATUSES = new Set(['completed', 'cancelled'])
+    const updates = (rows ?? []).flatMap((row: any) => {
+      const status = String(
+        row?.project_task?.project?.status ?? '',
+      )
+        .trim()
+        .toLowerCase()
+      if (LOCKED_STATUSES.has(status)) return []
+      const qty = Number(row?.estimated_quantity ?? 0)
+      if (!Number.isFinite(qty) || qty <= 0) return []
+      return [
+        {
+          project_task_material_id: row.project_task_material_id as string,
+          estimated_cost: qty * newUnitCost,
+        },
+      ]
+    })
+
+    for (const update of updates) {
+      const { error: updateError } = await supabase
+        .from('project_task_material')
+        .update({
+          estimated_cost: update.estimated_cost,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('project_task_material_id', update.project_task_material_id)
+
+      if (updateError) {
+        console.error(
+          `Failed to reprice project_task_material ${update.project_task_material_id}:`,
+          updateError,
+        )
+      }
     }
   }
 
