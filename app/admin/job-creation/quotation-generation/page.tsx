@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ChevronRight, Download, Loader2, Send } from "lucide-react";
+import { ChevronRight, Download, FileText, Loader2, Send } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -143,6 +143,12 @@ export default function JobQuotation() {
         data?.mode === "updated"
           ? "Quotation document updated in Documents."
           : "Quotation document saved to Documents.",
+        {
+          description:
+            data?.source === "signed-pdf-bucket"
+              ? "The signed PDF from the documents bucket was saved."
+              : "The rendered HTML preview was saved.",
+        },
       );
     } catch (error: any) {
       toast.error(error?.message || "Failed to save quotation document.");
@@ -294,21 +300,27 @@ export default function JobQuotation() {
 
               <div className="mt-4 space-y-3 text-[12px] text-slate-600 dark:text-slate-300">
                 <div>
-                  <div className="text-slate-500 dark:text-slate-400">Project Code</div>
+                  <div className="text-slate-500 dark:text-slate-400">
+                    Project Code
+                  </div>
                   <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
                     {project?.project_code || "No Code"}
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-slate-500 dark:text-slate-400">Project Title</div>
+                  <div className="text-slate-500 dark:text-slate-400">
+                    Project Title
+                  </div>
                   <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
                     {project?.title || "Untitled Project"}
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-slate-500 dark:text-slate-400">Estimated Payment</div>
+                  <div className="text-slate-500 dark:text-slate-400">
+                    Estimated Payment
+                  </div>
                   <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
                     {formatCurrency(project?.estimated_budget)}
                   </div>
@@ -320,7 +332,8 @@ export default function JobQuotation() {
                 onClick={handleDownloadPdf}
                 disabled={downloading || !projectId}
                 className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:opacity-70"
-                style={{ backgroundColor: ACCENT }}>
+                style={{ backgroundColor: ACCENT }}
+              >
                 {downloading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -336,13 +349,33 @@ export default function JobQuotation() {
 
               <button
                 type="button"
+                onClick={handleSaveQuotationDocument}
+                disabled={savingDocument || !projectId || !project}
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[13px] font-semibold text-[#047857] transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:border-emerald-400/50 dark:hover:bg-emerald-500/25"
+              >
+                {savingDocument ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4" />
+                    Save to Documents
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
                 onClick={handleNotifyClient}
                 disabled={
                   notifyingClient ||
                   !projectId ||
                   project?.status !== "quotation_pending"
                 }
-                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25">
+                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25"
+              >
                 {notifyingClient ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -361,7 +394,7 @@ export default function JobQuotation() {
           </div>
         </div>
 
-        <div className="shrink-0 flex items-center justify-end gap-2">
+        <div className="flex shrink-0 items-center justify-end gap-2">
           <button
             type="button"
             onClick={async () => {

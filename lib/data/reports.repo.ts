@@ -14,8 +14,6 @@ export type QuickLink = {
   href: string
 }
 
-export type ProjectPriority = "low" | "medium" | "high"
-
 export type ReportProjectRow = {
   projectId: string
   projectCode: string
@@ -28,7 +26,7 @@ export type ReportProjectRow = {
   clientAddress: string | null
   siteAddress: string
   status: string
-  priority: ProjectPriority
+  priority?: string | null
   startDatetime: string | null
   endDatetime: string | null
   estimatedBudget: number
