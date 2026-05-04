@@ -122,7 +122,15 @@ function moveToNextWorkdayStart(date: Date) {
 }
 
 function toDateKey(date: Date) {
-  return date.toISOString().slice(0, 10)
+  // Compare against the LOCAL calendar day (matches how unavailable_days
+  // stores blocked_date — a DATE column, no timezone). Using
+  // date.toISOString().slice(0, 10) returns the UTC date, which lands on
+  // the wrong day whenever the server's local working hours straddle UTC
+  // midnight (e.g., NZ/AU early morning).
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const dd = String(date.getDate()).padStart(2, "0")
+  return `${yyyy}-${mm}-${dd}`
 }
 
 function moveToNextAvailableWorkdayStart(date: Date, unavailableDateSet: Set<string>) {

@@ -32,6 +32,11 @@ import {
   SidebarMenuButton,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  SidebarBadgeDot,
+  SidebarBadgePill,
+  useSidebarBadges,
+} from "@/components/sidebar-badges";
 import { cn } from "@/lib/utils";
 
 type SubItem = {
@@ -334,6 +339,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const { open, setOpen } = useSidebar();
   const pathname = usePathname();
   const menuItems = ITEMS_BY_ROLE[role];
+  const badges = useSidebarBadges();
   const desktopScrollRef = React.useRef<HTMLDivElement | null>(null);
   const resolvedUser = user ?? FALLBACK_SIDEBAR_USER;
   const { resolvedTheme, setTheme } = useTheme();
@@ -538,6 +544,12 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                             >
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
+                              {badges[item.key] ? (
+                                <SidebarBadgePill
+                                  badge={badges[item.key]!}
+                                  className="ml-auto"
+                                />
+                              ) : null}
                             </Link>
 
                             <button
@@ -591,7 +603,15 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                         : "text-gray-500 hover:bg-gray-50",
                                     )}
                                   >
-                                    {subItem.title}
+                                    <span className="truncate">
+                                      {subItem.title}
+                                    </span>
+                                    {badges[subItem.key] ? (
+                                      <SidebarBadgePill
+                                        badge={badges[subItem.key]!}
+                                        className="ml-auto"
+                                      />
+                                    ) : null}
                                   </Link>
                                 );
                               })}
@@ -611,6 +631,12 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                         >
                           <Icon className="h-5 w-5 shrink-0" />
                           <span className="truncate">{item.title}</span>
+                          {badges[item.key] ? (
+                            <SidebarBadgePill
+                              badge={badges[item.key]!}
+                              className="ml-auto"
+                            />
+                          ) : null}
                         </Link>
                       )}
                     </div>
@@ -803,6 +829,12 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                               className="flex min-w-0 flex-1 items-center gap-3 px-3 text-sm font-medium transition-all duration-200">
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
+                              {badges[item.key] ? (
+                                <SidebarBadgePill
+                                  badge={badges[item.key]!}
+                                  className="ml-auto mr-1"
+                                />
+                              ) : null}
                             </Link>
 
                             <button
@@ -854,7 +886,15 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                         ? "bg-[#00BF63]/10 text-[#00BF63]"
                                         : "text-gray-500 hover:bg-gray-50",
                                     )}>
-                                    {subItem.title}
+                                    <span className="truncate">
+                                      {subItem.title}
+                                    </span>
+                                    {badges[subItem.key] ? (
+                                      <SidebarBadgePill
+                                        badge={badges[subItem.key]!}
+                                        className="ml-auto"
+                                      />
+                                    ) : null}
                                   </Link>
                                 );
                               })}
@@ -873,7 +913,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                           <Link
                             href={item.url}
                             className={cn(
-                              "w-full overflow-visible transition-all duration-200 ease-out",
+                              "w-full overflow-visible transition-all duration-200 ease-out relative",
                               open
                                 ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium hover:scale-[1.01]"
                                 : cn(
@@ -890,9 +930,22 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                 "transition-transform duration-200",
                               )}
                             />
-                            {open && (
-                              <span className="truncate">{item.title}</span>
-                            )}
+                            {open ? (
+                              <>
+                                <span className="truncate">{item.title}</span>
+                                {badges[item.key] ? (
+                                  <SidebarBadgePill
+                                    badge={badges[item.key]!}
+                                    className="ml-auto"
+                                  />
+                                ) : null}
+                              </>
+                            ) : badges[item.key] ? (
+                              <SidebarBadgeDot
+                                badge={badges[item.key]!}
+                                className="absolute right-2 top-2"
+                              />
+                            ) : null}
                           </Link>
                         </SidebarMenuButton>
                       )}

@@ -66,8 +66,6 @@ export async function GET(request: NextRequest) {
           .select(`
             equipment_id,
             name,
-            unit_cost,
-            condition,
             location,
             status
           `)
@@ -96,8 +94,6 @@ export async function GET(request: NextRequest) {
           .select(`
             equipment_id,
             name,
-            unit_cost,
-            condition,
             location,
             status
           `)
@@ -146,8 +142,8 @@ export async function GET(request: NextRequest) {
             equipmentId: resolvedEquipmentId,
             quantity: item.quantity,
             name: resolvedName,
-            unitCost: Number(equipment?.unit_cost ?? 0),
-            condition: equipment?.condition ?? "",
+            unitCost: 0,
+            condition: "",
             location: equipment?.location ?? "",
             status: equipment?.status ?? "",
             notes: item.notes,
