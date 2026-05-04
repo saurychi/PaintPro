@@ -16,6 +16,8 @@ type MaterialOption = {
   id: string;
   name: string;
   unitCost: number;
+  currentStock: number;
+  reorderPoint: number;
 };
 
 type AddMaterialModalProps = {

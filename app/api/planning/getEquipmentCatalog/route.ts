@@ -8,8 +8,6 @@ export async function GET() {
       .select(`
         equipment_id,
         name,
-        unit_cost,
-        condition,
         location,
         status
       `)
@@ -26,8 +24,8 @@ export async function GET() {
       equipment: (data ?? []).map((item) => ({
         id: item.equipment_id,
         name: item.name,
-        unitCost: Number(item.unit_cost ?? 0),
-        condition: item.condition ?? "",
+        unitCost: 0,
+        condition: "",
         location: item.location ?? "",
         status: item.status ?? "",
       })),

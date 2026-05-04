@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -17,6 +17,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -42,6 +43,7 @@ type ScheduleProject = {
   status: ProjectStatus;
   rawStatus: string;
   dateLabel: string;
+  activeDays?: string[];
 };
 
 type FCEvent = {
@@ -76,47 +78,55 @@ const STATUS_COLORS: Record<
   pending: { bg: "#facc15", border: "#eab308", text: "#1f2937" },
 };
 
-function toFCEvent(project: ScheduleProject): FCEvent | null {
-  if (!project.scheduledStartDatetime) return null;
+function addUtcDays(yyyymmdd: string, days: number) {
+  const d = new Date(`${yyyymmdd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
-  const start = new Date(project.scheduledStartDatetime);
-  if (Number.isNaN(start.getTime())) return null;
+function toFCEventSegments(project: ScheduleProject): FCEvent[] {
+  const days = Array.from(new Set(project.activeDays ?? [])).sort();
+  if (days.length === 0) return [];
 
   const status: EventStatus = project.status;
   const colors = STATUS_COLORS[status];
-  const startDateStr = project.scheduledStartDatetime.slice(0, 10);
+  const segments: FCEvent[] = [];
 
-  const event: FCEvent = {
-    id: project.id,
-    title: project.title,
-    start: startDateStr,
-    backgroundColor: colors.bg,
-    borderColor: colors.border,
-    textColor: colors.text,
-    extendedProps: {
-      status,
-      type: "project",
-      projectCode: project.projectCode,
-      rawStatus: project.rawStatus,
-      scheduledStartDatetime: project.scheduledStartDatetime,
-      scheduledEndDatetime: project.scheduledEndDatetime,
-    },
-  };
+  let segmentStart = days[0];
+  let segmentEnd = days[0];
 
-  if (project.scheduledEndDatetime) {
-    const end = new Date(project.scheduledEndDatetime);
-    if (!Number.isNaN(end.getTime())) {
-      const inclusiveEnd = new Date(end);
-      inclusiveEnd.setDate(inclusiveEnd.getDate() + 1);
-      event.end = inclusiveEnd.toISOString().slice(0, 10);
-    }
+  function pushSegment() {
+    segments.push({
+      id: `${project.id}-seg${segments.length}`,
+      title: project.title,
+      start: segmentStart,
+      end: addUtcDays(segmentEnd, 1),
+      backgroundColor: colors.bg,
+      borderColor: colors.border,
+      textColor: colors.text,
+      extendedProps: {
+        status,
+        type: "project",
+        projectCode: project.projectCode,
+        rawStatus: project.rawStatus,
+        scheduledStartDatetime: project.scheduledStartDatetime,
+        scheduledEndDatetime: project.scheduledEndDatetime,
+      },
+    });
   }
 
-  return event;
-}
+  for (let i = 1; i < days.length; i += 1) {
+    if (days[i] === addUtcDays(segmentEnd, 1)) {
+      segmentEnd = days[i];
+    } else {
+      pushSegment();
+      segmentStart = days[i];
+      segmentEnd = days[i];
+    }
+  }
+  pushSegment();
 
-function isFCEvent(event: FCEvent | null): event is FCEvent {
-  return Boolean(event);
+  return segments;
 }
 
 function renderEventContent(info: EventContentArg) {
@@ -183,7 +193,6 @@ export default function AdminSchedule() {
   const { now: projectNow, todayKey } = useProjectNow();
 
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
-  const [fcEvents, setFcEvents] = useState<FCEvent[]>([]);
   const [unavailableDays, setUnavailableDays] = useState<
     ScheduleUnavailableDay[]
   >([]);
@@ -208,80 +217,77 @@ export default function AdminSchedule() {
     x: number;
     y: number;
   } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true);
+  const loadProjects = useCallback(async () => {
+    try {
+      setLoading(true);
 
-        const response = await fetch("/api/schedule/getProjects", {
-          method: "GET",
-        });
+      const response = await fetch("/api/schedule/getProjects", {
+        method: "GET",
+        cache: "no-store",
+      });
 
-        const data = await response.json();
+      const data = await response.json();
 
-        if (!response.ok) {
-          throw new Error(data?.error || "Failed to load schedule projects.");
-        }
-
-        const nextProjects: ScheduleProject[] = Array.isArray(data?.projects)
-          ? data.projects
-          : [];
-
-        setProjects(nextProjects);
-        setCurrentProject(data?.currentProject ?? null);
-        setFcEvents(
-          nextProjects.map((project) => toFCEvent(project)).filter(isFCEvent),
-        );
-      } catch (error) {
-        console.error("Failed to load schedule projects:", error);
-        setProjects([]);
-        setCurrentProject(null);
-        setFcEvents([]);
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to load schedule projects.");
       }
-    }
 
-    loadData();
+      const nextProjects: ScheduleProject[] = Array.isArray(data?.projects)
+        ? data.projects
+        : [];
+
+      setProjects(nextProjects);
+      setCurrentProject(data?.currentProject ?? null);
+    } catch (error) {
+      console.error("Failed to load schedule projects:", error);
+      setProjects([]);
+      setCurrentProject(null);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadUnavailableDays = useCallback(async () => {
+    try {
+      setUnavailableLoading(true);
+
+      const response = await fetch("/api/schedule/unavailable-days", {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to load unavailable days.");
+      }
+
+      setUnavailableDays(
+        Array.isArray(data?.unavailableDays) ? data.unavailableDays : [],
+      );
+    } catch (error) {
+      console.error("Failed to load unavailable days:", error);
+      setUnavailableDays([]);
+      throw error;
+    } finally {
+      setUnavailableLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    void loadProjects();
+  }, [loadProjects]);
 
-    async function loadUnavailableDays() {
-      try {
-        setUnavailableLoading(true);
+  useEffect(() => {
+    void loadUnavailableDays();
+  }, [loadUnavailableDays, holidaySettings.enabled, holidaySettings.countryCode]);
 
-        const response = await fetch("/api/schedule/unavailable-days", {
-          method: "GET",
-          cache: "no-store",
-        });
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data?.error || "Failed to load unavailable days.");
-        }
-
-        if (cancelled) return;
-        setUnavailableDays(
-          Array.isArray(data?.unavailableDays) ? data.unavailableDays : [],
-        );
-      } catch (error) {
-        if (cancelled) return;
-        console.error("Failed to load unavailable days:", error);
-        setUnavailableDays([]);
-      } finally {
-        if (!cancelled) setUnavailableLoading(false);
-      }
-    }
-
-    loadUnavailableDays();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [holidaySettings.enabled, holidaySettings.countryCode]);
+  const fcEvents = useMemo<FCEvent[]>(
+    () => projects.flatMap((project) => toFCEventSegments(project)),
+    [projects],
+  );
 
   const unavailableDayEvents = useMemo<EventInput[]>(() => {
     return unavailableDays.map((day) => {
@@ -322,23 +328,10 @@ export default function AdminSchedule() {
   const projectsByDate = useMemo(() => {
     const map = new Map<string, ScheduleProject[]>();
     for (const project of projects) {
-      if (!project.scheduledStartDatetime) continue;
-      const startKey = project.scheduledStartDatetime.slice(0, 10);
-      const endKey = project.scheduledEndDatetime
-        ? project.scheduledEndDatetime.slice(0, 10)
-        : startKey;
-
-      const cursor = new Date(`${startKey}T00:00:00`);
-      const end = new Date(`${endKey}T00:00:00`);
-      if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime()))
-        continue;
-
-      while (cursor <= end) {
-        const key = cursor.toISOString().slice(0, 10);
+      for (const key of project.activeDays ?? []) {
         const list = map.get(key) ?? [];
         list.push(project);
         map.set(key, list);
-        cursor.setDate(cursor.getDate() + 1);
       }
     }
     return map;
@@ -429,20 +422,19 @@ export default function AdminSchedule() {
     };
   }, [calendarContextMenu]);
 
-  async function refreshUnavailableDays() {
-    const response = await fetch("/api/schedule/unavailable-days", {
-      method: "GET",
-      cache: "no-store",
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data?.error || "Failed to load unavailable days.");
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([loadProjects(), loadUnavailableDays()]);
+      toast.success("Schedule refreshed.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to refresh schedule.",
+      );
+    } finally {
+      setRefreshing(false);
     }
-
-    setUnavailableDays(
-      Array.isArray(data?.unavailableDays) ? data.unavailableDays : [],
-    );
   }
 
   async function handleSaveUnavailableDay(value: UnavailableDayFormValue) {
@@ -473,7 +465,7 @@ export default function AdminSchedule() {
         );
       }
 
-      await refreshUnavailableDays();
+      await loadUnavailableDays();
       setIsUnavailableModalOpen(false);
       setEditingUnavailableDay(null);
       setModalDateOverride(null);
@@ -519,7 +511,7 @@ export default function AdminSchedule() {
         throw new Error(data?.error || "Failed to delete unavailable day.");
       }
 
-      await refreshUnavailableDays();
+      await loadUnavailableDays();
       toast.success("Unavailable day deleted.");
     } catch (error) {
       toast.error(
@@ -906,6 +898,18 @@ export default function AdminSchedule() {
                             </div>
                           ))}
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={() => void handleRefresh()}
+                          disabled={refreshing}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          <RefreshCw
+                            className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                          />
+                          Refresh
+                        </button>
 
                         <button
                           type="button"

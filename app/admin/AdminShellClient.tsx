@@ -3,6 +3,7 @@
 import React from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
+import { SidebarBadgesProvider } from "@/components/sidebar-badges"
 import { cn } from "@/lib/utils"
 
 function AdminShell({
@@ -48,7 +49,9 @@ export default function AdminShellClient({
 }) {
   return (
     <SidebarProvider>
-      <AdminShell role={role} user={user}>{children}</AdminShell>
+      <SidebarBadgesProvider>
+        <AdminShell role={role} user={user}>{children}</AdminShell>
+      </SidebarBadgesProvider>
     </SidebarProvider>
   )
 }

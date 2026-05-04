@@ -4,7 +4,7 @@ import {
   buildProjectSchedule,
   type SchedulingGeneratedMainTask,
 } from "@/lib/planning/projectScheduling"
-import { listManualUnavailableDays } from "@/lib/schedule/unavailableDays"
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays"
 
 function isObj(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -169,7 +169,13 @@ export async function POST(req: Request) {
       }
     }
 
-    const unavailableDays = await listManualUnavailableDays()
+    // Pull manual blocks + public holidays (the same set the schedule pages
+    // render in red) so the scheduler skips both kinds when laying out
+    // subtasks. Without the cookie-driven holiday settings, the user would
+    // see freshly generated projects overlap holidays on the calendar.
+    const unavailableDays = await listScheduleUnavailableDays(
+      req.headers.get("cookie"),
+    )
 
     const schedule = buildProjectSchedule({
       project: {

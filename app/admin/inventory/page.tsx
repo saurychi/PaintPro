@@ -79,7 +79,22 @@ export default function AdminInventory() {
         const { error } = await supabase.from(table).update(payload).eq(idField, payload[idField])
         if (error) throw error
       }
-      
+
+      // Reprice the project_task_material rows for any non-finished projects
+      // that use this material when its unit_cost actually changed. Locked
+      // projects (completed / cancelled) keep their historical cost.
+      if (
+        mode === 'edit' &&
+        type === 'materials' &&
+        payload.material_id &&
+        previousUnitCost !== null
+      ) {
+        const newUnitCost = Number(payload.unit_cost ?? 0)
+        if (Number.isFinite(newUnitCost) && newUnitCost !== previousUnitCost) {
+          await repriceProjectsUsingMaterial(payload.material_id, newUnitCost)
+        }
+      }
+
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
     } catch (error) {

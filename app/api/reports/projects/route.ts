@@ -60,6 +60,24 @@ function normalizeStatus(value: string | null | undefined) {
   return status || "main_task_pending"
 }
 
+function normalizeStatusKey(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+}
+
+const hiddenReportStatuses = new Set([
+  "main_task_pending",
+  "sub_task_pending",
+  "materials_pending",
+  "equipment_pending",
+  "schedule_pending",
+  "employee_assignment_pending",
+  "cost_estimation_pending",
+  "overview_pending",
+])
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url)
@@ -105,6 +123,10 @@ export async function GET(request: Request) {
     }
 
     if (status && status !== "all") {
+      if (hiddenReportStatuses.has(normalizeStatusKey(status))) {
+        return NextResponse.json({ projects: [] })
+      }
+
       projectsQuery = projectsQuery.eq("status", status)
     }
 
@@ -147,7 +169,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: projectsError.message }, { status: 500 })
     }
 
-    const projectRows = (projects ?? []) as unknown as ProjectRow[]
+    const projectRows = ((projects ?? []) as unknown as ProjectRow[]).filter(
+      (project) => !hiddenReportStatuses.has(normalizeStatusKey(project.status))
+    )
 
     const clientIds = Array.from(
       new Set(
