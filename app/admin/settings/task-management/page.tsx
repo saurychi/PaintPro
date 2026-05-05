@@ -921,7 +921,7 @@ export default function TaskManagementSettingsPage() {
   }
 
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col overflow-hidden bg-gray-50 p-4">
+    <div className="flex min-h-screen flex-col overflow-y-auto bg-gray-50 p-4 lg:h-[100dvh] lg:max-h-[100dvh] lg:min-h-0 lg:overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold text-gray-900">
@@ -943,9 +943,9 @@ export default function TaskManagementSettingsPage() {
         </button>
       </div>
 
-      <div className="mt-3 grid min-h-0 flex-1 grid-cols-12 gap-3 overflow-hidden">
-        <aside className="col-span-12 min-h-0 overflow-hidden lg:col-span-3">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="mt-3 grid grid-cols-12 gap-3 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+        <aside className="col-span-12 lg:col-span-3 lg:min-h-0 lg:overflow-hidden">
+          <div className="flex min-h-[300px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0">
             <div className="shrink-0 border-b border-gray-100 px-3 py-2">
               <div className="flex items-center gap-2">
                 <div className="relative min-w-0 flex-1">
@@ -1085,7 +1085,7 @@ export default function TaskManagementSettingsPage() {
           </div>
         </aside>
 
-        <main className="col-span-12 min-h-0 overflow-hidden lg:col-span-9">
+        <main className="col-span-12 lg:col-span-9 lg:min-h-0 lg:overflow-hidden">
           {pageError && mainTasks.length === 0 ? (
             <div className="flex h-full items-center justify-center rounded-xl border border-red-200 bg-white px-6 py-10 text-center shadow-sm">
               <div>
@@ -1096,7 +1096,7 @@ export default function TaskManagementSettingsPage() {
               </div>
             </div>
           ) : selectedMainTask ? (
-            <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden">
+            <div className="grid gap-3 lg:h-full lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden">
               <section className="shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
                 <div className="h-1 w-full bg-[#00c065]" />
 
@@ -1199,7 +1199,7 @@ export default function TaskManagementSettingsPage() {
                 </div>
               </section>
 
-              <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              <section className="flex min-h-[400px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0">
                 <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-4 py-2.5">
                   <div className="min-w-0">
                     <h2 className="truncate text-sm font-semibold text-gray-900">

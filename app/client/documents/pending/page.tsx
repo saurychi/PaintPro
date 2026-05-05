@@ -423,8 +423,10 @@ export default function ClientPendingDocumentsPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-gray-50">
-      <div className="flex h-full min-h-0 flex-col gap-4 p-6">
+    // Below lg: natural-flow scroll so the document and the sidebar stack
+    // vertically. lg+: keep the locked-screen split layout.
+    <div className="lg:h-screen lg:overflow-hidden bg-gray-50">
+      <div className="flex flex-col gap-3 p-3 sm:gap-4 sm:p-4 lg:h-full lg:min-h-0 lg:p-6">
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="h-1 w-full rounded-t-xl bg-[#00c065]" />
 
@@ -547,9 +549,9 @@ export default function ClientPendingDocumentsPage() {
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-hidden">
-          <div className="col-span-12 min-h-0 overflow-hidden lg:col-span-8">
-            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="grid grid-cols-12 gap-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+          <div className="col-span-12 lg:col-span-8 lg:min-h-0 lg:overflow-hidden">
+            <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
               <div className="shrink-0 border-b border-gray-100 px-4 py-3">
                 <h2 className="text-sm font-semibold text-gray-900">
                   {documentLabel} Preview
@@ -560,9 +562,12 @@ export default function ClientPendingDocumentsPage() {
                 </p>
               </div>
 
-              <div className="min-h-0 flex-1 p-4">
+              {/* Below lg the parent isn't a fixed-height flex, so flex-1 would
+                  collapse the iframe. Fall back to a generous viewport-based
+                  min-height on mobile and resume the flex-fill behavior at lg+. */}
+              <div className="p-3 sm:p-4 min-h-[60vh] lg:min-h-0 lg:flex-1">
                 {loading ? (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50">
+                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 min-h-[60vh] lg:min-h-0">
                     <div className="text-center">
                       <Loader2 className="mx-auto h-5 w-5 animate-spin text-gray-500" />
                       <p className="mt-2 text-xs text-gray-500">
@@ -571,11 +576,11 @@ export default function ClientPendingDocumentsPage() {
                     </div>
                   </div>
                 ) : !projectId ? (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500">
+                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500 min-h-[60vh] lg:min-h-0">
                     Missing project ID.
                   </div>
                 ) : !previewSrc ? (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500">
+                  <div className="flex h-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500 min-h-[60vh] lg:min-h-0">
                     No document is available for this project right now.
                   </div>
                 ) : (
@@ -583,15 +588,15 @@ export default function ClientPendingDocumentsPage() {
                     key={`${documentType}-${projectStatus}-${projectId}`}
                     src={previewSrc}
                     title={`${documentLabel} Preview`}
-                    className="h-full w-full rounded-lg border border-gray-200 bg-white"
+                    className="h-full w-full rounded-lg border border-gray-200 bg-white min-h-[60vh] lg:min-h-0"
                   />
                 )}
               </div>
             </div>
           </div>
 
-          <aside className="col-span-12 min-h-0 overflow-hidden lg:col-span-4">
-            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <aside className="col-span-12 lg:col-span-4 lg:min-h-0 lg:overflow-hidden">
+            <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
               <div className="h-1 w-full shrink-0 bg-[#00c065]" />
 
               <div className="shrink-0 border-b border-gray-100 px-4 py-3">

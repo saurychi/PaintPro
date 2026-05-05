@@ -957,7 +957,7 @@ export default function AdminReportPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-0.75rem)] min-h-[560px] max-h-[calc(100dvh-0.75rem)] min-w-0 flex-col overflow-hidden bg-[#f7f8fa] px-3 py-2 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-3">
+    <div className="flex min-w-0 flex-col overflow-y-auto bg-[#f7f8fa] px-3 py-2 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-3 xl:h-[calc(100dvh-0.75rem)] xl:max-h-[calc(100dvh-0.75rem)] xl:min-h-[560px] xl:overflow-hidden">
       <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="ml-5 text-[22px] font-semibold leading-tight tracking-tight text-gray-950 dark:text-slate-100">
@@ -1016,8 +1016,8 @@ export default function AdminReportPage() {
         </div>
       </div>
 
-      <div className="mt-2 grid min-h-0 flex-1 grid-cols-1 items-stretch gap-3 overflow-hidden xl:grid-cols-12">
-        <section className={`flex h-full min-h-0 flex-col xl:col-span-8 ${cardShell} ${cardAccent}`}>
+      <div className="mt-2 grid grid-cols-1 items-stretch gap-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-12">
+        <section className={`flex flex-col xl:h-full xl:min-h-0 xl:col-span-8 ${cardShell} ${cardAccent}`}>
           <div className={sectionHeader}>
             <div>
               <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
@@ -1029,7 +1029,7 @@ export default function AdminReportPage() {
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
+          <div className="flex flex-col gap-3 p-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden">
             <div className="flex w-full shrink-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-900/35">
               <div className="flex items-center gap-2">
                 <CalendarDays className="h-4 w-4 text-gray-500 dark:text-slate-400" />
@@ -1206,8 +1206,8 @@ export default function AdminReportPage() {
           </div>
         </section>
 
-        <aside className="h-full min-h-0 overflow-hidden xl:col-span-4">
-          <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+        <aside className="xl:h-full xl:min-h-0 xl:overflow-hidden xl:col-span-4">
+          <div className="flex flex-col gap-3 xl:h-full xl:min-h-0 xl:overflow-hidden">
             <section className={`flex shrink-0 flex-col ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
                 <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
@@ -1244,7 +1244,7 @@ export default function AdminReportPage() {
             </section>
 
 
-            <section className={`flex min-h-0 flex-1 flex-col ${cardShell} ${cardAccent}`}>
+            <section className={`flex flex-col xl:min-h-0 xl:flex-1 ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
                 <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
                   Previous Period Check
@@ -1254,7 +1254,7 @@ export default function AdminReportPage() {
                 </div>
               </div>
 
-              <div className="grid min-h-0 flex-1 grid-rows-3 gap-3 p-3">
+              <div className="grid grid-cols-1 gap-3 p-3 xl:min-h-0 xl:flex-1 xl:grid-rows-3">
                 <ComparisonRow
                   icon={<TrendingUp className="h-4 w-4" />}
                   title="Revenue Movement"

@@ -1190,7 +1190,7 @@ export default function AdminDocuments() {
 
  return (
    <div
-     className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f7f8fa] px-4 pb-0 pt-4 text-gray-900 dark:bg-slate-700 dark:text-slate-100 sm:px-6"
+     className="flex min-h-0 flex-col overflow-y-auto bg-[#f7f8fa] px-4 pb-4 pt-4 text-gray-900 dark:bg-slate-700 dark:text-slate-100 sm:px-6 lg:h-screen lg:overflow-hidden lg:pb-0"
      onClick={closeAll}
    >
      <ToastStack toasts={toasts} />
@@ -1208,7 +1208,7 @@ export default function AdminDocuments() {
      </div>
 
 
-     <div className="flex min-h-0 flex-1 flex-col" onClick={(e) => e.stopPropagation()}>
+     <div className="flex flex-col lg:min-h-0 lg:flex-1" onClick={(e) => e.stopPropagation()}>
        {activeFolder && (
          <div className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold">
            <button
@@ -1628,7 +1628,7 @@ export default function AdminDocuments() {
        )}
 
 
-       <section className="mt-3 flex min-h-0 flex-1 flex-col">
+       <section className="mt-3 flex flex-col lg:min-h-0 lg:flex-1">
          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
            <div className="flex flex-wrap items-center gap-2">
              <div className="text-xs font-semibold text-gray-500 dark:text-slate-300">
@@ -1679,7 +1679,7 @@ export default function AdminDocuments() {
          </div>
 
 
-         <div className={cn(cardShell, cardAccent, "flex min-h-0 flex-1 flex-col")}>
+         <div className={cn(cardShell, cardAccent, "flex flex-col lg:min-h-0 lg:flex-1")}>
            <div className="grid shrink-0 grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:border-slate-700/70 dark:bg-slate-800 dark:text-slate-400">
              <div className="flex justify-center">
                <input
@@ -1697,8 +1697,8 @@ export default function AdminDocuments() {
            </div>
 
 
-           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white dark:bg-slate-800/25">
-             <div className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-slate-700/70">
+           <div className="flex flex-col bg-white dark:bg-slate-800/25 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+             <div className="min-h-[300px] divide-y divide-gray-100 overflow-y-auto dark:divide-slate-700/70 lg:min-h-0 lg:flex-1">
                {scopedFiles.length > 0 ? (
                  <>
                    {scopedFiles.map((f) => {

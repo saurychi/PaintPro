@@ -162,41 +162,54 @@ function clampToWorkingTime(date: Date, unavailableDateSet = new Set<string>()) 
   return next
 }
 
-function addWorkingHours(start: Date, hours: number, unavailableDateSet = new Set<string>()) {
-  let remainingMs = Math.max(0, hours) * 60 * 60 * 1000
+// Subtasks are modelled as a CONTIGUOUS [start, start + hours) span — the same
+// shape the schedule UI's drag/resize logic uses (snapToAvailableSpan in
+// app/admin/job-creation/project-schedule/page.tsx). Earlier the lib chunked
+// long tasks across workdays, producing spans like [Fri 9am, Sun 5pm) for a
+// 16h task with Sat blocked, which FullCalendar renders as a single block
+// crossing the red Sat column. Pushing start past any blocked day inside the
+// window keeps the rendering in sync with the maths.
+function placeContiguousSpan(
+  start: Date,
+  hours: number,
+  unavailableDateSet: Set<string>
+) {
+  const safeHours = Math.max(0, hours)
   let cursor = clampToWorkingTime(start, unavailableDateSet)
 
-  if (remainingMs === 0) {
-    return cloneDate(cursor)
-  }
+  if (safeHours === 0) return { start: cloneDate(cursor), end: cloneDate(cursor) }
 
-  while (remainingMs > 0) {
-    cursor = moveToNextAvailableWorkdayStart(cursor, unavailableDateSet)
+  const durationMs = safeHours * 60 * 60 * 1000
 
-    const dayEnd = endOfWorkday(cursor)
-    const availableToday = dayEnd.getTime() - cursor.getTime()
+  for (let guard = 0; guard < 365; guard++) {
+    const end = new Date(cursor.getTime() + durationMs)
+    const probe = cloneDate(cursor)
+    probe.setHours(0, 0, 0, 0)
 
-    if (availableToday <= 0) {
-      cursor = moveToNextAvailableWorkdayStart(
-        moveToNextWorkdayStart(cursor),
-        unavailableDateSet
-      )
-      continue
+    let firstBlocked: Date | null = null
+    while (probe < end) {
+      if (unavailableDateSet.has(toDateKey(probe))) {
+        firstBlocked = cloneDate(probe)
+        break
+      }
+      probe.setDate(probe.getDate() + 1)
     }
 
-    const chunk = Math.min(remainingMs, availableToday)
-    cursor = new Date(cursor.getTime() + chunk)
-    remainingMs -= chunk
-
-    if (remainingMs > 0) {
-      cursor = moveToNextAvailableWorkdayStart(
-        moveToNextWorkdayStart(cursor),
-        unavailableDateSet
-      )
+    if (!firstBlocked) {
+      return { start: cloneDate(cursor), end }
     }
+
+    const moved = moveToNextAvailableWorkdayStart(
+      moveToNextWorkdayStart(firstBlocked),
+      unavailableDateSet
+    )
+    cursor = clampToWorkingTime(moved, unavailableDateSet)
   }
 
-  return cursor
+  return {
+    start: cloneDate(cursor),
+    end: new Date(cursor.getTime() + durationMs),
+  }
 }
 
 function overlaps(
@@ -234,26 +247,29 @@ function findNextFreeSlot(args: {
   const { desiredStart, durationHours, assignedUserId, blocksByUser, unavailableDateSet } = args
 
   if (!assignedUserId) {
-    const start = clampToWorkingTime(desiredStart, unavailableDateSet)
-    const end = addWorkingHours(start, durationHours, unavailableDateSet)
-    return { start, end }
+    return placeContiguousSpan(desiredStart, durationHours, unavailableDateSet)
   }
 
   const blocks = blocksByUser.get(assignedUserId) ?? []
   let candidateStart = clampToWorkingTime(desiredStart, unavailableDateSet)
 
   while (true) {
-    const candidateEnd = addWorkingHours(candidateStart, durationHours, unavailableDateSet)
+    // placeContiguousSpan may push the start past blocked days inside the
+    // window, so the conflict check must use the snapped span — not the
+    // pre-snap candidateStart — otherwise we'd compare an employee block
+    // against the wrong interval.
+    const placed = placeContiguousSpan(
+      candidateStart,
+      durationHours,
+      unavailableDateSet
+    )
 
     const conflictingBlock = blocks.find((block) =>
-      overlaps(candidateStart, candidateEnd, block.start, block.end)
+      overlaps(placed.start, placed.end, block.start, block.end)
     )
 
     if (!conflictingBlock) {
-      return {
-        start: candidateStart,
-        end: candidateEnd,
-      }
+      return placed
     }
 
     candidateStart = clampToWorkingTime(conflictingBlock.end, unavailableDateSet)
