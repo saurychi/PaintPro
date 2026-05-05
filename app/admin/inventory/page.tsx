@@ -8,6 +8,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMe
 import InventoryTable from '@/components/inventorytable'
 import InventoryModal from '@/components/inventory-modal'
 import { useSidebarBadge } from '@/components/sidebar-badges'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 const ACCENT = "#00c065"
 
@@ -15,44 +17,59 @@ export default function AdminInventory() {
   const [activeTab, setActiveTab] = useState<"materials" | "equipment">("materials")
   const [materials, setMaterials] = useState<any[]>([])
   const [equipment, setEquipment] = useState<any[]>([])
-  
+
   const [tags, setTags] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [locations, setLocations] = useState<any[]>([])
-  
+
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
-  
+
   const [locationFilter, setLocationFilter] = useState<string>("All")
   const [tagFilter, setTagFilter] = useState<string>("All")
   const [supplierFilter, setSupplierFilter] = useState<string>("All")
   const [statusFilter, setStatusFilter] = useState<string>("All")
-  const [reorderFilter, setReorderFilter] = useState<string>("All")
+  const [alertFilter, setAlertFilter] = useState<string>("All")
   const [showArchived, setShowArchived] = useState(false)
 
   const [modalConfig, setModalConfig] = useState<{isOpen: boolean, mode: 'add'|'edit'|'view', item: any}>({isOpen: false, mode: 'view', item: null})
 
+  // Quick Add Deficit State
+  const [quickAddModal, setQuickAddModal] = useState<{isOpen: boolean, item: any, amount: number}>({isOpen: false, item: null, amount: 0})
+
   const fetchInventory = async () => {
     setIsLoading(true)
-    
+
     const [tagRes, supRes, locRes] = await Promise.all([
       supabase.from('tag').select('*').order('tag_name'),
       supabase.from('supplier').select('*').order('supplier_name'),
       supabase.from('location').select('*').order('name')
     ])
-    
+
     if (tagRes.data) setTags(tagRes.data)
     if (supRes.data) setSuppliers(supRes.data)
     if (locRes.data) setLocations(locRes.data)
 
     const [matRes, eqRes] = await Promise.all([
-      supabase.from('materials').select('*, tag(tag_name, color), supplier(supplier_name, color), location(name)').order('name'),
-      supabase.from('equipment').select('*, tag(tag_name, color), supplier(supplier_name, color), location(name)').order('name')
+      supabase.from('materials').select('*, tag(tag_name, color), supplier(supplier_name, color), location(name)'),
+      supabase.from('equipment').select('*, tag(tag_name, color), supplier(supplier_name, color), location(name)')
     ])
-    
-    if (matRes.data) setMaterials(matRes.data)
-    if (eqRes.data) setEquipment(eqRes.data)
-      
+
+    if (matRes.data) {
+      // Sort materials: Deficits on top, then alphabetical by name
+      const sortedMats = matRes.data.sort((a, b) => {
+        const aDeficit = a.needed_stock || 0;
+        const bDeficit = b.needed_stock || 0;
+        if (bDeficit !== aDeficit) return bDeficit - aDeficit;
+        return a.name.localeCompare(b.name);
+      });
+      setMaterials(sortedMats)
+    }
+    if (eqRes.data) {
+      const sortedEq = eqRes.data.sort((a, b) => a.name.localeCompare(b.name));
+      setEquipment(sortedEq)
+    }
+
     setIsLoading(false)
   }
 
@@ -97,7 +114,6 @@ export default function AdminInventory() {
         const { error } = await supabase.from(table).update(payload).eq(idField, payload[idField])
         if (error) throw error
       }
-
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
     } catch (error) {
@@ -106,18 +122,40 @@ export default function AdminInventory() {
     }
   }
 
+  const handleQuickAddResolve = async () => {
+    if (!quickAddModal.item || quickAddModal.amount <= 0) return;
+
+    // Add the input amount to the current stock.
+    // The DB trigger we added will automatically reduce needed_stock based on this delta.
+    const newStock = (quickAddModal.item.current_in_stock || 0) + Number(quickAddModal.amount);
+
+    try {
+      const { error } = await supabase
+        .from('materials')
+        .update({ current_in_stock: newStock, updated_at: new Date().toISOString() })
+        .eq('material_id', quickAddModal.item.material_id)
+
+      if (error) throw error;
+
+      setQuickAddModal({ isOpen: false, item: null, amount: 0 });
+      fetchInventory();
+    } catch (error) {
+      console.error("Error resolving deficit:", error)
+      alert("Failed to update stock.");
+    }
+  }
+
   const handleArchiveItem = async (id: string, type: 'materials' | 'equipment', isArchiving: boolean) => {
     const table = type === 'materials' ? 'materials' : 'equipment'
     const idField = type === 'materials' ? 'material_id' : 'equipment_id'
-    
-    // Default restore statuses based on the type
+
     const restoreStatus = type === 'materials' ? 'Active' : 'Available'
     const newStatus = isArchiving ? 'Archived' : restoreStatus
-    
+
     try {
       const { error } = await supabase.from(table).update({ status: newStatus }).eq(idField, id)
       if (error) throw error
-      
+
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
     } catch (error) {
@@ -129,32 +167,35 @@ export default function AdminInventory() {
   const applyFilters = (items: any[], type: "materials" | "equipment") => {
     return items.filter(item => {
       const matchesSearch = item.name?.toLowerCase().includes(searchQuery.toLowerCase())
-      
+
       const isItemArchived = item.status === 'Archived'
       if (!showArchived && isItemArchived) return false
-      
+
       const matchesLocation = locationFilter === "All" || item.location_id === locationFilter
       const matchesTag = tagFilter === "All" || item.tag_id === tagFilter
       const matchesSupplier = supplierFilter === "All" || item.supplier_id === supplierFilter
       const matchesStatus = statusFilter === "All" || item.status === statusFilter
-      
-      let matchesReorder = true
-      if (type === "materials" && reorderFilter !== "All") {
+
+      let matchesAlert = true
+      if (type === "materials" && alertFilter !== "All") {
         const stock = item.current_in_stock ?? 0
         const reorderPoint = item.reorder_point ?? 0
-        
-        if (reorderFilter === "Reaching") {
-           matchesReorder = stock <= (reorderPoint + 1) && stock >= reorderPoint
-        } else if (reorderFilter === "Below") {
-           matchesReorder = stock < reorderPoint
+        const neededStock = item.needed_stock ?? 0
+
+        if (alertFilter === "Deficit") {
+           matchesAlert = neededStock > 0;
+        } else if (alertFilter === "Reaching") {
+           matchesAlert = stock <= (reorderPoint + 1) && stock >= reorderPoint && neededStock === 0
+        } else if (alertFilter === "Below") {
+           matchesAlert = stock < reorderPoint && neededStock === 0
         }
       }
 
-      return matchesSearch && matchesLocation && matchesTag && matchesSupplier && matchesStatus && matchesReorder
+      return matchesSearch && matchesLocation && matchesTag && matchesSupplier && matchesStatus && matchesAlert
     })
   }
-  
-  const hasActiveFilters = locationFilter !== "All" || tagFilter !== "All" || supplierFilter !== "All" || statusFilter !== "All" || reorderFilter !== "All";
+
+  const hasActiveFilters = locationFilter !== "All" || tagFilter !== "All" || supplierFilter !== "All" || statusFilter !== "All" || alertFilter !== "All";
 
   return (
     <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden flex flex-col">
@@ -162,15 +203,15 @@ export default function AdminInventory() {
         <h1 className="text-2xl font-semibold text-gray-900">Inventory Management</h1>
         <div className="flex gap-4 items-center">
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={showArchived}
               onChange={(e) => setShowArchived(e.target.checked)}
               className="rounded border-gray-300 text-[#00c065] focus:ring-[#00c065] w-4 h-4"
             />
             Show Archived
           </label>
-          <button 
+          <button
             onClick={() => setModalConfig({ isOpen: true, mode: 'add', item: null })}
             className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90"
             style={{ backgroundColor: ACCENT }}
@@ -184,7 +225,8 @@ export default function AdminInventory() {
         <Tabs defaultValue="materials" onValueChange={(val) => {
           setActiveTab(val as 'materials' | 'equipment')
           setSearchQuery("")
-          setStatusFilter("All") // Reset status filter on tab change since options are different
+          setStatusFilter("All")
+          setAlertFilter("All")
         }} className="flex-1 flex flex-col h-full">
           <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0">
             <TabsList className="bg-gray-100">
@@ -214,13 +256,13 @@ export default function AdminInventory() {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
-                  
-                  {/* Status Filter */}
+
                   <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Status</div>
                   <DropdownMenuCheckboxItem checked={statusFilter === "All"} onCheckedChange={() => setStatusFilter("All")}>All Statuses</DropdownMenuCheckboxItem>
                   {activeTab === "materials" ? (
                     <>
                       <DropdownMenuCheckboxItem checked={statusFilter === "Active"} onCheckedChange={() => setStatusFilter("Active")}>Active</DropdownMenuCheckboxItem>
+                      {/* Removed the Needs Reorder Status option here */}
                     </>
                   ) : (
                     <>
@@ -234,14 +276,15 @@ export default function AdminInventory() {
 
                   {activeTab === "materials" && (
                     <>
-                      <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Re-Order Alerts</div>
-                      <DropdownMenuCheckboxItem checked={reorderFilter === "All"} onCheckedChange={() => setReorderFilter("All")}>All Items</DropdownMenuCheckboxItem>
-                      <DropdownMenuCheckboxItem checked={reorderFilter === "Reaching"} onCheckedChange={() => setReorderFilter("Reaching")}>Reaching Re-Order Point</DropdownMenuCheckboxItem>
-                      <DropdownMenuCheckboxItem checked={reorderFilter === "Below"} onCheckedChange={() => setReorderFilter("Below")}>Below Re-Order Point</DropdownMenuCheckboxItem>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Inventory Alerts</div>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "All"} onCheckedChange={() => setAlertFilter("All")}>All Items</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "Deficit"} onCheckedChange={() => setAlertFilter("Deficit")}>Project Deficit (Needed)</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "Reaching"} onCheckedChange={() => setAlertFilter("Reaching")}>Reaching Re-Order Point</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "Below"} onCheckedChange={() => setAlertFilter("Below")}>Below Re-Order Point</DropdownMenuCheckboxItem>
                       <div className="h-px bg-gray-100 my-1"></div>
                     </>
                   )}
-                  
+
                   <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Location</div>
                   <DropdownMenuCheckboxItem checked={locationFilter === "All"} onCheckedChange={() => setLocationFilter("All")}>All Locations</DropdownMenuCheckboxItem>
                   {locations.map(loc => (
@@ -269,7 +312,7 @@ export default function AdminInventory() {
                       {s.supplier_name}
                     </DropdownMenuCheckboxItem>
                   ))}
-                  
+
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -277,19 +320,20 @@ export default function AdminInventory() {
 
           <div className="flex-1 overflow-hidden p-4 bg-gray-50/50">
             <TabsContent value="materials" className="h-full m-0 data-[state=active]:flex flex-col">
-              <InventoryTable 
-                data={applyFilters(materials, "materials")} 
-                type="materials" 
-                isLoading={isLoading} 
-                onRowClick={(item: any) => setModalConfig({ isOpen: true, mode: 'view', item })} 
+              <InventoryTable
+                data={applyFilters(materials, "materials")}
+                type="materials"
+                isLoading={isLoading}
+                onRowClick={(item: any) => setModalConfig({ isOpen: true, mode: 'view', item })}
+                onQuickAdd={(item: any) => setQuickAddModal({ isOpen: true, item: item, amount: item.needed_stock || 0 })}
               />
             </TabsContent>
             <TabsContent value="equipment" className="h-full m-0 data-[state=active]:flex flex-col">
-              <InventoryTable 
-                data={applyFilters(equipment, "equipment")} 
-                type="equipment" 
-                isLoading={isLoading} 
-                onRowClick={(item: any) => setModalConfig({ isOpen: true, mode: 'view', item })} 
+              <InventoryTable
+                data={applyFilters(equipment, "equipment")}
+                type="equipment"
+                isLoading={isLoading}
+                onRowClick={(item: any) => setModalConfig({ isOpen: true, mode: 'view', item })}
               />
             </TabsContent>
           </div>
@@ -311,6 +355,42 @@ export default function AdminInventory() {
           refreshData={fetchInventory}
         />
       )}
+
+      {/* Quick Add Shortcut Modal */}
+      <Dialog open={quickAddModal.isOpen} onOpenChange={() => setQuickAddModal({ isOpen: false, item: null, amount: 0 })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Resolve Material Deficit</DialogTitle>
+            <DialogDescription>
+              Add newly purchased stock to clear the project deficit warning.
+            </DialogDescription>
+          </DialogHeader>
+          {quickAddModal.item && (
+            <div className="space-y-4 py-4">
+              <div className="p-3 bg-red-50 text-red-800 rounded-md border border-red-100 text-sm">
+                <strong>{quickAddModal.item.name}</strong> currently has a deficit of <strong>{quickAddModal.item.needed_stock} units</strong> required for upcoming projects.
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Units to Add to Stock</label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={quickAddModal.amount || ''}
+                    onChange={(e) => setQuickAddModal(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                  />
+                  <span className="text-sm text-gray-500 whitespace-nowrap">{quickAddModal.item.unit}</span>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setQuickAddModal({ isOpen: false, item: null, amount: 0 })} className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700">Cancel</button>
+                <button onClick={handleQuickAddResolve} className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#00c065] text-white hover:bg-[#00a054]">Restock & Resolve</button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }
