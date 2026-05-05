@@ -481,17 +481,19 @@ export default function ClientDashboardPage() {
   const siteAddress = readString(project?.site_address, project?.siteAddress);
 
   return (
-    <div className="h-screen overflow-hidden">
-      <div className="flex h-full flex-col p-6">
+    // Below md: natural document flow with scroll. md+: locked-screen layout
+    // identical to before so desktop still feels app-like.
+    <div className="md:h-screen md:overflow-hidden">
+      <div className="flex flex-col gap-4 p-3 sm:p-4 md:h-full md:p-6">
         {/* Header */}
         <div className="shrink-0">
           <h1
-            className="text-2xl font-semibold"
+            className="text-xl sm:text-2xl font-semibold"
             style={{ color: "var(--cp-text)" }}>
             {projectTitle}
           </h1>
           <div
-            className="mt-1 flex flex-wrap items-center gap-3 text-sm"
+            className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm"
             style={{ color: "var(--cp-text-muted)" }}>
             <span
               className="font-mono font-medium"
@@ -511,11 +513,9 @@ export default function ClientDashboardPage() {
           </div>
         </div>
 
-        {/* Body */}
-        <div
-          className="mt-6 grid min-h-0 flex-1 gap-4 overflow-hidden"
-          style={{ gridTemplateColumns: "minmax(0,7fr) minmax(0,3fr)" }}>
-          <div className="min-h-0 overflow-hidden">
+        {/* Body — stacks on mobile, switches to the 7/3 split on lg+. */}
+        <div className="grid flex-1 min-h-0 gap-4 lg:overflow-hidden lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)] md:mt-2">
+          <div className="min-h-0 lg:overflow-hidden">
             <JobProgressCard
               title="Project Progress"
               selectedProject={project}
@@ -532,15 +532,15 @@ export default function ClientDashboardPage() {
             />
           </div>
 
-          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-4 overflow-hidden">
-            <div className="min-h-0 overflow-hidden">
+          <div className="grid min-h-0 gap-4 lg:overflow-hidden lg:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="min-h-0 lg:overflow-hidden">
               <PendingDocumentsCard
                 selectedProject={pendingDocumentProject}
                 loading={loadingDetails}
               />
             </div>
 
-            <div className="min-h-0 overflow-hidden">
+            <div className="min-h-0 lg:overflow-hidden">
               <NotificationsCard
                 limit={4}
                 dataSource="project-chat"
@@ -548,7 +548,7 @@ export default function ClientDashboardPage() {
               />
             </div>
 
-            <div className="min-h-0 overflow-hidden">
+            <div className="min-h-0 lg:overflow-hidden">
               <DashboardInsightCard
                 processItems={processItems as ProcessItem[]}
                 loadingDetails={loadingDetails}

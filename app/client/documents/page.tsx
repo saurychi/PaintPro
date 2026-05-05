@@ -759,13 +759,13 @@ export default function ClientDocuments() {
   }
 
   return (
-    <div className="p-6 text-gray-900" onClick={closeAll}>
+    <div className="p-3 sm:p-4 md:p-6 text-gray-900" onClick={closeAll}>
       <ToastStack toasts={toasts} />
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Documents</h1>
-          <div className="mt-1 text-sm text-gray-500">Files, folders, and exports.</div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Documents</h1>
+          <div className="mt-1 text-xs sm:text-sm text-gray-500">Files, folders, and exports.</div>
         </div>
       </div>
 

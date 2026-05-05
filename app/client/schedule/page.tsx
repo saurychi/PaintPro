@@ -489,16 +489,16 @@ export default function ClientSchedule() {
         }
       `}</style>
 
-      <div className="client-schedule-page h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden p-4 text-gray-900 dark:text-gray-100">
+      <div className="client-schedule-page p-3 sm:p-4 text-gray-900 dark:text-gray-100 lg:h-[calc(100vh-var(--admin-header-offset,0px))] lg:min-h-0 lg:overflow-hidden">
         <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
           Schedule
         </h1>
 
-        <div className="mt-3 min-h-0 h-[calc(100%-2.25rem)]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="min-h-0 flex-1 overflow-hidden p-3">
+        <div className="mt-3 lg:min-h-0 lg:h-[calc(100%-2.25rem)]">
+          <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:h-full lg:min-h-0 lg:overflow-hidden">
+            <div className="p-3 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
               {loading ? (
-                <div className="flex h-full items-center justify-center">
+                <div className="flex items-center justify-center min-h-[40vh] lg:h-full">
                   <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
                     <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
                     <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -507,8 +507,8 @@ export default function ClientSchedule() {
                   </div>
                 </div>
               ) : (
-                <div className="grid h-full min-h-0 grid-cols-12 gap-3">
-                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-9">
+                <div className="grid grid-cols-12 gap-3 lg:h-full lg:min-h-0">
+                  <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
                     <div className="mb-2.5 flex items-start justify-between gap-3 border-b border-gray-200 pb-2.5 dark:border-slate-700">
                       <div>
                         <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
@@ -557,8 +557,11 @@ export default function ClientSchedule() {
                       </div>
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-950">
-                      <div className="h-full min-h-0">
+                    {/* Calendar needs an explicit height. On mobile the parent
+                        is no longer a fixed-height flex, so flex-1 collapses;
+                        give it a viewport-anchored min-height there. */}
+                    <div className="rounded-lg border border-gray-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-950 min-h-[60vh] lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+                      <div className="h-full min-h-[60vh] lg:min-h-0">
                         <FullCalendar
                           key={todayKey}
                           plugins={[dayGridPlugin, interactionPlugin]}
@@ -585,7 +588,7 @@ export default function ClientSchedule() {
                     </div>
                   </div>
 
-                  <aside className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-3">
+                  <aside className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
                     <section className="shrink-0 pb-3">
                       <p className="text-sm font-semibold text-gray-900 dark:text-gray-50 dark:text-gray-50">
                         Current Project Status
