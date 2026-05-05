@@ -145,6 +145,7 @@ const STATUS_COLORS: Record<string, string> = {
   in_progress: "#3b82f6",
   ready_to_start: "#10b981",
   quotation_pending: "#f59e0b",
+  client_quotation_done: "#0ea5e9",
   employee_management_pending: "#f59e0b",
   invoice_pending: "#8b5cf6",
   payment_pending: "#8b5cf6",

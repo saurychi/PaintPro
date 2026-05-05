@@ -228,6 +228,7 @@ function getStatusLabel(projectStatus: string) {
     cost_estimation_pending: "Cost Estimation Pending",
     overview_pending: "Overview Pending",
     quotation_pending: "Quotation Pending",
+    client_quotation_done: "Client Signed Quotation",
     ready_to_start: "Ready to Start",
     in_progress: "In Progress",
     review_pending: "Review Pending",
@@ -959,34 +960,15 @@ export default function DashboardPage() {
     setSelectedProject(nextProject);
   }
 
-  /**
-   * Dashboard layout percentages.
-   * Change only these values when adjusting the top/bottom dashboard height.
-   */
-  const dashboardTopHeight = "12fr";
-  const dashboardBottomHeight = "88fr";
-
-  /**
-   * Bottom section layout percentages.
-   * Change these if you want Progress / Right Panel to be wider or smaller.
-   */
-  const progressColumnWidth = "7fr";
-  const sideColumnWidth = "3fr";
-
   return (
-    <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
-      <h1 className="shrink-0 text-2xl font-semibold leading-8 text-gray-900">
+    <div className="flex min-h-screen flex-col bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 lg:grid lg:h-screen lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden lg:px-[1.4%] lg:py-[1.2%]">
+      <h1 className="shrink-0 text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
         Dashboard
       </h1>
 
-      <div
-        className="mt-[1.2%] grid min-h-0 overflow-hidden"
-        style={{
-          gridTemplateRows: `${dashboardTopHeight} minmax(0, ${dashboardBottomHeight})`,
-          rowGap: "2.2%",
-        }}>
+      <div className="mt-3 flex flex-col gap-3 sm:mt-4 sm:gap-4 lg:mt-[1.2%] lg:grid lg:min-h-0 lg:gap-0 lg:overflow-hidden lg:grid-rows-[12fr_minmax(0,88fr)] lg:gap-y-[2.2%]">
         {/* Top section */}
-        <section className="min-h-0 overflow-hidden">
+        <section className="lg:min-h-0 lg:overflow-hidden">
           <CurrentJobCard
             statusLabel={getStatusLabel(selectedStatus)}
             jobNo={
@@ -1004,13 +986,8 @@ export default function DashboardPage() {
         </section>
 
         {/* Bottom section */}
-        <section
-          className="grid min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-none"
-          style={{
-            gridTemplateColumns: `${progressColumnWidth} ${sideColumnWidth}`,
-            columnGap: "1.2%",
-          }}>
-          <div className="min-h-0 overflow-hidden">
+        <section className="flex flex-col gap-3 sm:gap-4 lg:grid lg:min-h-0 lg:gap-0 lg:overflow-hidden lg:grid-cols-[7fr_3fr] lg:gap-x-[1.2%]">
+          <div className="h-[70vh] sm:h-[75vh] lg:h-auto lg:min-h-0 lg:overflow-hidden">
             <JobProgressCard
               selectedProject={selectedProject}
               projectId={selectedProjectId}
@@ -1022,22 +999,23 @@ export default function DashboardPage() {
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
               onFinishSubtask={handleFinishSubtask}
+              onRefresh={() => setRefreshKey((k) => k + 1)}
               currentUserId={currentUserId}
               employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
             />
           </div>
 
-          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-[2%] overflow-hidden">
-            <div className="min-h-0 overflow-hidden">
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-none lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] lg:gap-[2%] lg:overflow-hidden">
+            <div className="h-72 sm:h-80 lg:h-auto lg:min-h-0 lg:overflow-hidden">
               <EmployeesCard />
             </div>
 
-            <div className="min-h-0 overflow-hidden">
+            <div className="h-72 sm:h-80 lg:h-auto lg:min-h-0 lg:overflow-hidden">
               <NotificationsCard notifications={[]} />
             </div>
 
-            <div className="min-h-0 overflow-hidden">
+            <div className="h-80 md:col-span-2 sm:h-96 lg:h-auto lg:col-span-1 lg:min-h-0 lg:overflow-hidden">
               <DashboardInsightCard
                 processItems={processItems}
                 loadingDetails={loadingProjects || loadingDetails}

@@ -1,12 +1,13 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { supabase } from '@/lib/supabaseClient'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Search, Plus, Filter } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import InventoryTable from '@/components/inventorytable'
 import InventoryModal from '@/components/inventory-modal'
+import { useSidebarBadge } from '@/components/sidebar-badges'
 
 const ACCENT = "#00c065"
 
@@ -57,6 +58,23 @@ export default function AdminInventory() {
 
   useEffect(() => { fetchInventory() }, [])
 
+  // Surface a badge on the sidebar's "Inventory" item whenever any non-archived
+  // material is below its reorder point or has needed_stock requested. The
+  // count reflects the number of materials, not the magnitude of the deficit.
+  const inventoryAttentionCount = useMemo(() => {
+    return materials.reduce((count, item) => {
+      if (item?.status === "Archived") return count
+      const stock = Number(item?.current_in_stock ?? 0)
+      const reorderPoint = Number(item?.reorder_point ?? 0)
+      const needed = Number(item?.needed_stock ?? 0)
+      const belowReorder = reorderPoint > 0 && stock < reorderPoint
+      const hasNeeded = needed > 0
+      return belowReorder || hasNeeded ? count + 1 : count
+    }, 0)
+  }, [materials])
+
+  useSidebarBadge("inventory", inventoryAttentionCount, "danger")
+
   const handleSaveItem = async (data: any, mode: 'add' | 'edit', type: 'materials' | 'equipment') => {
     const table = type === 'materials' ? 'materials' : 'equipment'
     const idField = type === 'materials' ? 'material_id' : 'equipment_id'
@@ -78,21 +96,6 @@ export default function AdminInventory() {
         payload.updated_at = new Date().toISOString()
         const { error } = await supabase.from(table).update(payload).eq(idField, payload[idField])
         if (error) throw error
-      }
-
-      // Reprice the project_task_material rows for any non-finished projects
-      // that use this material when its unit_cost actually changed. Locked
-      // projects (completed / cancelled) keep their historical cost.
-      if (
-        mode === 'edit' &&
-        type === 'materials' &&
-        payload.material_id &&
-        previousUnitCost !== null
-      ) {
-        const newUnitCost = Number(payload.unit_cost ?? 0)
-        if (Number.isFinite(newUnitCost) && newUnitCost !== previousUnitCost) {
-          await repriceProjectsUsingMaterial(payload.material_id, newUnitCost)
-        }
       }
 
       setModalConfig({ isOpen: false, mode: 'view', item: null })

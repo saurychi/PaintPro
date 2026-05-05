@@ -353,6 +353,7 @@ export default function ClientDashboardPage() {
 
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!projectId) return;
@@ -399,7 +400,7 @@ export default function ClientDashboardPage() {
     }
 
     load();
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
   const projectStatus = readString(project?.status, project?.rawStatus);
 
@@ -525,6 +526,7 @@ export default function ClientDashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
+              onRefresh={() => setRefreshKey((k) => k + 1)}
               employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
             />

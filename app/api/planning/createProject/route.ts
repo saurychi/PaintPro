@@ -798,11 +798,27 @@ export async function POST(req: Request) {
       ])
   );
 
-  const materialMap = new Map<string, MaterialRow>(
-    catalogMaterials
-      .filter((row) => row.material_id && row.name)
-      .map((row) => [norm(String(row.name)), row])
-  );
+  // The materials catalog can hold multiple rows that share a name but are
+  // priced differently (e.g. same paint from two suppliers). When the
+  // estimator looks up a material by name, prefer the *cheapest* unit_cost
+  // so the project's estimated cost matches the lowest available source.
+  // Rows missing unit_cost still count (treated as 0) so they can be picked
+  // when no priced variant exists.
+  const materialMap = new Map<string, MaterialRow>();
+  for (const row of catalogMaterials) {
+    if (!row.material_id || !row.name) continue;
+    const key = norm(String(row.name));
+    const existing = materialMap.get(key);
+    if (!existing) {
+      materialMap.set(key, row);
+      continue;
+    }
+    const existingCost = Number(existing.unit_cost ?? Number.POSITIVE_INFINITY);
+    const candidateCost = Number(row.unit_cost ?? Number.POSITIVE_INFINITY);
+    if (candidateCost < existingCost) {
+      materialMap.set(key, row);
+    }
+  }
 
   const insertedProjectTasksForCost: Array<{
     project_task_id: string;

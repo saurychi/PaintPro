@@ -33,6 +33,7 @@ type StatusKey =
   | "cost_estimation_pending"
   | "overview_pending"
   | "quotation_pending"
+  | "client_quotation_done"
   | "downpayment_pending"
   | "ready_to_start"
   | "in_progress"
@@ -55,6 +56,7 @@ const STATUS_ORDER: StatusKey[] = [
   "cost_estimation_pending",
   "overview_pending",
   "quotation_pending",
+  "client_quotation_done",
   "downpayment_pending",
   "ready_to_start",
   "in_progress",
@@ -129,6 +131,12 @@ const STATUS_META: Record<StatusKey, StatusMeta> = {
     badgeBg: "#f0fdf4",
     badgeBorder: "#bbf7d0",
     badgeColor: "#15803d",
+  },
+  client_quotation_done: {
+    label: "Client Signed Quotation",
+    badgeBg: "#ecfdf5",
+    badgeBorder: "#a7f3d0",
+    badgeColor: "#047857",
   },
   downpayment_pending: {
     label: "Downpayment Pending",
@@ -225,6 +233,10 @@ function getProjectRoute(projectId: string, status: StatusKey | "unknown"): stri
     case "overview_pending":
       return `/admin/job-creation/overview?projectId=${projectId}`;
     case "quotation_pending":
+      return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
+    case "client_quotation_done":
+      // The client has signed; the admin still needs to review and ack on the
+      // quotation page before advancing to downpayment.
       return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
     case "downpayment_pending":
     case "ready_to_start":

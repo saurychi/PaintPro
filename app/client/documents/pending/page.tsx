@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import SignatureCanvas from "react-signature-canvas";
 import {
+  Check,
   Download,
   FileText,
   Loader2,
   PenLine,
+  Send,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -23,6 +25,18 @@ type ProjectOverviewResponse = {
     estimated_budget?: number | null;
     estimated_cost?: number | null;
     estimated_profit?: number | null;
+  };
+  error?: string;
+  details?: string;
+};
+
+type CostEstimationResponse = {
+  summary?: {
+    materialTotal?: number | null;
+    laborTotal?: number | null;
+    totalCost?: number | null;
+    profitAmount?: number | null;
+    quotationTotal?: number | null;
   };
   error?: string;
   details?: string;
@@ -45,7 +59,11 @@ function readError(data: ProjectOverviewResponse | null, fallback: string) {
 }
 
 function getDocumentType(status: string): DocumentType {
-  if (status === "quotation_pending" || status === "ready_to_start") {
+  if (
+    status === "quotation_pending" ||
+    status === "client_quotation_done" ||
+    status === "ready_to_start"
+  ) {
     return "quotation";
   }
 
@@ -67,17 +85,28 @@ export default function ClientPendingDocumentsPage() {
   const [project, setProject] = useState<
     ProjectOverviewResponse["project"] | null
   >(null);
+  const [costSummary, setCostSummary] = useState<
+    CostEstimationResponse["summary"] | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   const [signatureErr, setSignatureErr] = useState<string | null>(null);
 
+  // Local-only flags for the "client signed; status not yet advanced" state.
+  // The signature endpoint persists the signed PDF but intentionally leaves
+  // projects.status alone, so we drive the post-sign UI from these refs.
+  const [justSignedQuotation, setJustSignedQuotation] = useState(false);
+  const [notifyingPM, setNotifyingPM] = useState(false);
+  const [pmNotified, setPmNotified] = useState(false);
+
   const projectStatus = String(project?.status || "").trim();
   const documentType = getDocumentType(projectStatus);
 
   const isPendingQuotation = projectStatus === "quotation_pending";
   const isPendingInvoiceAgreement = projectStatus === "invoice_agreement_pending";
+  const isClientQuotationDone = projectStatus === "client_quotation_done";
   const isQuotationApproved = projectStatus === "ready_to_start";
   const isInvoiceAccepted = projectStatus === "payment_pending";
 
@@ -125,19 +154,36 @@ export default function ClientPendingDocumentsPage() {
       try {
         setLoading(true);
 
-        const response = await fetch(
-          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
-            projectId,
-          )}`,
-        );
+        const [overviewRes, costRes] = await Promise.all([
+          fetch(
+            `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
+              projectId,
+            )}`,
+          ),
+          fetch(
+            `/api/planning/getProjectCostEstimation?projectId=${encodeURIComponent(
+              projectId,
+            )}`,
+          ),
+        ]);
 
-        const data = (await response.json()) as ProjectOverviewResponse;
+        const overviewData =
+          (await overviewRes.json()) as ProjectOverviewResponse;
 
-        if (!response.ok) {
-          throw new Error(readError(data, "Failed to load pending document."));
+        if (!overviewRes.ok) {
+          throw new Error(
+            readError(overviewData, "Failed to load pending document."),
+          );
         }
 
-        setProject(data.project ?? null);
+        setProject(overviewData.project ?? null);
+
+        if (costRes.ok) {
+          const costData = (await costRes.json()) as CostEstimationResponse;
+          setCostSummary(costData.summary ?? null);
+        } else {
+          setCostSummary(null);
+        }
       } catch (error) {
         const message =
           error instanceof Error
@@ -194,19 +240,19 @@ export default function ClientPendingDocumentsPage() {
         );
       }
 
+      // Reflect the new server-side status locally so the post-sign UI sticks
+      // even after a refresh — the signature endpoint flips the project to
+      // "client_quotation_done".
       setProject((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: "ready_to_start",
-            }
-          : prev,
+        prev ? { ...prev, status: "client_quotation_done" } : prev,
       );
-
+      setJustSignedQuotation(true);
+      setPmNotified(false);
       signatureRef.current.clear();
 
       toast.success("Quotation signed.", {
-        description: "The project is now ready to start.",
+        description:
+          "Notify the project manager to let them know the quotation is agreed.",
       });
     } catch (error) {
       const message =
@@ -218,6 +264,47 @@ export default function ClientPendingDocumentsPage() {
       });
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function notifyProjectManager() {
+    if (!projectId || notifyingPM) return;
+
+    try {
+      setNotifyingPM(true);
+
+      const response = await fetch("/api/client/messages/notify-pm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          projectCode: project?.project_code ?? "",
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to notify project manager.",
+        );
+      }
+
+      setPmNotified(true);
+      toast.success("Project manager notified.", {
+        description:
+          "A message has been sent in the project conversation. They will review and update the project from their side.",
+      });
+    } catch (error) {
+      toast.error("Couldn't notify project manager", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to notify project manager.",
+      });
+    } finally {
+      setNotifyingPM(false);
     }
   }
 
@@ -360,7 +447,12 @@ export default function ClientPendingDocumentsPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {isPendingQuotation || isPendingInvoiceAgreement ? (
+              {(justSignedQuotation || isClientQuotationDone) &&
+              documentType === "quotation" ? (
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                  Signed — awaiting project manager
+                </span>
+              ) : isPendingQuotation || isPendingInvoiceAgreement ? (
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
                   Needs signature
                 </span>
@@ -392,7 +484,9 @@ export default function ClientPendingDocumentsPage() {
                 Download PDF
               </button>
 
-              {documentType === "quotation" ? (
+              {documentType === "quotation" &&
+              !justSignedQuotation &&
+              !isClientQuotationDone ? (
                 <button
                   type="button"
                   onClick={signQuotation}
@@ -406,6 +500,27 @@ export default function ClientPendingDocumentsPage() {
                     <PenLine className="h-3.5 w-3.5" />
                   )}
                   {isQuotationApproved ? "Already Signed" : "Sign Quotation"}
+                </button>
+              ) : null}
+
+              {documentType === "quotation" &&
+              (justSignedQuotation || isClientQuotationDone) ? (
+                <button
+                  type="button"
+                  onClick={notifyProjectManager}
+                  disabled={!projectId || notifyingPM || pmNotified}
+                  className="inline-flex h-9 items-center gap-2 rounded-full bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {notifyingPM ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : pmNotified ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  {pmNotified
+                    ? "Project Manager Notified"
+                    : "Notify Project Manager"}
                 </button>
               ) : null}
 
@@ -535,7 +650,10 @@ export default function ClientPendingDocumentsPage() {
                             : "Estimated Budget"}
                         </p>
                         <p className="mt-1 text-sm font-semibold text-gray-900">
-                          {formatCurrency(project?.estimated_budget)}
+                          {formatCurrency(
+                            costSummary?.quotationTotal ??
+                              project?.estimated_budget,
+                          )}
                         </p>
                       </div>
 
@@ -545,7 +663,10 @@ export default function ClientPendingDocumentsPage() {
                             Estimated Cost
                           </p>
                           <p className="mt-1 text-sm font-semibold text-gray-900">
-                            {formatCurrency(project?.estimated_cost)}
+                            {formatCurrency(
+                              costSummary?.totalCost ??
+                                project?.estimated_cost,
+                            )}
                           </p>
                         </div>
                       ) : null}

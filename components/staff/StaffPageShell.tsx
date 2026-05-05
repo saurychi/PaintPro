@@ -21,18 +21,22 @@ export default function StaffPageShell({
   return (
     <div
       className={cn(
-        "flex h-[calc(100vh-var(--admin-header-offset,0px))] flex-col overflow-hidden p-6",
+        "flex min-h-[calc(100vh-var(--admin-header-offset,0px))] flex-col p-3 sm:p-4 md:p-6 lg:h-[calc(100vh-var(--admin-header-offset,0px))] lg:overflow-hidden",
         className,
       )}
       {...props}
     >
       {/* Header — matches admin page style */}
-      <div className="flex shrink-0 items-start justify-between gap-4">
+      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+          <h1 className="text-xl font-semibold text-gray-900 sm:text-2xl dark:text-slate-100">
+            {title}
+          </h1>
 
           {subtitle ? (
-            <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+            <p className="mt-1 text-xs text-gray-500 sm:text-sm dark:text-slate-400">
+              {subtitle}
+            </p>
           ) : null}
         </div>
 
@@ -40,7 +44,7 @@ export default function StaffPageShell({
       </div>
 
       {/* Body */}
-      <div className={cn("mt-6 min-h-0 flex-1", bodyClassName)}>
+      <div className={cn("mt-4 min-h-0 flex-1 sm:mt-6", bodyClassName)}>
         {children}
       </div>
     </div>

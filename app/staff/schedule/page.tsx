@@ -563,14 +563,14 @@ export default function StaffSchedulePage() {
         }
       `}</style>
 
-      <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
-        <h1 className="shrink-0 text-2xl font-semibold leading-8 text-gray-900">
+      <div className="flex min-h-screen flex-col bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 lg:grid lg:h-screen lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden lg:px-[1.4%] lg:py-[1.2%]">
+        <h1 className="shrink-0 text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
           Schedule
         </h1>
 
-        <div className="mt-3 min-h-0">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="min-h-0 flex-1 overflow-hidden p-2">
+        <div className="mt-3 lg:min-h-0">
+          <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
+            <div className="flex-1 p-2 lg:min-h-0 lg:overflow-hidden">
               {loading ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
@@ -581,8 +581,8 @@ export default function StaffSchedulePage() {
                   </div>
                 </div>
               ) : (
-                <div className="grid h-full min-h-0 grid-cols-12 gap-2">
-                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9">
+                <div className="grid grid-cols-12 gap-2 lg:h-full lg:min-h-0">
+                  <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold text-gray-900">
@@ -633,7 +633,7 @@ export default function StaffSchedulePage() {
                     </div>
 
                     <div
-                      className={`min-h-0 flex-1 overflow-hidden rounded-xl border ${BORDER} bg-white p-1.5`}
+                      className={`mt-2 h-[60vh] rounded-xl border ${BORDER} bg-white p-1.5 sm:h-[70vh] lg:mt-0 lg:h-auto lg:min-h-0 lg:flex-1 lg:overflow-hidden`}
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
@@ -660,9 +660,9 @@ export default function StaffSchedulePage() {
                     </div>
                   </div>
 
-                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:col-span-3">
-                    <div className="flex h-full min-h-0 flex-col overflow-hidden p-4">
-                      <section className="flex basis-[20%] flex-col pb-4">
+                  <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:col-span-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                    <div className="flex flex-col p-4 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                      <section className="flex flex-col pb-4 lg:basis-[20%]">
                         <div className="mb-3 flex items-center gap-2">
                           <p className="text-xs font-semibold text-gray-900">
                             Current Project Status
@@ -698,7 +698,7 @@ export default function StaffSchedulePage() {
 
                       <div className="border-t border-gray-200" />
 
-                      <section className="flex min-h-0 basis-[34%] flex-col py-4">
+                      <section className="flex flex-col py-4 lg:min-h-0 lg:basis-[34%]">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <p className="text-xs font-semibold text-gray-900">
                             Unavailable Days
@@ -713,7 +713,7 @@ export default function StaffSchedulePage() {
                           </button>
                         </div>
 
-                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1">
+                        <div className="max-h-[260px] divide-y divide-gray-200 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
                           {upcomingUnavailableItems.length > 0 ? (
                             upcomingUnavailableItems.map((item) => (
                               <button
@@ -749,7 +749,7 @@ export default function StaffSchedulePage() {
 
                       <div className="border-t border-gray-200" />
 
-                      <section className="flex min-h-0 basis-[46%] flex-col pt-4">
+                      <section className="flex flex-col pt-4 lg:min-h-0 lg:basis-[46%]">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <p className="text-xs font-semibold text-gray-900">
                             Projects
@@ -759,7 +759,7 @@ export default function StaffSchedulePage() {
                           </span>
                         </div>
 
-                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1">
+                        <div className="max-h-80 divide-y divide-gray-200 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
                           {projects.length ? (
                             projects.map((project) => (
                               <button

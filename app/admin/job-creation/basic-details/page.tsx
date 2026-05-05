@@ -1609,27 +1609,6 @@ export default function BasicDetails() {
         throw new Error("You must be signed in to create a project.");
       }
 
-      console.log(
-        "createProject payload first subtask",
-        nextTasks?.[0]?.sub_tasks?.[0],
-      );
-
-      console.log(
-        "createProject payload",
-        JSON.stringify(
-          nextTasks.map((task) => ({
-            name: task.name,
-            sub_tasks: task.sub_tasks.map((subTask) => ({
-              title: subTask.title,
-              assignedEmployees: subTask.assignedEmployees,
-              requiredEmployeeCount: subTask.requiredEmployeeCount,
-            })),
-          })),
-          null,
-          2,
-        ),
-      );
-
       const createProjectResponse = await fetch("/api/planning/createProject", {
         method: "POST",
         headers: {

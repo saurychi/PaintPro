@@ -37,6 +37,14 @@ export default function SigninClient() {
     if (e) {
       setIdentity(e)
       setMode("internal")
+      return
+    }
+
+    const m = params.get("mode")
+    if (m === "client") {
+      setMode("client")
+    } else if (m === "staff" || m === "internal") {
+      setMode("internal")
     }
   }, [params])
 
@@ -223,7 +231,7 @@ export default function SigninClient() {
 
   if (checkingSession) {
     return (
-      <div className="min-h-svh flex items-center justify-center bg-white px-6">
+      <div className="min-h-svh flex items-center justify-center bg-white px-6 dark:bg-slate-950">
         <div className="flex flex-col items-center gap-6 text-center">
           <div className="flex flex-col items-center gap-3">
             <Image
@@ -234,10 +242,10 @@ export default function SigninClient() {
               priority
               className="object-contain"
             />
-            <span className="text-3xl font-semibold text-gray-900">PaintPro</span>
+            <span className="text-3xl font-semibold text-gray-900 dark:text-slate-100">PaintPro</span>
           </div>
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-[#00c065]" />
-          <p className="text-sm text-gray-600">Checking your account...</p>
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-[#00c065] dark:border-x-slate-700 dark:border-b-slate-700" />
+          <p className="text-sm text-gray-600 dark:text-slate-400">Checking your account...</p>
         </div>
       </div>
     )

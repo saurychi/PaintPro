@@ -35,6 +35,7 @@ import {
 import {
   SidebarBadgeDot,
   SidebarBadgePill,
+  type SidebarBadgeTone,
   useSidebarBadges,
 } from "@/components/sidebar-badges";
 import { cn } from "@/lib/utils";
@@ -339,7 +340,77 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const { open, setOpen } = useSidebar();
   const pathname = usePathname();
   const menuItems = ITEMS_BY_ROLE[role];
-  const badges = useSidebarBadges();
+  const rawBadges = useSidebarBadges();
+
+  // Aggregate child badges up to their parent so a parent menu shows the
+  // total even when its children are hidden. Numeric labels are summed; if any
+  // contributing badge is non-numeric we fall back to a count of distinct
+  // badges. A parent's own explicit badge takes precedence over the rollup.
+  // We also track which parent keys got their badge from a rollup so the
+  // render can hide those when the parent is expanded (the children's own
+  // badges are visible at that point — duplicating on the parent is noisy).
+  const { badges, rollupParentKeys } = React.useMemo(() => {
+    const merged: Record<string, ReturnType<typeof useSidebarBadges>[string]> = {
+      ...rawBadges,
+    };
+    const rollupKeys = new Set<string>();
+
+    const tonePriority: Record<SidebarBadgeTone, number> = {
+      neutral: 0,
+      info: 1,
+      success: 2,
+      warning: 3,
+      danger: 4,
+    };
+
+    for (const item of menuItems) {
+      if (rawBadges[item.key]) continue; // explicit parent badge wins
+      const subItems = item.subItems ?? [];
+      if (subItems.length === 0) continue;
+
+      let total = 0;
+      let allNumeric = true;
+      let contributing = 0;
+      let strongestTone: SidebarBadgeTone = "neutral";
+
+      for (const subItem of subItems) {
+        const childBadge = rawBadges[subItem.key];
+        if (!childBadge) continue;
+        contributing += 1;
+        const childTone: SidebarBadgeTone = childBadge.tone ?? "neutral";
+        if (tonePriority[childTone] > tonePriority[strongestTone]) {
+          strongestTone = childTone;
+        }
+        const numeric = Number(childBadge.label);
+        if (Number.isFinite(numeric)) {
+          total += numeric;
+        } else {
+          allNumeric = false;
+        }
+      }
+
+      if (contributing === 0) continue;
+
+      const label = allNumeric ? String(total) : String(contributing);
+      merged[item.key] = {
+        label,
+        tone: strongestTone,
+      };
+      rollupKeys.add(item.key);
+    }
+
+    return { badges: merged, rollupParentKeys: rollupKeys };
+  }, [rawBadges, menuItems]);
+
+  // Returns the badge to actually render for a parent menu row, given whether
+  // it's currently expanded. Rollup badges hide when expanded; explicit
+  // badges always show.
+  function getParentBadgeToRender(itemKey: string, expanded: boolean) {
+    const badge = badges[itemKey];
+    if (!badge) return null;
+    if (expanded && rollupParentKeys.has(itemKey)) return null;
+    return badge;
+  }
   const desktopScrollRef = React.useRef<HTMLDivElement | null>(null);
   const resolvedUser = user ?? FALLBACK_SIDEBAR_USER;
   const { resolvedTheme, setTheme } = useTheme();
@@ -544,12 +615,18 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                             >
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
-                              {badges[item.key] ? (
-                                <SidebarBadgePill
-                                  badge={badges[item.key]!}
-                                  className="ml-auto"
-                                />
-                              ) : null}
+                              {(() => {
+                                const badge = getParentBadgeToRender(
+                                  item.key,
+                                  isExpanded,
+                                );
+                                return badge ? (
+                                  <SidebarBadgePill
+                                    badge={badge}
+                                    className="ml-auto"
+                                  />
+                                ) : null;
+                              })()}
                             </Link>
 
                             <button
@@ -829,12 +906,18 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                               className="flex min-w-0 flex-1 items-center gap-3 px-3 text-sm font-medium transition-all duration-200">
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
-                              {badges[item.key] ? (
-                                <SidebarBadgePill
-                                  badge={badges[item.key]!}
-                                  className="ml-auto mr-1"
-                                />
-                              ) : null}
+                              {(() => {
+                                const badge = getParentBadgeToRender(
+                                  item.key,
+                                  isExpanded,
+                                );
+                                return badge ? (
+                                  <SidebarBadgePill
+                                    badge={badge}
+                                    className="ml-auto mr-1"
+                                  />
+                                ) : null;
+                              })()}
                             </Link>
 
                             <button

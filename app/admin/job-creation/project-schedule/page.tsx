@@ -100,6 +100,34 @@ function addHoursToIso(startIso: string | null, hours: number | null) {
   return end.toISOString();
 }
 
+function localDateKey(date: Date) {
+  // Match the YYYY-MM-DD shape stored in unavailable_days.blocked_date,
+  // computed from the LOCAL day so a 23:00 timestamp doesn't accidentally
+  // match the next UTC date.
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function snapToAvailableDay(
+  iso: string | null,
+  unavailable: Set<string>,
+): { iso: string | null; skippedDays: number } {
+  if (!iso) return { iso, skippedDays: 0 };
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { iso, skippedDays: 0 };
+
+  let skipped = 0;
+  // Bound the loop so a misconfigured set can't spin forever.
+  while (unavailable.has(localDateKey(date)) && skipped < 365) {
+    date.setDate(date.getDate() + 1);
+    skipped += 1;
+  }
+
+  return { iso: date.toISOString(), skippedDays: skipped };
+}
+
 function diffHours(startIso: string | null, endIso: string | null) {
   if (!startIso || !endIso) return null;
 
@@ -158,6 +186,10 @@ export default function ProjectSchedulePage() {
 
   const [jobNo, setJobNo] = useState("Project Schedule");
   const [siteName, setSiteName] = useState("Review the generated schedule");
+
+  const [unavailableDates, setUnavailableDates] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [isDirty, setIsDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState<
@@ -377,6 +409,27 @@ export default function ProjectSchedulePage() {
 
     loadSchedule();
   }, [projectId]);
+
+  useEffect(() => {
+    async function loadUnavailableDates() {
+      try {
+        const response = await fetch("/api/schedule/unavailable-days");
+        if (!response.ok) return;
+        const data = await response.json();
+        const days = Array.isArray(data?.unavailableDays)
+          ? data.unavailableDays
+          : [];
+        const set = new Set<string>();
+        for (const day of days) {
+          if (typeof day?.blockedDate === "string") set.add(day.blockedDate);
+        }
+        setUnavailableDates(set);
+      } catch {
+        // Non-fatal: scheduling still works, we just won't auto-skip blocks.
+      }
+    }
+    loadUnavailableDates();
+  }, []);
 
   useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent) {
@@ -599,6 +652,9 @@ export default function ProjectSchedulePage() {
     field: "estimatedHours" | "scheduledStartDatetime" | "scheduledEndDatetime",
     rawValue: string,
   ) {
+    let totalSkippedDays = 0;
+    const blockedDates = unavailableDates;
+
     setServices((prev) => {
       const next = prev.map((group) => ({
         ...group,
@@ -635,7 +691,12 @@ export default function ProjectSchedulePage() {
       }
 
       if (field === "scheduledStartDatetime") {
-        target.scheduledStartDatetime = fromInputDateTimeLocal(rawValue);
+        const snapped = snapToAvailableDay(
+          fromInputDateTimeLocal(rawValue),
+          blockedDates,
+        );
+        totalSkippedDays += snapped.skippedDays;
+        target.scheduledStartDatetime = snapped.iso;
         target.scheduledEndDatetime = addHoursToIso(
           target.scheduledStartDatetime,
           target.estimatedHours,
@@ -659,7 +720,12 @@ export default function ProjectSchedulePage() {
         const currentStep =
           next[currRef.groupIndex].children[currRef.childIndex];
 
-        currentStep.scheduledStartDatetime = previousStep.scheduledEndDatetime;
+        const cascaded = snapToAvailableDay(
+          previousStep.scheduledEndDatetime,
+          blockedDates,
+        );
+        totalSkippedDays += cascaded.skippedDays;
+        currentStep.scheduledStartDatetime = cascaded.iso;
         currentStep.scheduledEndDatetime = addHoursToIso(
           currentStep.scheduledStartDatetime,
           currentStep.estimatedHours,
@@ -668,6 +734,14 @@ export default function ProjectSchedulePage() {
 
       return next;
     });
+
+    if (totalSkippedDays > 0) {
+      toast.message(
+        `Skipped ${totalSkippedDays} unavailable day${
+          totalSkippedDays === 1 ? "" : "s"
+        }.`,
+      );
+    }
 
     setIsDirty(true);
   }

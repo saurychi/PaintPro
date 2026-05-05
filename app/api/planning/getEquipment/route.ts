@@ -5,7 +5,6 @@ type EquipmentOut = {
   equipment_id: string
   name: string
   status?: string
-  location?: string
 }
 
 type SuccessResponse = {
@@ -32,7 +31,6 @@ type EquipmentRow = {
   equipment_id: string
   name: string | null
   status: string | null
-  location: string | null
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -217,7 +215,7 @@ export async function POST(req: Request) {
     if (idRefs.length > 0) {
       const { data, error } = await supabaseAdmin
         .from("equipment")
-        .select("equipment_id, name, status, location")
+        .select("equipment_id, name, status")
         .in("equipment_id", idRefs)
 
       if (error) {
@@ -230,7 +228,7 @@ export async function POST(req: Request) {
     if (nameRefs.length > 0) {
       const { data, error } = await supabaseAdmin
         .from("equipment")
-        .select("equipment_id, name, status, location")
+        .select("equipment_id, name, status")
         .in("name", nameRefs)
 
       if (error) {
@@ -267,7 +265,6 @@ export async function POST(req: Request) {
         equipment_id: row.equipment_id,
         name: row.name?.trim() ?? "",
         status: row.status?.trim() || undefined,
-        location: row.location?.trim() || undefined,
       }))
 
     const response: SuccessResponse = {

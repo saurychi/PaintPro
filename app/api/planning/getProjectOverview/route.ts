@@ -18,6 +18,7 @@ type ProjectRow = {
   estimated_budget: number | null;
   estimated_cost: number | null;
   estimated_profit: number | null;
+  downpayment: number | null;
 };
 
 type ProjectTaskRow = {
@@ -209,7 +210,8 @@ export async function GET(request: Request) {
         scheduled_end_datetime,
         estimated_budget,
         estimated_cost,
-        estimated_profit
+        estimated_profit,
+        downpayment
         `,
       )
       .eq("project_id", projectId)

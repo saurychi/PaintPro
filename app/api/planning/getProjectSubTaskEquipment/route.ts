@@ -66,7 +66,6 @@ export async function GET(request: NextRequest) {
           .select(`
             equipment_id,
             name,
-            location,
             status
           `)
           .in("equipment_id", equipmentIds);
@@ -94,7 +93,6 @@ export async function GET(request: NextRequest) {
           .select(`
             equipment_id,
             name,
-            location,
             status
           `)
           .in("name", equipmentNames);
@@ -144,7 +142,7 @@ export async function GET(request: NextRequest) {
             name: resolvedName,
             unitCost: 0,
             condition: "",
-            location: equipment?.location ?? "",
+            location: "",
             status: equipment?.status ?? "",
             notes: item.notes,
           };

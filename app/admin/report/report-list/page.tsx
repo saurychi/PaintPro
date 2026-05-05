@@ -244,6 +244,7 @@ function statusLabel(status: string) {
     cost_estimation_pending: "Cost Estimation Pending",
     overview_pending: "Overview Pending",
     quotation_pending: "Quotation Pending",
+    client_quotation_done: "Client Signed Quotation",
     invoice_agreement_pending: "Invoice Agreement Pending",
     invoice_pending: "Invoice Pending",
     payment_pending: "Payment Pending",
@@ -1155,6 +1156,9 @@ export default function ReportListPage() {
                           >
                             <option value="all">All statuses</option>
                             <option value="quotation_pending">Quotation Pending</option>
+                            <option value="client_quotation_done">
+                              Client Signed Quotation
+                            </option>
                             <option value="invoice_agreement_pending">
                               Invoice Agreement Pending
                             </option>

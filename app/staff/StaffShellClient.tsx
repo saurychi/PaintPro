@@ -17,7 +17,7 @@ function StaffShell({ children, user }: { children: React.ReactNode; user: Sideb
         className={cn(
           "min-h-screen min-w-0 overflow-auto",
           "transition-[padding-left] duration-300 ease-in-out",
-          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
+          open ? "md:pl-(--sidebar-width)" : "md:pl-(--sidebar-width-icon)"
         )}
         style={{ background: "var(--app-bg)" }}
       >

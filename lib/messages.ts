@@ -55,17 +55,21 @@ export async function fetchConversations(userId: string): Promise<ConversationPa
 }
 
 export async function fetchMessages(conversationId: string) {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true }) // Oldest to newest
+  // Goes through a server endpoint so RLS-blocked callers (project-cookie
+  // clients without a Supabase auth user) can still read messages they're
+  // entitled to. The endpoint authorizes via auth user OR project cookie.
+  const response = await fetch(
+    `/api/messages/list?conversationId=${encodeURIComponent(conversationId)}`,
+    { cache: "no-store" },
+  )
 
-  if (error) {
-    console.error("Error fetching messages:", error)
+  if (!response.ok) {
+    console.error("Error fetching messages:", response.statusText)
     return []
   }
-  return data
+
+  const data = await response.json().catch(() => null)
+  return Array.isArray(data) ? (data as Message[]) : []
 }
 
 export async function postMessage(conversationId: string, senderId: string, content: string) {
