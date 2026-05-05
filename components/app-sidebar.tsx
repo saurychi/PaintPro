@@ -66,7 +66,7 @@ const adminItems: Item[] = [
     subItems: [
       {
         key: "create-job",
-        title: "Create Job",
+        title: "Create Project",
         url: "/admin/job-creation/basic-details",
         matchUrls: ["/admin/job-creation"],
       },
@@ -253,9 +253,13 @@ const clientItems: Item[] = [
   },
 ];
 
+const managerItems: Item[] = adminItems.map((item) =>
+  item.key === "settings" ? { ...item, subItems: undefined } : item,
+);
+
 const ITEMS_BY_ROLE: Record<Role, Item[]> = {
   admin: adminItems,
-  manager: adminItems,
+  manager: managerItems,
   staff: staffItems,
   client: clientItems,
 };

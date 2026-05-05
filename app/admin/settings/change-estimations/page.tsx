@@ -915,14 +915,14 @@ export default function ChangeEstimationsSettingsPage() {
 
   return (
     <>
-      <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
+      <main className="flex min-h-screen flex-col overflow-y-auto bg-gray-50 dark:bg-gray-950 xl:h-screen xl:min-h-0 xl:overflow-hidden">
         <div className="shrink-0 px-4 py-3 sm:px-6">
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
             Change Estimations
           </h1>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4 sm:px-6">
+        <div className="flex flex-col gap-3 px-4 pb-4 sm:px-6 xl:min-h-0 xl:flex-1">
           <section className="grid shrink-0 gap-3 lg:grid-cols-3">
             <SummaryCard
               title="Formula Templates"
@@ -972,7 +972,7 @@ export default function ChangeEstimationsSettingsPage() {
 
           <section
             className={[
-              "min-h-0 flex-1",
+              "xl:min-h-0 xl:flex-1",
               activeSection === "templates"
                 ? "grid gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(400px,0.75fr)] animate-in fade-in-0 duration-150"
                 : "hidden",
@@ -1020,7 +1020,7 @@ export default function ChangeEstimationsSettingsPage() {
 
           <section
             className={[
-              "min-h-0 flex-1",
+              "xl:min-h-0 xl:flex-1",
               activeSection === "variables"
                 ? "block animate-in fade-in-0 duration-150"
                 : "hidden",
@@ -1039,7 +1039,7 @@ export default function ChangeEstimationsSettingsPage() {
 
           <section
             className={[
-              "min-h-0 flex-1",
+              "xl:min-h-0 xl:flex-1",
               activeSection === "rules"
                 ? "block animate-in fade-in-0 duration-150"
                 : "hidden",
@@ -1294,7 +1294,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="min-h-[280px] overflow-hidden xl:min-h-0 xl:flex-1">
           {loading ? (
             <CenteredLoading label="Loading formulas..." />
           ) : filteredFormulas.length > 0 ? (
@@ -1419,8 +1419,8 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
         </div>
       </div>
 
-      <aside className="grid min-h-0 gap-3 xl:grid-rows-[minmax(0,0.64fr)_minmax(0,0.36fr)]">
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <aside className="grid gap-3 xl:min-h-0 xl:grid-rows-[minmax(0,0.64fr)_minmax(0,0.36fr)]">
+        <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0">
           <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1435,7 +1435,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+          <div className="flex flex-col gap-2 p-3 xl:min-h-0 xl:flex-1">
             <div className="grid shrink-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
               <select
                 value={selectedFormulaId ?? ""}
@@ -1474,7 +1474,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
               </button>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-2">
+            <div className="grid gap-2 xl:min-h-0 xl:flex-1 xl:grid-rows-[auto_minmax(0,1fr)]">
               <div>
                 <label className="text-[11px] font-semibold text-gray-900 dark:text-white">
                   Formula Expression
@@ -1494,7 +1494,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
                   </p>
 
                   {previewFields.length > 0 ? (
-                    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                    <div className="min-h-[100px] space-y-2 overflow-y-auto pr-1 xl:min-h-0 xl:flex-1">
                       {previewFields.map((variable) => (
                         <PreviewInput
                           key={variable.key}
@@ -1552,7 +1552,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0">
           <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1578,7 +1578,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="min-h-[180px] overflow-hidden xl:min-h-0 xl:flex-1">
             {selectedFormula?.variables.length ? (
               <div className="h-full divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
                 {selectedFormula.variables.map((variable) => {
@@ -1695,7 +1695,7 @@ const VariablesOverviewSection = memo(function VariablesOverviewSection({
   ];
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div className="flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:h-full xl:min-h-0">
       <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1731,7 +1731,7 @@ const VariablesOverviewSection = memo(function VariablesOverviewSection({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-[300px] overflow-hidden xl:min-h-0 xl:flex-1">
         {loading ? (
           <CenteredLoading label="Loading variables..." />
         ) : variables.length > 0 ? (
@@ -1833,7 +1833,7 @@ const ActiveRulesOverviewSection = memo(function ActiveRulesOverviewSection({
   const filterTabs: ScopeFilter[] = ["all", "duration", "material"];
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div className="flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:h-full xl:min-h-0">
       <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1869,7 +1869,7 @@ const ActiveRulesOverviewSection = memo(function ActiveRulesOverviewSection({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-[300px] overflow-hidden xl:min-h-0 xl:flex-1">
         {loading ? (
           <CenteredLoading label="Loading active rules..." />
         ) : rules.length > 0 ? (
