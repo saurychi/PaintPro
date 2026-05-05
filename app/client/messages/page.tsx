@@ -421,11 +421,11 @@ export default function AdminMessages() {
 
   if (isLoading) {
     return (
-      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-        <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
-        <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-          <div className="flex gap-6 h-full overflow-hidden">
-            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+      <div className="p-3 sm:p-4 md:p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Messages</h1>
+        <div className="mt-4 sm:mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+          <div className="flex flex-col gap-3 lg:flex-row lg:gap-6 h-full overflow-hidden">
+            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[40vh] lg:max-h-none lg:min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
               <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
                 <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
               </div>
@@ -443,14 +443,17 @@ export default function AdminMessages() {
   }
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-      <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
+    <div className="p-3 sm:p-4 md:p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+      <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Messages</h1>
 
-      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-        <div className="flex gap-6 h-full overflow-hidden">
+      <div className="mt-4 sm:mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+        {/* Stacks on mobile (list on top with capped height, chat below)
+            and goes side-by-side at lg+. Keeps `min-w-[260px]` desktop-only
+            so the list doesn't overflow phone widths. */}
+        <div className="flex flex-col gap-3 lg:flex-row lg:gap-6 h-full overflow-hidden">
 
           {/* Conversation Sidebar */}
-          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[40vh] lg:max-h-none lg:min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
