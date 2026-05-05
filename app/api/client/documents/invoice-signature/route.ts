@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { ensureBucket } from "@/lib/supabase/ensureBucket";
 
 export const runtime = "nodejs";
 
@@ -113,6 +114,9 @@ export async function POST(request: Request) {
     const invoicePdfPath = `invoices/${projectId}/invoice-${safeProjectCode}.pdf`;
     const invoiceFileName = `invoice-${safeProjectCode}.pdf`;
 
+    await ensureBucket("signatures");
+    await ensureBucket("documents");
+
     const { error: uploadSignatureError } = await supabaseAdmin.storage
       .from("signatures")
       .upload(clientSignaturePath, signatureBuffer, {
@@ -120,7 +124,11 @@ export async function POST(request: Request) {
         upsert: true,
       });
 
-    if (uploadSignatureError) throw uploadSignatureError;
+    if (uploadSignatureError) {
+      throw new Error(
+        `Failed to upload signature image to "signatures" bucket: ${uploadSignatureError.message}`,
+      );
+    }
 
     const { data: existingDocument, error: existingError } = await supabaseAdmin
       .from("project_documents")
@@ -201,7 +209,11 @@ export async function POST(request: Request) {
         upsert: true,
       });
 
-    if (uploadPdfError) throw uploadPdfError;
+    if (uploadPdfError) {
+      throw new Error(
+        `Failed to upload signed PDF to "documents" bucket: ${uploadPdfError.message}`,
+      );
+    }
 
     const { error: updateSizeError } = await supabaseAdmin
       .from("project_documents")
