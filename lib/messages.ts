@@ -72,15 +72,23 @@ export async function fetchMessages(conversationId: string) {
   return Array.isArray(data) ? (data as Message[]) : []
 }
 
-export async function postMessage(conversationId: string, senderId: string, content: string) {
-  const { data, error } = await supabase
-    .from('messages')
-    .insert([{ conversation_id: conversationId, sender_id: senderId, content: content }])
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
+export async function postMessage(conversationId: string, _senderId: string, content: string) {
+  // Routed through the server so guest clients (project-cookie mode, no
+  // Supabase auth user) can send too — RLS would block their direct insert.
+  // The server resolves sender_id (auth user) or client_id (cookie mode) from
+  // the request itself, so the senderId argument is ignored but kept on the
+  // signature so callers don't all need a refactor in one go.
+  void _senderId
+  const response = await fetch("/api/messages/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversationId, content }),
+  })
+  const data = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(readHttpError(data, "Failed to send message."))
+  }
+  return data as Message
 }
 
 export async function fetchAvailableUsers(currentUserId: string): Promise<RecipientPayload[]> {
