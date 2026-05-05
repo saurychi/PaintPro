@@ -291,6 +291,7 @@ export async function GET(request: Request) {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Quotation ${escapeHtml(project.project_code || "")}</title>
     <style>
       * { box-sizing: border-box; }
@@ -301,12 +302,17 @@ export async function GET(request: Request) {
         color: #1f2937;
         font-family: Arial, Helvetica, sans-serif;
       }
+      /* Responsive page: keeps the A4 look on desktop / print, but scales
+         down so it fits inside the iframe on phones without horizontal
+         scroll. clamp() handles the padding so margins shrink with the
+         viewport. */
       .page {
-        width: 210mm;
+        width: 100%;
+        max-width: 210mm;
         min-height: 297mm;
         margin: 0 auto;
         background: white;
-        padding: 18mm 16mm;
+        padding: clamp(14px, 4vw, 18mm) clamp(12px, 4vw, 16mm);
       }
       .topbar {
         display: flex;
@@ -315,9 +321,10 @@ export async function GET(request: Request) {
         gap: 16px;
         padding-bottom: 16px;
         border-bottom: 2px solid #111827;
+        flex-wrap: wrap;
       }
       .brand-title {
-        font-size: 28px;
+        font-size: clamp(22px, 5vw, 28px);
         font-weight: 800;
         letter-spacing: 0.02em;
         color: #111827;
@@ -332,7 +339,7 @@ export async function GET(request: Request) {
       }
       .doc-title h1 {
         margin: 0;
-        font-size: 26px;
+        font-size: clamp(20px, 5vw, 26px);
         font-weight: 800;
         color: #111827;
       }
@@ -406,7 +413,8 @@ export async function GET(request: Request) {
       }
       .summary-box {
         margin-left: auto;
-        width: 340px;
+        width: 100%;
+        max-width: 340px;
       }
       .summary-row {
         display: flex;
@@ -472,6 +480,25 @@ export async function GET(request: Request) {
       @page {
         size: A4;
         margin: 12mm;
+      }
+      /* Below ~640px: stack the two-column blocks and the signature row so
+         long content doesn't get squished into half-width columns on phones. */
+      @media (max-width: 640px) {
+        .grid-2,
+        .signature {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+        .topbar {
+          gap: 12px;
+        }
+        .doc-title {
+          text-align: left;
+        }
+        th, td {
+          font-size: 11px;
+          padding: 7px 4px;
+        }
       }
     </style>
   </head>

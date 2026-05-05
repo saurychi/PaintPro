@@ -79,6 +79,7 @@ export default function ClientPendingDocumentsPage() {
   const { projectId: sessionProjectId } = useClientProject();
 
   const signatureRef = useRef<SignatureCanvas | null>(null);
+  const signatureWrapRef = useRef<HTMLDivElement | null>(null);
 
   const projectId = searchParams.get("projectId") || sessionProjectId || "";
 
@@ -201,6 +202,61 @@ export default function ClientPendingDocumentsPage() {
 
     loadProject();
   }, [projectId]);
+
+  // react-signature-canvas defaults the canvas's intrinsic bitmap to 300x150
+  // even when CSS stretches it to 100% width — so on a phone, touch points
+  // map to the wrong pixels and ink lands offset from the user's finger
+  // (which reads as "the signature isn't working"). Resize the canvas to its
+  // wrapper's actual size, scaled by devicePixelRatio for crispness, and
+  // re-run on viewport changes (rotation, address-bar collapse, keyboard).
+  useEffect(() => {
+    const wrap = signatureWrapRef.current;
+    const sigPad = signatureRef.current;
+    if (!wrap || !sigPad) return;
+
+    function resize() {
+      const pad = signatureRef.current;
+      const node = signatureWrapRef.current;
+      if (!pad || !node) return;
+
+      const canvas = pad.getCanvas();
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      const rect = node.getBoundingClientRect();
+
+      // Preserve any in-progress signature across the resize so a phone
+      // rotation or scrollbar showing up doesn't wipe what the user drew.
+      const data =
+        typeof pad.toData === "function" ? pad.toData() : null;
+
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      const ctx = canvas.getContext("2d");
+      ctx?.setTransform(1, 0, 0, 1, 0, 0);
+      ctx?.scale(ratio, ratio);
+
+      if (data && typeof pad.fromData === "function") {
+        pad.fromData(data);
+      } else {
+        pad.clear();
+      }
+    }
+
+    resize();
+
+    const observer = new ResizeObserver(() => resize());
+    observer.observe(wrap);
+    window.addEventListener("orientationchange", resize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("orientationchange", resize);
+    };
+    // Re-run when the signature panel is mounted/unmounted as the project
+    // status changes — without this dep, the effect would attach to a stale
+    // canvas after a re-render swaps the panel in.
+  }, [isPendingQuotation, isPendingInvoiceAgreement]);
 
   async function signQuotation() {
     if (!projectId || approving) return;
@@ -487,25 +543,6 @@ export default function ClientPendingDocumentsPage() {
               </button>
 
               {documentType === "quotation" &&
-              !justSignedQuotation &&
-              !isClientQuotationDone ? (
-                <button
-                  type="button"
-                  onClick={signQuotation}
-                  disabled={
-                    !projectId || loading || approving || !isPendingQuotation
-                  }
-                  className="inline-flex h-9 items-center gap-2 rounded-full bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
-                  {approving ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <PenLine className="h-3.5 w-3.5" />
-                  )}
-                  {isQuotationApproved ? "Already Signed" : "Sign Quotation"}
-                </button>
-              ) : null}
-
-              {documentType === "quotation" &&
               (justSignedQuotation || isClientQuotationDone) ? (
                 <button
                   type="button"
@@ -523,26 +560,6 @@ export default function ClientPendingDocumentsPage() {
                   {pmNotified
                     ? "Project Manager Notified"
                     : "Notify Project Manager"}
-                </button>
-              ) : null}
-
-              {documentType === "invoice" ? (
-                <button
-                  type="button"
-                  onClick={acceptInvoiceAgreement}
-                  disabled={
-                    !projectId ||
-                    loading ||
-                    approving ||
-                    !isPendingInvoiceAgreement
-                  }
-                  className="inline-flex h-9 items-center gap-2 rounded-full bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
-                  {approving ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <PenLine className="h-3.5 w-3.5" />
-                  )}
-                  {isInvoiceAccepted ? "Already Signed" : "Sign Invoice"}
                 </button>
               ) : null}
             </div>
@@ -697,25 +714,74 @@ export default function ClientPendingDocumentsPage() {
                             Signature
                           </label>
 
-                          <div className="mt-1 overflow-hidden rounded-lg border border-emerald-200 bg-white">
+                          {/* Wrapper has explicit height so the resize effect
+                              can read getBoundingClientRect() and size the
+                              underlying canvas — h-[160px] on phones gives
+                              more room for finger drawing, h-[130px] at sm+
+                              keeps the desktop sidebar compact. */}
+                          <div
+                            ref={signatureWrapRef}
+                            className="mt-1 h-40 sm:h-[130px] overflow-hidden rounded-lg border border-emerald-200 bg-white touch-none">
                             <SignatureCanvas
                               ref={signatureRef}
                               penColor="black"
                               canvasProps={{
-                                className: "h-[130px] w-full bg-white",
+                                className: "block h-full w-full bg-white",
                               }}
                             />
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              signatureRef.current?.clear();
-                              setSignatureErr(null);
-                            }}
-                            className="mt-2 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100">
-                            Clear Signature
-                          </button>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                signatureRef.current?.clear();
+                                setSignatureErr(null);
+                              }}
+                              className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                              Clear Signature
+                            </button>
+
+                            {documentType === "quotation" ? (
+                              <button
+                                type="button"
+                                onClick={signQuotation}
+                                disabled={
+                                  !projectId ||
+                                  loading ||
+                                  approving ||
+                                  !isPendingQuotation
+                                }
+                                className="ml-auto inline-flex h-9 items-center gap-2 rounded-lg bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
+                                {approving ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <PenLine className="h-3.5 w-3.5" />
+                                )}
+                                Sign Quotation
+                              </button>
+                            ) : null}
+
+                            {documentType === "invoice" ? (
+                              <button
+                                type="button"
+                                onClick={acceptInvoiceAgreement}
+                                disabled={
+                                  !projectId ||
+                                  loading ||
+                                  approving ||
+                                  !isPendingInvoiceAgreement
+                                }
+                                className="ml-auto inline-flex h-9 items-center gap-2 rounded-lg bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
+                                {approving ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <PenLine className="h-3.5 w-3.5" />
+                                )}
+                                Sign Invoice
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
 
                         {signatureErr ? (
