@@ -56,8 +56,12 @@ export type CostEstimationInput = {
   mainTasks: CostEstimationMainTask[];
 };
 
+// Round UP to the nearest hundredth (0.01). All monetary values in cost
+// estimation pass through this — line items, per-task totals, and the project
+// summary (totalCost, profitAmount, quotationTotal) — so quoted figures never
+// dip below the underlying calculation.
 function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return Math.ceil((value - Number.EPSILON) * 100) / 100;
 }
 
 export function normalizeMarkupRate(value: number | null | undefined) {

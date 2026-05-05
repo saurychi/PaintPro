@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
-import { chromium } from "playwright";
+import type { Browser } from "playwright-core";
+import { launchPdfBrowser } from "@/lib/server/pdfBrowser";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+  let browser: Browser | null = null;
 
   try {
     const url = new URL(request.url);
@@ -20,7 +24,7 @@ export async function GET(request: Request) {
       projectId,
     )}&markupRate=${encodeURIComponent(markupRate)}`;
 
-    browser = await chromium.launch({ headless: true });
+    browser = await launchPdfBrowser();
 
     const page = await browser.newPage();
 
