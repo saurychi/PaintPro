@@ -55,13 +55,21 @@ export default function PostAuthPage() {
           return
         }
 
-        if (profile.status === "inactive") {
+        // Normalize so a stray capital letter / trailing whitespace in the DB
+        // doesn't wedge the user between this page and /admin (the admin
+        // layout uses strict === "active" checks; if we redirect to /admin
+        // for a user whose status doesn't strictly match, the layout boots
+        // them right back here → infinite loop).
+        const status = String(profile.status ?? "").trim().toLowerCase()
+        const role = String(profile.role ?? "").trim().toLowerCase()
+
+        if (status === "inactive") {
           await supabase.auth.signOut()
           router.replace("/auth/signin?reason=inactive")
           return
         }
 
-        if (profile.status === "pending") {
+        if (status === "pending") {
           router.replace("/auth/setup-profile")
           return
         }
@@ -79,12 +87,26 @@ export default function PostAuthPage() {
           }
         }
 
-        if (profile.role === "admin" || profile.role === "manager") {
+        // Only let users into /admin or /staff if their status is the exact
+        // shape the destination layouts expect. Anything else (null, an
+        // unrecognized string, etc.) is treated as a bad account and bounced
+        // back to sign-in instead of being looped back here.
+        if (status !== "active") {
+          console.error(
+            "[post-auth] unexpected profile status, signing out:",
+            JSON.stringify(profile.status),
+          )
+          await supabase.auth.signOut()
+          router.replace("/auth/signin?reason=invalid_status")
+          return
+        }
+
+        if (role === "admin" || role === "manager") {
           router.replace("/admin")
           return
         }
 
-        if (profile.role === "staff") {
+        if (role === "staff") {
           router.replace("/staff")
           return
         }
