@@ -24,16 +24,11 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         get(name: string) {
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options: any) {
-          cookieStore.set({ name, value, ...options })
-        },
-        remove(name: string, options: any) {
-          try {
-            ;(cookieStore as any).delete({ name, ...options })
-          } catch {
-            cookieStore.delete(name)
-          }
-        },
+        // Cookie refresh is handled by middleware.ts before this layout
+        // runs, so no-op here. Writing cookies from a server component is
+        // a hard error in Next 16.
+        set() {},
+        remove() {},
       },
     }
   )
@@ -49,8 +44,13 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     .maybeSingle<DbUser>()
 
   if (!profile) redirect("/auth/invite?reason=not_invited")
-  if (profile.status !== "active") redirect("/auth/post-auth")
-  if (profile.role !== "staff") redirect("/auth/post-auth")
+  // Normalize before comparing — see /auth/post-auth for the matching logic.
+  // Without this, a casing/whitespace quirk in the DB would loop the user
+  // between this layout and post-auth.
+  const profileStatus = String(profile.status ?? "").trim().toLowerCase()
+  const profileRole = String(profile.role ?? "").trim().toLowerCase()
+  if (profileStatus !== "active") redirect("/auth/post-auth")
+  if (profileRole !== "staff") redirect("/auth/post-auth")
 
   return (
     <StaffShellClient
@@ -58,7 +58,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         id: profile.id,
         username: profile.username ?? authUser.user_metadata?.username ?? null,
         email: profile.email ?? authUser.email ?? null,
-        role: profile.role,
+        role: "staff",
         profile_image_url: profile.profile_image_url ?? authUser.user_metadata?.avatar_url ?? null,
       }}
     >

@@ -24,6 +24,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         get(name: string) {
           return cookieStore.get(name)?.value
         },
+        // Cookie refresh is handled by middleware.ts before this layout
+        // runs, so no-op here. Writing cookies from a server component is
+        // a hard error in Next 16.
         set() {},
         remove() {},
       },
@@ -41,17 +44,28 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     .maybeSingle<DbUser>()
 
   if (!profile) redirect("/auth/invite?reason=not_invited")
-  if (profile.status !== "active") redirect("/auth/post-auth")
-  if (profile.role !== "admin" && profile.role !== "manager") redirect("/auth/post-auth")
+  // Normalize before comparing — see /auth/post-auth for the matching logic.
+  // Prevents a casing or whitespace quirk in the DB from bouncing valid
+  // admins/managers between here and post-auth in a redirect loop.
+  const profileStatus = String(profile.status ?? "").trim().toLowerCase()
+  const profileRole = String(profile.role ?? "").trim().toLowerCase()
+  if (profileStatus !== "active") redirect("/auth/post-auth")
+  if (profileRole !== "admin" && profileRole !== "manager") redirect("/auth/post-auth")
+
+  // After the guard above, profileRole is narrowed by the equality checks but
+  // TS doesn't propagate that to profile.role (the un-normalized DB field).
+  // Use the normalized value for the shell — it's the same identity, just
+  // case/whitespace-cleaned.
+  const normalizedRole: "admin" | "manager" = profileRole
 
   return (
     <AdminShellClient
-      role={profile.role}
+      role={normalizedRole}
       user={{
         id: profile.id,
         username: profile.username ?? authUser.user_metadata?.username ?? null,
         email: profile.email ?? authUser.email ?? null,
-        role: profile.role,
+        role: normalizedRole,
         profile_image_url: profile.profile_image_url ?? authUser.user_metadata?.avatar_url ?? null,
       }}
     >
