@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { createClient } from "@supabase/supabase-js";
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays";
 
 type ProjectRow = {
   project_id: string;
@@ -11,11 +12,38 @@ type ProjectRow = {
   status: string | null;
 };
 
+function utcDateKey(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function addUtcDays(yyyymmdd: string, days: number) {
+  const d = new Date(`${yyyymmdd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function enumerateUtcDays(startIso: string | null, endIso: string | null) {
+  const startKey = utcDateKey(startIso);
+  const endKey = utcDateKey(endIso);
+  if (!startKey || !endKey || endKey < startKey) return [] as string[];
+  const out: string[] = [];
+  let cur = startKey;
+  while (cur <= endKey) {
+    out.push(cur);
+    cur = addUtcDays(cur, 1);
+  }
+  return out;
+}
+
 type UnavailRow = {
   unavailability_id: string;
   start_datetime: string | null;
   end_datetime: string | null;
   reason: string | null;
+  status: string | null;
 };
 
 function normalizeStatus(status: string | null) {
@@ -29,6 +57,7 @@ function normalizeStatus(status: string | null) {
     value === "active" ||
     value === "review_pending" ||
     value === "invoice_pending" ||
+    value === "invoice_agreement_pending" ||
     value === "payment_pending" ||
     value === "employee_management_pending" ||
     value === "conclude_job_pending"
@@ -88,32 +117,38 @@ export async function GET(request: NextRequest) {
   let projects: ReturnType<typeof buildProject>[] = [];
 
   if (subTaskIds.length > 0) {
-    // Step 2: get project_task_ids
+    // Resolve the staff member's projects through subtask → task → project.
     const { data: subTaskData } = await supabaseAdmin
       .from("project_sub_task")
       .select("project_task_id")
       .in("project_sub_task_id", subTaskIds);
 
-    const projectTaskIds = [...new Set((subTaskData ?? []).map((st) => st.project_task_id))];
+    const projectTaskIds = [
+      ...new Set((subTaskData ?? []).map((st) => st.project_task_id)),
+    ];
 
     if (projectTaskIds.length > 0) {
-      // Step 3: get project_ids
       const { data: taskData } = await supabaseAdmin
         .from("project_task")
         .select("project_id")
         .in("project_task_id", projectTaskIds);
 
-      const projectIds = [...new Set((taskData ?? []).map((t) => t.project_id))];
+      const projectIds = [
+        ...new Set((taskData ?? []).map((t) => t.project_id)),
+      ];
 
       if (projectIds.length > 0) {
-        // Step 4: get project details
-        const { data: projectData, error: projectErr } = await supabaseAdmin
-          .from("projects")
-          .select(
-            "project_id, project_code, title, scheduled_start_datetime, scheduled_end_datetime, status",
-          )
-          .in("project_id", projectIds)
-          .order("scheduled_start_datetime", { ascending: true });
+        const [{ data: projectData, error: projectErr }, unavailableDays] =
+          await Promise.all([
+            supabaseAdmin
+              .from("projects")
+              .select(
+                "project_id, project_code, title, scheduled_start_datetime, scheduled_end_datetime, status",
+              )
+              .in("project_id", projectIds)
+              .order("scheduled_start_datetime", { ascending: true }),
+            listScheduleUnavailableDays(request.headers.get("cookie")),
+          ]);
 
         if (projectErr) {
           return NextResponse.json(
@@ -122,7 +157,41 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        projects = ((projectData ?? []) as ProjectRow[]).map(buildProject);
+        // Only surface projects that have actually entered the work / wrap-up
+        // phase. Earlier draft statuses belong on /admin/projects, not on the
+        // calendar.
+        const SCHEDULE_VISIBLE_STATUSES = new Set([
+          "in_progress",
+          "review_pending",
+          "invoice_pending",
+          "invoice_agreement_pending",
+          "payment_pending",
+          "employee_management_pending",
+          "conclude_job_pending",
+          "completed",
+        ]);
+
+        // Render-only exclusion: subtract the current unavailable-day set
+        // from each project's [start, end] span so the calendar bars never
+        // paint over a holiday or manual block.
+        const unavailableSet = new Set(
+          unavailableDays.map((day) => day.blockedDate),
+        );
+
+        projects = ((projectData ?? []) as ProjectRow[])
+          .filter((row) =>
+            SCHEDULE_VISIBLE_STATUSES.has(
+              String(row.status || "").trim().toLowerCase(),
+            ),
+          )
+          .map((row) => {
+            const span = enumerateUtcDays(
+              row.scheduled_start_datetime,
+              row.scheduled_end_datetime,
+            );
+            const activeDays = span.filter((day) => !unavailableSet.has(day));
+            return buildProject(row, activeDays);
+          });
       }
     }
   }
@@ -130,7 +199,7 @@ export async function GET(request: NextRequest) {
   // Get unavailability for this staff member
   const { data: unavailData, error: unavailErr } = await supabaseAdmin
     .from("staff_unavailability")
-    .select("unavailability_id, start_datetime, end_datetime, reason")
+    .select("unavailability_id, start_datetime, end_datetime, reason, status")
     .eq("user_id", userId)
     .order("start_datetime", { ascending: true });
 
@@ -146,6 +215,7 @@ export async function GET(request: NextRequest) {
     startDatetime: u.start_datetime,
     endDatetime: u.end_datetime,
     reason: u.reason,
+    status: String(u.status ?? "pending").trim().toLowerCase(),
   }));
 
   const currentProject =
@@ -154,7 +224,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ projects, currentProject, unavailability });
 }
 
-function buildProject(project: ProjectRow) {
+function buildProject(project: ProjectRow, activeDays: string[]) {
   return {
     id: project.project_id,
     projectCode: project.project_code,
@@ -164,5 +234,6 @@ function buildProject(project: ProjectRow) {
     status: normalizeStatus(project.status),
     rawStatus: String(project.status || "").trim().toLowerCase(),
     dateLabel: formatDateLabel(project.scheduled_start_datetime),
+    activeDays,
   };
 }

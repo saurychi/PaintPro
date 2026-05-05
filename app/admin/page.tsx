@@ -339,11 +339,14 @@ function getCurrentWorkflowIndex(status: string) {
 
   if (index >= 0) return index;
 
-  if (normalized === "downpayment_pending") return WORKFLOW_STEPS.length;
-  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length + 1;
-  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 2;
+  // client_quotation_done sits *just after* the quotation step but before
+  // downpayment — the client has signed, the admin still has to acknowledge.
+  if (normalized === "client_quotation_done") return WORKFLOW_STEPS.length;
+  if (normalized === "downpayment_pending") return WORKFLOW_STEPS.length + 1;
+  if (normalized === "ready_to_start") return WORKFLOW_STEPS.length + 2;
+  if (normalized === "in_progress") return WORKFLOW_STEPS.length + 3;
   if (isEndOfWorkStatus(normalized)) {
-    return WORKFLOW_STEPS.length + 3 + END_OF_WORK_STATUS_ORDER.indexOf(
+    return WORKFLOW_STEPS.length + 4 + END_OF_WORK_STATUS_ORDER.indexOf(
       normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
     );
   }
@@ -381,6 +384,8 @@ function getStatusLabel(projectStatus: string) {
     cost_estimation_pending: "Cost Estimation Pending",
     overview_pending: "Overview Pending",
     quotation_pending: "Quotation Pending",
+    client_quotation_done: "Client Signed Quotation",
+    downpayment_pending: "Downpayment Pending",
     ready_to_start: "Ready to Start",
     in_progress: "In Progress",
     review_pending: "Review Pending",
@@ -564,6 +569,119 @@ function collectEmployeeLabelsFromSubTask(subTask: Record<string, unknown>) {
   return unique(labels);
 }
 
+function collectEmployeeIdsFromSubTask(subTask: Record<string, unknown>) {
+  const employeeIds = new Set<string>();
+  collectEmployeesFromSubTask(subTask, employeeIds);
+  return [...employeeIds];
+}
+
+function collectAssignedStaffFromSubTask(subTask: Record<string, unknown>) {
+  const staff = [
+    ...asArray<Record<string, unknown>>(subTask.assignedStaff),
+    ...asArray<Record<string, unknown>>(subTask.assignedEmployees),
+    ...asArray<Record<string, unknown>>(subTask.employees),
+    ...asArray<Record<string, unknown>>(subTask.staff),
+    ...asArray<Record<string, unknown>>(subTask.projectSubTaskStaff),
+    ...asArray<Record<string, unknown>>(subTask.assigned_staff),
+  ];
+
+  return staff
+    .map((entry) => {
+      const nested =
+        asRecord(entry.user) ||
+        asRecord(entry.employee) ||
+        asRecord(entry.profile);
+      const id = readString(entry.user_id, entry.userId, entry.id, nested?.id);
+      const name = readString(
+        entry.username,
+        entry.full_name,
+        entry.fullName,
+        entry.name,
+        entry.email,
+        nested?.username,
+        nested?.full_name,
+        nested?.fullName,
+        nested?.name,
+        nested?.email,
+      );
+
+      return id ? { id, name: name || "Staff" } : null;
+    })
+    .filter((item): item is { id: string; name: string } => Boolean(item));
+}
+
+function collectMaterialsFromMainTask(mainTask: Record<string, unknown>) {
+  return asArray<Record<string, unknown>>(mainTask.materials)
+    .map((material) => {
+      const id = readString(
+        material.material_id,
+        material.materialId,
+        material.id,
+      );
+
+      return id
+        ? {
+            id,
+            name: readString(material.name, material.title) || "Material",
+            quantity: readNumber(
+              material.estimated_quantity,
+              material.estimatedQuantity,
+              material.quantity,
+            ),
+            estimatedCost: readNumber(
+              material.estimated_cost,
+              material.estimatedCost,
+              material.cost,
+            ),
+          }
+        : null;
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        name: string;
+        quantity: number;
+        estimatedCost: number;
+      } => Boolean(item),
+    );
+}
+
+function collectEquipmentFromSubTask(subTask: Record<string, unknown>) {
+  return [
+    ...asArray<Record<string, unknown>>(subTask.equipments_used),
+    ...asArray<Record<string, unknown>>(subTask.equipmentsUsed),
+    ...asArray<Record<string, unknown>>(subTask.equipment),
+  ]
+    .map((item) => {
+      const id = readString(
+        item.equipment_id,
+        item.equipmentId,
+        item.id,
+      );
+
+      return id
+        ? {
+            id,
+            name: readString(item.name, item.title) || "Equipment",
+            quantity: readNumber(item.quantity) || 1,
+            notes: readString(item.notes, item.note) || null,
+          }
+        : null;
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        name: string;
+        quantity: number;
+        notes: string | null;
+      } => Boolean(item),
+    );
+}
+
 function deriveProjectMeta(
   projectRow: RawProject | null,
   overviewProject: Record<string, unknown> | null,
@@ -721,6 +839,8 @@ function buildProcessItems(args: {
 
   for (let index = 0; index < mainTasks.length; index += 1) {
     const mainTask = mainTasks[index];
+    const projectTaskId = readString(mainTask.project_task_id, mainTask.id);
+    const materials = collectMaterialsFromMainTask(mainTask);
 
     const subTasks = [
       ...asArray<Record<string, unknown>>(mainTask.subTasks),
@@ -738,11 +858,19 @@ function buildProcessItems(args: {
       const status = getTaskStatus(rawStatus);
 
       const employeeLabels = collectEmployeeLabelsFromSubTask(subTask);
+      const employeeIds = collectEmployeeIdsFromSubTask(subTask);
+      const assignedStaff = collectAssignedStaffFromSubTask(subTask);
       const scheduledStart = readString(
         subTask.scheduled_start_datetime,
         subTask.scheduledStartDatetime,
         subTask.start_datetime,
         subTask.startDatetime,
+      );
+      const scheduledEnd = readString(
+        subTask.scheduled_end_datetime,
+        subTask.scheduledEndDatetime,
+        subTask.end_datetime,
+        subTask.endDatetime,
       );
       const completedAt = readString(subTask.updated_at, subTask.updatedAt);
 
@@ -781,19 +909,22 @@ function buildProcessItems(args: {
           status === "done"
             ? formatDateTime(
                 completedAt ||
-                  readString(
-                    subTask.scheduled_end_datetime,
-                    subTask.scheduledEndDatetime,
-                    subTask.end_datetime,
-                    subTask.endDatetime,
-                  ) ||
+                  scheduledEnd ||
                   null,
               )
             : "-",
         detail: {
           employees: employeeLabels,
-          employeeIds: [],
+          employeeIds,
           estimatedHours: formatHours(estimatedHours),
+          estimatedHoursValue: estimatedHours,
+          projectTaskId,
+          projectSubTaskId: readString(subTask.project_sub_task_id, subTask.id),
+          materials,
+          equipment: collectEquipmentFromSubTask(subTask),
+          assignedStaff,
+          scheduledStartDatetime: scheduledStart || null,
+          scheduledEndDatetime: scheduledEnd || null,
           completedAt: completedAt || null,
         },
       };
@@ -810,7 +941,7 @@ function buildProcessItems(args: {
           : "pending";
 
     items.push({
-      id: `task-${readString(mainTask.project_task_id, mainTask.id) || index}`,
+      id: `task-${projectTaskId || index}`,
       title:
         readString(
           mainTask.title,
@@ -951,14 +1082,36 @@ export default function DashboardPage() {
       try {
         setLoadingProjects(true);
 
-        const response = await fetch("/api/schedule/getProjects");
+        // Pull every project (no schedule-side filter) so we can scope to the
+        // statuses we care about for the progress card. The pre-work and
+        // pre-sign statuses below stay on /admin/projects, not here.
+        const response = await fetch("/api/projects/list", { cache: "no-store" });
         const data = (await response.json()) as ProjectsResponse;
 
         if (!response.ok) {
           throw new Error(data?.error || "Failed to load projects.");
         }
 
-        const nextProjects = Array.isArray(data?.projects) ? data.projects : [];
+        const PROGRESS_HIDDEN_STATUSES = new Set([
+          "main_task_pending",
+          "sub_task_pending",
+          "materials_pending",
+          "equipment_pending",
+          "schedule_pending",
+          "employee_assignment_pending",
+          "cost_estimation_pending",
+          "overview_pending",
+          "quotation_pending",
+          "client_quotation_done",
+        ]);
+
+        const allProjects = Array.isArray(data?.projects) ? data.projects : [];
+        const nextProjects = allProjects.filter((project) => {
+          const raw = String(project.rawStatus ?? project.status ?? "")
+            .trim()
+            .toLowerCase();
+          return !PROGRESS_HIDDEN_STATUSES.has(raw);
+        });
         setProjects(nextProjects);
 
         const firstProject = data?.currentProject ?? nextProjects[0] ?? null;
@@ -1222,7 +1375,9 @@ export default function DashboardPage() {
               toggleSubtaskRow={toggleSubtaskRow}
               employeeReviewItems={employeeReviewItems}
               onRefresh={handleRefresh}
+              canEditGeneratedTasks
               reviewSummary={reviewSummary}
+              emptyProjectState="no-projects-today"
             />
           </div>
 

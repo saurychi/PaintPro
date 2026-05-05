@@ -114,7 +114,12 @@ export async function POST(request: Request) {
     const safeProjectCode = sanitizeFileName(project.project_code || projectId);
 
     const clientSignaturePath = `project-documents/${projectId}/quotation-client-signature.png`;
-    const quotationPdfPath = `quotations/${projectId}/quotation-${safeProjectCode}.pdf`;
+    // Signed quotation PDFs live in their own "quotations" storage bucket so
+    // they're easy to audit / restrict separately from the general documents
+    // library. The Save to Documents flow on the admin side now downloads
+    // from this bucket via project_documents.storage_bucket.
+    const quotationStorageBucket = "quotations";
+    const quotationPdfPath = `${projectId}/quotation-${safeProjectCode}.pdf`;
     const quotationFileName = `quotation-${safeProjectCode}.pdf`;
 
     const { error: uploadSignatureError } = await supabaseAdmin.storage
@@ -143,7 +148,7 @@ export async function POST(request: Request) {
         .from("project_documents")
         .update({
           document_status: "signed",
-          storage_bucket: "documents",
+          storage_bucket: quotationStorageBucket,
           storage_path: quotationPdfPath,
           file_name: quotationFileName,
           file_mime_type: "application/pdf",
@@ -199,7 +204,7 @@ export async function POST(request: Request) {
     const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
 
     const { error: uploadPdfError } = await supabaseAdmin.storage
-      .from("documents")
+      .from(quotationStorageBucket)
       .upload(quotationPdfPath, pdfBuffer, {
         contentType: "application/pdf",
         upsert: true,
@@ -217,10 +222,14 @@ export async function POST(request: Request) {
 
     if (updateSizeError) throw updateSizeError;
 
+    // Mark the project as "client signed, awaiting project manager". The
+    // admin still has to advance to downpayment_pending from their side once
+    // they've acknowledged via the project conversation, but having a
+    // dedicated status makes the in-between state legible to every page.
     const { error: statusError } = await supabaseAdmin
       .from("projects")
       .update({
-        status: "ready_to_start",
+        status: "client_quotation_done",
         updated_at: new Date().toISOString(),
       })
       .eq("project_id", projectId);
@@ -229,7 +238,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: "Quotation signed and saved.",
-      nextStatus: "ready_to_start",
+      nextStatus: "client_quotation_done",
       documentId,
       signedName,
       signedAt: now,

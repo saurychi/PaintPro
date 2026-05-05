@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Dialog,
@@ -71,14 +71,14 @@ function getTimingTone(status: ReviewTimingStatus) {
   }
 
   if (status === "completed") {
-    return "border-border bg-muted/70 text-muted-foreground";
+    return "border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800/70 text-gray-500 dark:text-slate-400";
   }
 
   if (status === "working on it...") {
     return "border-amber-300/80 bg-amber-500/10 text-amber-700 dark:border-amber-500/35 dark:bg-amber-500/15 dark:text-amber-300";
   }
 
-  return "border-border bg-muted/60 text-muted-foreground";
+  return "border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800/60 text-gray-500 dark:text-slate-400";
 }
 
 function TimingPill({ status }: { status: ReviewTimingStatus }) {
@@ -95,11 +95,11 @@ function TimingPill({ status }: { status: ReviewTimingStatus }) {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
-      <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+    <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-sm">
+      <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-slate-400">
         {label}
       </div>
-      <div className="mt-1 text-base font-semibold tracking-tight text-foreground md:text-lg">
+      <div className="mt-1 text-base font-semibold tracking-tight text-gray-900 dark:text-slate-100 md:text-lg">
         {value}
       </div>
     </div>
@@ -116,12 +116,12 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="shrink-0 border-b border-border px-3.5 py-2">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
+      <div className="shrink-0 border-b border-gray-200 dark:border-slate-700 px-3.5 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-slate-400">
           {title}
         </div>
-        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+        <p className="mt-0.5 text-[11px] leading-4 text-gray-500 dark:text-slate-400">
           {description}
         </p>
       </div>
@@ -130,7 +130,7 @@ function SectionCard({
           "min-h-0 flex-1 overflow-y-auto px-3.5 py-2.5",
           "[&::-webkit-scrollbar]:w-2",
           "[&::-webkit-scrollbar-thumb]:rounded-full",
-          "[&::-webkit-scrollbar-thumb]:bg-border",
+          "[&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700",
           "[&::-webkit-scrollbar-track]:bg-transparent",
         )}>
         {children}
@@ -141,19 +141,19 @@ function SectionCard({
 
 function MaterialRow({ material }: { material: ReviewMaterialSummary }) {
   return (
-    <div className="grid gap-2 rounded-lg border border-border bg-background px-3 py-2.5 text-[11px] sm:grid-cols-[minmax(0,2fr)_80px_120px] sm:items-center">
+    <div className="grid gap-2 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-[11px] sm:grid-cols-[minmax(0,2fr)_80px_120px] sm:items-center">
       <div className="min-w-0">
-        <div className="truncate font-medium text-foreground">
+        <div className="truncate font-medium text-gray-900 dark:text-slate-100">
           {material.name}
         </div>
-        <div className="mt-0.5 text-[10px] text-muted-foreground">
+        <div className="mt-0.5 text-[10px] text-gray-500 dark:text-slate-400">
           {material.unit || "No unit specified"}
         </div>
       </div>
-      <div className="text-muted-foreground">
+      <div className="text-gray-500 dark:text-slate-400">
         {material.totalQuantity.toLocaleString()}
       </div>
-      <div className="text-left font-medium text-foreground sm:text-right">
+      <div className="text-left font-medium text-gray-900 dark:text-slate-100 sm:text-right">
         {formatCurrency(material.totalCost)}
       </div>
     </div>
@@ -168,7 +168,7 @@ function getEmployeePerformance(employee: ReviewEmployeeSummary) {
     return {
       score: 0,
       label: "No scored work yet",
-      tone: "border-border bg-muted/60 text-muted-foreground dark:bg-input/20",
+      tone: "border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800/60 text-gray-500 dark:text-slate-400 dark:bg-slate-800/40",
     };
   }
 
@@ -207,86 +207,6 @@ function getEmployeePerformance(employee: ReviewEmployeeSummary) {
   };
 }
 
-function EmployeeSummaryView({
-  employee,
-}: {
-  employee: ReviewEmployeeSummary;
-}) {
-  const performance = getEmployeePerformance(employee);
-
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2.5">
-      <div className="rounded-xl border border-border bg-background px-3 py-2.5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-xs font-semibold text-foreground md:text-sm">
-              {employee.name}
-            </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {[employee.role, employee.specialty]
-                .filter(Boolean)
-                .join(" • ") || "Assigned staff"}
-            </div>
-          </div>
-
-          <div
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
-              performance.tone,
-            )}>
-            {performance.label}
-          </div>
-        </div>
-
-        <div className="mt-2 grid gap-2 sm:grid-cols-4">
-          <SummaryCard label="Score" value={`${performance.score}%`} />
-          <SummaryCard label="Early" value={String(employee.earlyCount)} />
-          <SummaryCard label="On Time" value={String(employee.onTimeCount)} />
-          <SummaryCard label="Late" value={String(employee.lateCount)} />
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          "min-h-0 flex-1 space-y-2 overflow-y-auto",
-          "[&::-webkit-scrollbar]:w-2",
-          "[&::-webkit-scrollbar-thumb]:rounded-full",
-          "[&::-webkit-scrollbar-thumb]:bg-border",
-          "[&::-webkit-scrollbar-track]:bg-transparent",
-        )}>
-        {employee.assignedTasks.length > 0 ? (
-          employee.assignedTasks.map((task) => (
-            <div
-              key={`${employee.id}-${task.subTaskId}`}
-              className="rounded-lg border border-border bg-background px-3 py-2.5">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-[11px] font-medium text-foreground md:text-xs">
-                    {task.subTaskTitle}
-                  </div>
-                  <div className="mt-1 text-[11px] text-muted-foreground">
-                    {task.mainTaskTitle}
-                  </div>
-                </div>
-                <TimingPill status={task.timingStatus} />
-              </div>
-
-              <div className="mt-2 grid gap-1 text-[10px] leading-4 text-muted-foreground">
-                <div>Planned start: {formatDateTime(task.scheduledStart)}</div>
-                <div>Finished: {formatDateTime(task.completedAt)}</div>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="rounded-xl border border-dashed border-border bg-background px-3 py-5 text-xs text-muted-foreground">
-            No employee task timing to review yet.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function ProjectReviewModal({
   open,
   onClose,
@@ -307,12 +227,13 @@ export default function ProjectReviewModal({
   )
     ? selectedEmployeeIdState
     : (employees[0]?.id ?? "");
-  const effectiveOpenMainTaskIds =
-    openMainTaskIds.length > 0
-      ? openMainTaskIds
-      : mainTasks.length > 0
-        ? [mainTasks[0].id]
-        : [];
+
+  // Auto-open the first main task whenever a new summary is loaded; once the
+  // user toggles, their state takes over and is preserved (including closing
+  // every task).
+  useEffect(() => {
+    setOpenMainTaskIds(mainTasks.length > 0 ? [mainTasks[0].id] : []);
+  }, [summary, mainTasks]);
 
   const selectedEmployeeIndex = Math.max(
     0,
@@ -350,12 +271,12 @@ export default function ProjectReviewModal({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent
         className={cn(
-          "flex h-[90vh] w-[min(94vw,1640px)] max-w-[94vw] flex-col overflow-hidden border-border bg-background p-0 shadow-xl",
+          "flex h-[90vh] w-[min(94vw,1640px)] max-w-[94vw] flex-col overflow-hidden border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-0 shadow-xl",
           "sm:max-w-[92vw]",
         )}>
-        <DialogHeader className="border-b border-border bg-background px-4 py-3 md:px-5">
+        <DialogHeader className="border-b border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 md:px-5">
           <div className="grid gap-2 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center">
-            <DialogTitle className="text-sm font-semibold tracking-tight text-foreground md:text-base">
+            <DialogTitle className="text-sm font-semibold tracking-tight text-gray-900 dark:text-slate-100 md:text-base">
               Review and Final Checks
             </DialogTitle>
 
@@ -364,7 +285,7 @@ export default function ProjectReviewModal({
                 <span className="shrink-0 rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-[9px] font-semibold tracking-[0.16em] text-slate-100 dark:border-slate-500 dark:bg-slate-100 dark:text-slate-900">
                   {summary.projectCode || "NO PROJECT CODE"}
                 </span>
-                <div className="truncate text-[12px] font-medium text-foreground md:text-sm">
+                <div className="truncate text-[12px] font-medium text-gray-900 dark:text-slate-100 md:text-sm">
                   {summary.projectTitle || "Unnamed Project"}
                 </div>
               </div>
@@ -372,9 +293,9 @@ export default function ProjectReviewModal({
           </div>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-hidden bg-muted/20 px-4 py-3 md:px-5">
+        <div className="min-h-0 flex-1 overflow-hidden bg-gray-50 dark:bg-slate-950 px-4 py-3 md:px-5">
           {!summary ? (
-            <div className="rounded-2xl border border-dashed border-border bg-card px-5 py-10 text-center text-xs text-muted-foreground md:text-sm">
+            <div className="rounded-2xl border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-10 text-center text-xs text-gray-500 dark:text-slate-400 md:text-sm">
               No review data is available for this project yet.
             </div>
           ) : (
@@ -408,42 +329,40 @@ export default function ProjectReviewModal({
                   description="Completed work, timing status, equipment, and assigned staff.">
                   <div className="space-y-2">
                     {mainTasks.map((mainTask) => {
-                      const isOpen = effectiveOpenMainTaskIds.includes(
-                        mainTask.id,
-                      );
+                      const isOpen = openMainTaskIds.includes(mainTask.id);
 
                       return (
                         <div
                           key={mainTask.id}
-                          className="rounded-xl border border-border bg-muted/35">
+                          className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
                           <button
                             type="button"
                             onClick={() => toggleMainTask(mainTask.id)}
                             className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left">
-                            <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground">
+                            <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-900 dark:text-slate-100">
                               {mainTask.title}
                             </div>
                             <ChevronDown
                               className={cn(
-                                "h-4 w-4 text-muted-foreground transition-transform",
+                                "h-4 w-4 text-gray-500 dark:text-slate-400 transition-transform",
                                 isOpen ? "rotate-0" : "-rotate-90",
                               )}
                             />
                           </button>
 
                           {isOpen ? (
-                            <div className="space-y-2 border-t border-border px-3 pb-2.5 pt-2">
+                            <div className="space-y-2 border-t border-gray-200 dark:border-slate-700 px-3 pb-2.5 pt-2">
                               {mainTask.subTasks.length > 0 ? (
                                 mainTask.subTasks.map((subTask) => (
                                   <div
                                     key={subTask.id}
-                                    className="rounded-lg border border-border bg-background px-3 py-2.5">
+                                    className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0">
-                                        <div className="truncate text-[11px] font-medium text-foreground">
+                                        <div className="truncate text-[11px] font-medium text-gray-900 dark:text-slate-100">
                                           {subTask.title}
                                         </div>
-                                        <div className="mt-1 text-[10px] text-muted-foreground">
+                                        <div className="mt-1 text-[10px] text-gray-500 dark:text-slate-400">
                                           {subTask.estimatedHours > 0
                                             ? `${subTask.estimatedHours} hrs planned`
                                             : "No duration"}
@@ -455,7 +374,7 @@ export default function ProjectReviewModal({
                                       />
                                     </div>
 
-                                    <div className="mt-2 grid gap-x-3 gap-y-1 text-[10px] leading-4 text-muted-foreground xl:grid-cols-2">
+                                    <div className="mt-2 grid gap-x-3 gap-y-1 text-[10px] leading-4 text-gray-500 dark:text-slate-400 xl:grid-cols-2">
                                       <div>
                                         Planned:{" "}
                                         {formatDateTime(subTask.scheduledStart)}
@@ -480,7 +399,7 @@ export default function ProjectReviewModal({
                                   </div>
                                 ))
                               ) : (
-                                <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-[11px] text-muted-foreground">
+                                <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
                                   No subtasks were recorded under this main
                                   task.
                                 </div>
@@ -493,51 +412,135 @@ export default function ProjectReviewModal({
                   </div>
                 </SectionCard>
 
-                <div className="grid min-h-0 overflow-hidden gap-3 lg:grid-rows-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                  <SectionCard
-                    title="Employees"
-                    description="One employee at a time with timing results and overall performance.">
-                    {selectedEmployee ? (
-                      <div className="space-y-2.5">
-                        <div className="grid grid-cols-[36px_minmax(0,1fr)_36px] items-center gap-2 rounded-xl border border-border bg-background px-2.5 py-2">
-                          <button
-                            type="button"
-                            onClick={() => handleChangeEmployee(-1)}
-                            disabled={employees.length <= 1}
-                            className={cn(
-                              "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50",
-                            )}>
-                            <ChevronLeft className="h-4 w-4" />
-                          </button>
-
-                          <div className="min-w-0 text-center">
-                            <div className="truncate text-[11px] font-semibold text-foreground md:text-xs">
-                              {selectedEmployee.name}
-                            </div>
-                            <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                              {employeePagerLabel}
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleChangeEmployee(1)}
-                            disabled={employees.length <= 1}
-                            className={cn(
-                              "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50",
-                            )}>
-                            <ChevronRight className="h-4 w-4" />
-                          </button>
-                        </div>
-
-                        <EmployeeSummaryView employee={selectedEmployee} />
+                <div className="grid min-h-0 overflow-hidden gap-3 lg:grid-rows-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                  <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <div className="shrink-0 border-b border-gray-200 px-3.5 py-1.5 dark:border-slate-700">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-slate-400">
+                        Employees
                       </div>
+                    </div>
+
+                    {selectedEmployee ? (
+                      (() => {
+                        const performance = getEmployeePerformance(selectedEmployee);
+
+                        const stats = [
+                          { label: "Score", value: `${performance.score}%` },
+                          { label: "Early", value: String(selectedEmployee.earlyCount) },
+                          { label: "On Time", value: String(selectedEmployee.onTimeCount) },
+                          { label: "Late", value: String(selectedEmployee.lateCount) },
+                        ];
+
+                        return (
+                          <>
+                            <div className="shrink-0 border-b border-gray-200 px-3.5 py-2 dark:border-slate-700">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleChangeEmployee(-1)}
+                                  disabled={employees.length <= 1}
+                                  className={cn(
+                                    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/70 dark:hover:text-slate-100",
+                                  )}>
+                                  <ChevronLeft className="h-4 w-4" />
+                                </button>
+
+                                <div className="min-w-0 flex-1 text-center">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="truncate text-xs font-semibold text-gray-900 dark:text-slate-100 md:text-sm">
+                                      {selectedEmployee.name}
+                                    </div>
+                                    <span
+                                      className={cn(
+                                        "shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]",
+                                        performance.tone,
+                                      )}>
+                                      {performance.label}
+                                    </span>
+                                  </div>
+                                  <div className="mt-0.5 truncate text-[9px] uppercase tracking-[0.14em] text-gray-500 dark:text-slate-400">
+                                    {employeePagerLabel}
+                                    {selectedEmployee.role || selectedEmployee.specialty
+                                      ? ` · ${[selectedEmployee.role, selectedEmployee.specialty].filter(Boolean).join(" • ")}`
+                                      : ""}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleChangeEmployee(1)}
+                                  disabled={employees.length <= 1}
+                                  className={cn(
+                                    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/70 dark:hover:text-slate-100",
+                                  )}>
+                                  <ChevronRight className="h-4 w-4" />
+                                </button>
+                              </div>
+
+                              <div className="mt-2 grid grid-cols-4 gap-1.5">
+                                {stats.map((stat) => (
+                                  <div
+                                    key={stat.label}
+                                    className="rounded-md border border-gray-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900">
+                                    <div className="text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-slate-400">
+                                      {stat.label}
+                                    </div>
+                                    <div className="mt-0.5 text-sm font-semibold tracking-tight text-gray-900 dark:text-slate-100">
+                                      {stat.value}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div
+                              className={cn(
+                                "min-h-0 flex-1 space-y-2 overflow-y-auto px-3.5 py-2.5",
+                                "[&::-webkit-scrollbar]:w-2",
+                                "[&::-webkit-scrollbar-thumb]:rounded-full",
+                                "[&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700",
+                                "[&::-webkit-scrollbar-track]:bg-transparent",
+                              )}>
+                              {selectedEmployee.assignedTasks.length > 0 ? (
+                                selectedEmployee.assignedTasks.map((task) => (
+                                  <div
+                                    key={`${selectedEmployee.id}-${task.subTaskId}`}
+                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-[11px] font-medium text-gray-900 dark:text-slate-100 md:text-xs">
+                                          {task.subTaskTitle}
+                                        </div>
+                                        <div className="mt-1 text-[11px] text-gray-500 dark:text-slate-400">
+                                          {task.mainTaskTitle}
+                                        </div>
+                                      </div>
+                                      <TimingPill status={task.timingStatus} />
+                                    </div>
+
+                                    <div className="mt-2 grid gap-1 text-[10px] leading-4 text-gray-500 dark:text-slate-400">
+                                      <div>Planned start: {formatDateTime(task.scheduledStart)}</div>
+                                      <div>Finished: {formatDateTime(task.completedAt)}</div>
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-5 text-xs text-gray-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                                  No employee task timing to review yet.
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()
                     ) : (
-                      <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-[11px] text-muted-foreground">
-                        No employee assignments were found for this project.
+                      <div className="flex-1 p-3.5">
+                        <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-4 text-[11px] text-gray-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                          No employee assignments were found for this project.
+                        </div>
                       </div>
                     )}
-                  </SectionCard>
+                  </section>
 
                   <SectionCard
                     title={
@@ -556,7 +559,7 @@ export default function ProjectReviewModal({
                           "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition",
                           resourceView === "materials"
                             ? "border-emerald-300 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-300"
-                            : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                            : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:bg-gray-50 hover:text-gray-900 dark:hover:bg-slate-800/70 dark:hover:text-slate-100",
                         )}>
                         Materials
                       </button>
@@ -567,7 +570,7 @@ export default function ProjectReviewModal({
                           "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition",
                           resourceView === "equipment"
                             ? "border-sky-300 bg-sky-500/10 text-sky-700 dark:border-sky-500/35 dark:bg-sky-500/15 dark:text-sky-300"
-                            : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                            : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:bg-gray-50 hover:text-gray-900 dark:hover:bg-slate-800/70 dark:hover:text-slate-100",
                         )}>
                         Equipment
                       </button>
@@ -583,7 +586,7 @@ export default function ProjectReviewModal({
                             />
                           ))
                         ) : (
-                          <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-[11px] text-muted-foreground">
+                          <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
                             No materials were recorded for this project.
                           </div>
                         )}
@@ -594,12 +597,12 @@ export default function ProjectReviewModal({
                           summary.equipment.map((equipment) => (
                             <div
                               key={equipment.name}
-                              className="rounded-lg border border-border bg-background px-3 py-2.5">
+                              className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5">
                               <div className="flex items-center justify-between gap-3">
-                                <div className="text-[11px] font-medium text-foreground">
+                                <div className="text-[11px] font-medium text-gray-900 dark:text-slate-100">
                                   {equipment.name}
                                 </div>
-                                <div className="text-[10px] text-muted-foreground">
+                                <div className="text-[10px] text-gray-500 dark:text-slate-400">
                                   Used {equipment.usageCount} time
                                   {equipment.usageCount === 1 ? "" : "s"}
                                 </div>
@@ -610,7 +613,7 @@ export default function ProjectReviewModal({
                                   {equipment.notes.map((note) => (
                                     <span
                                       key={`${equipment.name}-${note}`}
-                                      className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground">
+                                      className="rounded-full border border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800/50 px-2 py-0.5 text-[10px] text-gray-500 dark:text-slate-400">
                                       {note}
                                     </span>
                                   ))}
@@ -619,7 +622,7 @@ export default function ProjectReviewModal({
                             </div>
                           ))
                         ) : (
-                          <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-[11px] text-muted-foreground">
+                          <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
                             No equipment usage was recorded for this project.
                           </div>
                         )}
@@ -632,11 +635,11 @@ export default function ProjectReviewModal({
           )}
         </div>
 
-        <DialogFooter className="shrink-0 border-t border-border bg-background px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5">
+        <DialogFooter className="shrink-0 border-t border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-[11px] font-semibold text-foreground transition hover:bg-accent hover:text-accent-foreground">
+            className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-gray-900 dark:text-slate-100 transition hover:bg-gray-50 hover:text-gray-900 dark:hover:bg-slate-800/70 dark:hover:text-slate-100">
             Close
           </button>
 

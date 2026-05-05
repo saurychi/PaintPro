@@ -3,6 +3,7 @@
 import React from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
+import { SidebarBadgesProvider } from "@/components/sidebar-badges"
 import { cn } from "@/lib/utils"
 
 function StaffShell({ children, user }: { children: React.ReactNode; user: SidebarUser }) {
@@ -16,7 +17,7 @@ function StaffShell({ children, user }: { children: React.ReactNode; user: Sideb
         className={cn(
           "min-h-screen min-w-0 overflow-auto",
           "transition-[padding-left] duration-300 ease-in-out",
-          open ? "pl-(--sidebar-width)" : "pl-(--sidebar-width-icon)"
+          open ? "md:pl-(--sidebar-width)" : "md:pl-(--sidebar-width-icon)"
         )}
         style={{ background: "var(--app-bg)" }}
       >
@@ -29,7 +30,9 @@ function StaffShell({ children, user }: { children: React.ReactNode; user: Sideb
 export default function StaffShellClient({ children, user }: { children: React.ReactNode; user: SidebarUser }) {
   return (
     <SidebarProvider>
-      <StaffShell user={user}>{children}</StaffShell>
+      <SidebarBadgesProvider>
+        <StaffShell user={user}>{children}</StaffShell>
+      </SidebarBadgesProvider>
     </SidebarProvider>
   )
 }

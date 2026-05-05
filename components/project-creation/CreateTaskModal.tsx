@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Plus, Trash2, X } from "lucide-react";
+import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
 
 type ResourceOption = {
   id: string;
@@ -51,6 +52,8 @@ function ResourcePicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [itemPendingRemove, setItemPendingRemove] =
+    useState<ResourceOption | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -89,7 +92,7 @@ function ResourcePicker({
                 {item.name}
                 <button
                   type="button"
-                  onClick={() => removeItem(item.id)}
+                  onClick={() => setItemPendingRemove(item)}
                   className="inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-emerald-100"
                 >
                   <X className="h-3 w-3" />
@@ -137,6 +140,22 @@ function ResourcePicker({
           )}
         </div>
       </div>
+
+      <ConfirmDeleteModal
+        open={Boolean(itemPendingRemove)}
+        title={`Remove ${label.toLowerCase()}?`}
+        description={
+          itemPendingRemove
+            ? `Remove "${itemPendingRemove.name}" from this draft?`
+            : `Remove this ${label.toLowerCase()} from this draft?`
+        }
+        confirmLabel="Remove"
+        onCancel={() => setItemPendingRemove(null)}
+        onConfirm={() => {
+          if (itemPendingRemove) removeItem(itemPendingRemove.id);
+          setItemPendingRemove(null);
+        }}
+      />
     </div>
   );
 }
@@ -153,6 +172,8 @@ export default function CreateTaskModal({
   const [subTasks, setSubTasks] = useState<DraftSubTask[]>([]);
   const [equipmentOptions, setEquipmentOptions] = useState<ResourceOption[]>([]);
   const [materialOptions, setMaterialOptions] = useState<ResourceOption[]>([]);
+  const [subTaskPendingRemove, setSubTaskPendingRemove] =
+    useState<DraftSubTask | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -310,7 +331,7 @@ export default function CreateTaskModal({
 
                           <button
                             type="button"
-                            onClick={() => removeSubTaskRow(subTask.id)}
+                            onClick={() => setSubTaskPendingRemove(subTask)}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition hover:bg-red-50 hover:text-red-500"
                             aria-label="Remove sub task"
                           >
@@ -396,6 +417,22 @@ export default function CreateTaskModal({
           </button>
         </div>
       </div>
+
+      <ConfirmDeleteModal
+        open={Boolean(subTaskPendingRemove)}
+        title="Remove subtask?"
+        description={
+          subTaskPendingRemove?.description
+            ? `Remove "${subTaskPendingRemove.description}" from this task draft?`
+            : "Remove this subtask from this task draft?"
+        }
+        confirmLabel="Remove"
+        onCancel={() => setSubTaskPendingRemove(null)}
+        onConfirm={() => {
+          if (subTaskPendingRemove) removeSubTaskRow(subTaskPendingRemove.id);
+          setSubTaskPendingRemove(null);
+        }}
+      />
     </div>
   );
 }

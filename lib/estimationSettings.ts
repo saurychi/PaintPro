@@ -26,6 +26,26 @@ export type EstimationFormulaVariable = {
   updated_at: string;
 };
 
+export type EstimationMainTaskOption = {
+  main_task_id: string;
+  name: string;
+};
+
+export type EstimationSubTaskOption = {
+  sub_task_id: string;
+  main_task_id: string;
+  description: string;
+};
+
+export type EstimationFormulaRuleRelation = {
+  relation_id: string;
+  rule_scope: EstimationFormulaScope;
+  main_task_id: string;
+  main_task_name: string;
+  sub_task_id: string;
+  sub_task_name: string;
+};
+
 export type EstimationFormulaTemplate = {
   formula_template_id: string;
   formula_key: string;
@@ -41,6 +61,7 @@ export type EstimationFormulaTemplate = {
   duration_rule_count: number;
   total_rule_count: number;
   sample_usage: string | null;
+  rule_relations: EstimationFormulaRuleRelation[];
 };
 
 export type EstimationSettingsSummary = {
@@ -52,6 +73,8 @@ export type EstimationSettingsSummary = {
 export type EstimationSettingsResponse = {
   formulas?: EstimationFormulaTemplate[];
   summary?: EstimationSettingsSummary;
+  mainTasks?: EstimationMainTaskOption[];
+  subTasks?: EstimationSubTaskOption[];
   error?: string;
 };
 
@@ -62,6 +85,9 @@ export type EstimationFormulaTemplatePayload = {
   formulaScope: EstimationFormulaScope;
   formulaExpression: string;
   isActive: boolean;
+  relatedMainTaskId?: string;
+  relatedSubTaskId?: string;
+  relatedRuleLabel?: string;
 };
 
 export type EstimationFormulaVariablePayload = {

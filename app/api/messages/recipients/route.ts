@@ -3,6 +3,9 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
+const CLIENT_COOKIE = "paintpro_client_project_id"
+const ALLOWED_PROJECT_RECIPIENT_ROLES = new Set(["staff", "manager", "admin"])
+
 type UserRecipient = {
   id: string
   username: string | null
@@ -47,6 +50,97 @@ async function getAuthUserId() {
   return user?.id ?? null
 }
 
+async function getClientProjectId() {
+  const cookieStore = await cookies()
+  return cookieStore.get(CLIENT_COOKIE)?.value ?? null
+}
+
+// For a guest client (project-cookie auth): return the project creator (manager/admin)
+// and any staff/manager/admin assigned to the project's sub-tasks.
+async function buildClientProjectRecipients(projectId: string) {
+  const { data: projectRow, error: projectError } = await supabaseAdmin
+    .from("projects")
+    .select("project_id, created_by")
+    .eq("project_id", projectId)
+    .maybeSingle()
+
+  if (projectError) {
+    return NextResponse.json({ error: projectError.message }, { status: 500 })
+  }
+  if (!projectRow) {
+    return NextResponse.json({ error: "Project not found." }, { status: 404 })
+  }
+
+  const project = projectRow as { project_id: string; created_by: string | null }
+  const candidateUserIds = new Set<string>()
+
+  if (project.created_by) {
+    candidateUserIds.add(project.created_by)
+  }
+
+  const { data: taskRows } = await supabaseAdmin
+    .from("project_task")
+    .select("project_task_id")
+    .eq("project_id", projectId)
+
+  const taskIds = (taskRows ?? []).map((row) => row.project_task_id as string)
+
+  if (taskIds.length > 0) {
+    const { data: subTaskRows } = await supabaseAdmin
+      .from("project_sub_task")
+      .select("project_sub_task_id")
+      .in("project_task_id", taskIds)
+
+    const subTaskIds = (subTaskRows ?? []).map((row) => row.project_sub_task_id as string)
+
+    if (subTaskIds.length > 0) {
+      const { data: assignmentRows } = await supabaseAdmin
+        .from("project_sub_task_staff")
+        .select("user_id")
+        .in("project_sub_task_id", subTaskIds)
+
+      for (const row of assignmentRows ?? []) {
+        if (row.user_id) candidateUserIds.add(row.user_id as string)
+      }
+    }
+  }
+
+  if (candidateUserIds.size === 0) {
+    return NextResponse.json([])
+  }
+
+  const { data: userRows } = await supabaseAdmin
+    .from("users")
+    .select("id, username, role, profile_image_url, status")
+    .in("id", Array.from(candidateUserIds))
+    .order("username", { ascending: true })
+
+  const filtered = ((userRows ?? []) as Array<UserRecipient & { status?: string | null }>).filter((user) => {
+    const role = String(user.role ?? "").trim().toLowerCase()
+    const isActive = String(user.status ?? "").trim().toLowerCase() === "active"
+    return isActive && ALLOWED_PROJECT_RECIPIENT_ROLES.has(role)
+  })
+
+  const recipients = filtered.map((user) => {
+    const role = String(user.role ?? "").trim().toLowerCase()
+    const isProjectCreator = user.id === project.created_by
+    const assignedTasks = isProjectCreator
+      ? "Project Manager"
+      : "Assigned Staff"
+
+    return {
+      kind: "user" as const,
+      id: user.id,
+      username: user.username || "Unknown User",
+      role: role || "staff",
+      profile_image_url: user.profile_image_url ?? null,
+      assignedTasks,
+    }
+  })
+
+  return NextResponse.json(recipients)
+}
+
 function formatStatusLabel(status: string | null) {
   return String(status || "pending")
     .replace(/_/g, " ")
@@ -57,6 +151,11 @@ export async function GET() {
   try {
     const userId = await getAuthUserId()
     if (!userId) {
+      // Fall back to guest-client auth (project-code cookie)
+      const clientProjectId = await getClientProjectId()
+      if (clientProjectId) {
+        return await buildClientProjectRecipients(clientProjectId)
+      }
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
     }
 

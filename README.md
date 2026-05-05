@@ -60,3 +60,288 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 2. npm install
 3. create .env.local in root dir and insert details
 4. npm run dev
+
+#SQL Structure
+
+##Users
+- id
+- username
+- email
+- phone
+- role
+- specialty
+- status
+- profile_image_url
+- hourly_wage
+- signature_url
+- signature_updated_at
+- created_at
+- updated_at
+
+##Projects
+- project_id
+- project_code
+- title
+- description
+- site_address
+- scheduled_start_datetime
+- scheduled_end_datetime
+- status
+- priority
+- estimated_budget
+- estimated_cost
+- estimated_profit
+- materials_cost
+- labor_cost
+- notes
+- dimension (jsonb)
+- mark_up
+- created_at
+- updated_at
+- client_id (user_id)
+- created_by (admin user_id)
+
+##Clients
+- client_id
+- full_name
+- phone
+- email
+- address
+- notes
+- created_at
+- updated_at
+
+##Project_Task
+- project_task_id
+- project_id
+- main_task_id
+
+##MainTask
+- main_task_id
+- name
+- is_active
+- default_sort_order
+- replaced_by_main_task_id
+- created_at
+- updated_at
+
+##SubTask
+- sub_task_id
+- main_task_id
+- description
+- is_active
+- replaced_by_sub_task_id
+- default_equipment
+- default_materials
+- default_sort_order
+- created_at
+- updated_at
+
+##Project_SubTask
+- project_sub_task_id
+- project_task_id
+- sub_task_id
+- assigned_user_id
+- estimated_hours
+- equipments_used
+- status
+- sort_order
+- notes
+- created_at
+- updated_at
+
+##Tag
+- tag_id
+- parent_id (self tag)
+- tag_name
+- color
+- created_at
+- updated_at
+
+##Supplier
+- supplier_id
+- supplier_name
+- color
+- created_at
+- updated_at
+
+##Materials
+- material_id
+- tag_id
+- supplier_id
+- location_id
+- name
+- unit
+- unit_cost
+- reorder_point
+- needed_stock
+- current_in_stock
+- status
+- date_purchased
+- notes
+- created_at
+- updated_at
+
+##Equipment
+- equipment_id
+- tag_id
+- supplier_id
+- location_id
+- name
+- unit
+- status
+- notes
+- created_at
+- updated_at
+
+##project_task_material
+- project_task_material_id
+- project_task_id
+- material_id
+- estimated_quantity
+- estimated_cost
+- created_at
+- updated_at
+
+##staff_unavailability
+- unavailability_id
+- user_id
+- start_datetime
+- end_datetime
+- reason
+- created_at
+- updated_at
+
+##Message
+- message_id
+- project_id
+- user_id
+
+##project_schedule
+- project_schedule_id
+- project_id
+- start_datetime
+- end_datetime
+- status
+- notes
+- created_at
+- updated_at
+
+##project_sub_task_staff
+- project_sub_task_staff_id
+- project_sub_task_id
+- user_id
+- role
+- assignment_status
+- created_at
+- updated_at
+
+##surface_scale_presets
+- surface_key
+- label
+- unit
+- small_min
+- small_max
+- small_suggested
+- small_label
+- medium_min
+- medium_max
+- medium_suggested
+- medium_label
+- large_min
+- large_max
+- large_suggested
+- large_label
+- created_at
+- updated_at
+
+##project_documents
+- document_id
+- project_id
+- client_id
+- document_type
+- document_status
+- storage_bucket
+- storage_path
+- file_name
+- file_mime_type
+- file_size_bytes
+- signed_at
+- signed_name
+- signed_ip
+- client_signature_path
+- created_by
+- created_at
+- updated_at
+
+##employee_performance
+- employee_performance_id
+- project_id
+- user_id
+- time_efficiency
+- work_quality
+- teamwork
+- work_ethic
+- note
+- salary_amount
+- total_estimated_hours
+- hourly_wage
+- reviewed_by
+- reviewed_at
+- created_at
+- updated_at
+
+##task_duration_rules
+- duration_rule_id
+- main_task_id
+- sub_task_id
+- formula_template_id
+- minimum_hours
+- is_active
+- created_at
+- updated_at
+
+##material_estimation_rules
+- material_rule_id
+- main_task_id
+- sub_task_id
+- material_name
+- formula_template_id
+- minimum_quantity
+- is_active
+- created_at
+- updated_at
+
+##formula_templates
+- formula_template_id
+- formula_key
+- name
+- description
+- formula_expression
+- formula_scope
+- is_active
+- created_at
+- updated_at
+
+##formula_variables
+- formula_variable_id
+- formula_template_id
+- variable_key
+- label
+- description
+- data_type
+- default_value
+- unit
+- is_required
+- created_at
+- updated_at
+
+##unavailable_days
+- unavailable_day_id
+- blocked_date
+- reason
+- block_type
+- notes
+- is_active
+- created_at
+- updated_at

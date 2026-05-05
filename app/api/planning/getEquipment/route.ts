@@ -5,8 +5,6 @@ type EquipmentOut = {
   equipment_id: string
   name: string
   status?: string
-  condition?: string
-  location?: string
 }
 
 type SuccessResponse = {
@@ -33,8 +31,6 @@ type EquipmentRow = {
   equipment_id: string
   name: string | null
   status: string | null
-  condition: string | null
-  location: string | null
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -140,13 +136,14 @@ export async function POST(req: Request) {
     const mainTaskRow = ((mainTaskRows ?? []) as MainTaskRow[])[0] ?? null
 
     if (!mainTaskRow?.main_task_id) {
-      return NextResponse.json(
-        {
-          error: "Main task not found.",
-          details: `No active main_task matched "${taskName}".`,
-        },
-        { status: 404 }
-      )
+      // No matching main_task in the catalog — return empty equipment instead
+      // of a 404 so a single unmapped task name doesn't abort the whole flow.
+      const response: SuccessResponse = {
+        taskName,
+        subTaskTitle,
+        equipment: [],
+      }
+      return NextResponse.json(response)
     }
 
     let subTaskRows: SubTaskRow[] = []
@@ -190,11 +187,11 @@ export async function POST(req: Request) {
       subTaskRows = (data ?? []) as SubTaskRow[]
     }
 
-    const equipmentIds = uniqueStrings(
+    const equipmentRefs = uniqueStrings(
       subTaskRows.flatMap((row) => parseEquipmentIds(row.default_equipment))
     )
 
-    if (!equipmentIds.length) {
+    if (!equipmentRefs.length) {
       const response: SuccessResponse = {
         taskName,
         subTaskTitle,
@@ -204,34 +201,70 @@ export async function POST(req: Request) {
       return NextResponse.json(response)
     }
 
-    const { data: equipmentRows, error: equipmentError } = await supabaseAdmin
-      .from("equipment")
-      .select("equipment_id, name, status, condition, location")
-      .in("equipment_id", equipmentIds)
+    // sub_task.default_equipment may hold either uuids (equipment_id) or
+    // free-form names (legacy / catalog items not yet linked). Postgres rejects
+    // non-uuid strings on a uuid column, so split and look up each shape
+    // separately to keep the route from 500-ing.
+    const UUID_RE =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const idRefs = equipmentRefs.filter((ref) => UUID_RE.test(ref))
+    const nameRefs = equipmentRefs.filter((ref) => !UUID_RE.test(ref))
 
-    if (equipmentError) {
-      return NextResponse.json(
-        {
-          error: "Failed to fetch equipment records.",
-          details: equipmentError.message,
-        },
-        { status: 500 }
-      )
+    const equipmentRows: EquipmentRow[] = []
+
+    if (idRefs.length > 0) {
+      const { data, error } = await supabaseAdmin
+        .from("equipment")
+        .select("equipment_id, name, status")
+        .in("equipment_id", idRefs)
+
+      if (error) {
+        console.error("getEquipment id lookup failed:", error)
+      } else if (data) {
+        equipmentRows.push(...(data as EquipmentRow[]))
+      }
     }
 
-    const equipment: EquipmentOut[] = ((equipmentRows ?? []) as EquipmentRow[])
-      .filter((row) => row.equipment_id && row.name)
+    if (nameRefs.length > 0) {
+      const { data, error } = await supabaseAdmin
+        .from("equipment")
+        .select("equipment_id, name, status")
+        .in("name", nameRefs)
+
+      if (error) {
+        console.error("getEquipment name lookup failed:", error)
+      } else if (data) {
+        equipmentRows.push(...(data as EquipmentRow[]))
+      }
+    }
+
+    const seen = new Set<string>()
+    const equipment: EquipmentOut[] = equipmentRows
+      .filter((row) => {
+        if (!row.equipment_id || !row.name) return false
+        if (seen.has(row.equipment_id)) return false
+        seen.add(row.equipment_id)
+        return true
+      })
       .sort((a, b) => {
-        const aIndex = equipmentIds.indexOf(a.equipment_id)
-        const bIndex = equipmentIds.indexOf(b.equipment_id)
+        const aRef = a.equipment_id
+        const bRef = b.equipment_id
+        const aName = (a.name ?? "").trim()
+        const bName = (b.name ?? "").trim()
+        const aIndex =
+          equipmentRefs.indexOf(aRef) === -1
+            ? equipmentRefs.indexOf(aName)
+            : equipmentRefs.indexOf(aRef)
+        const bIndex =
+          equipmentRefs.indexOf(bRef) === -1
+            ? equipmentRefs.indexOf(bName)
+            : equipmentRefs.indexOf(bRef)
         return aIndex - bIndex
       })
       .map((row) => ({
         equipment_id: row.equipment_id,
         name: row.name?.trim() ?? "",
         status: row.status?.trim() || undefined,
-        condition: row.condition?.trim() || undefined,
-        location: row.location?.trim() || undefined,
       }))
 
     const response: SuccessResponse = {

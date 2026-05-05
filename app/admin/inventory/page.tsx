@@ -1,12 +1,15 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { supabase } from '@/lib/supabaseClient'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, Plus, Filter, Download } from "lucide-react"
+import { Search, Plus, Filter } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import InventoryTable from '@/components/inventorytable'
 import InventoryModal from '@/components/inventory-modal'
+import { useSidebarBadge } from '@/components/sidebar-badges'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 const ACCENT = "#00c065"
 
@@ -14,52 +17,80 @@ export default function AdminInventory() {
   const [activeTab, setActiveTab] = useState<"materials" | "equipment">("materials")
   const [materials, setMaterials] = useState<any[]>([])
   const [equipment, setEquipment] = useState<any[]>([])
-  
+
   const [tags, setTags] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
-  
+  const [locations, setLocations] = useState<any[]>([])
+
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
-  
+
   const [locationFilter, setLocationFilter] = useState<string>("All")
+  const [tagFilter, setTagFilter] = useState<string>("All")
+  const [supplierFilter, setSupplierFilter] = useState<string>("All")
+  const [statusFilter, setStatusFilter] = useState<string>("All")
+  const [alertFilter, setAlertFilter] = useState<string>("All")
+  const [showArchived, setShowArchived] = useState(false)
+
   const [modalConfig, setModalConfig] = useState<{isOpen: boolean, mode: 'add'|'edit'|'view', item: any}>({isOpen: false, mode: 'view', item: null})
+
+  // Quick Add Deficit State
+  const [quickAddModal, setQuickAddModal] = useState<{isOpen: boolean, item: any, amount: number}>({isOpen: false, item: null, amount: 0})
 
   const fetchInventory = async () => {
     setIsLoading(true)
-    const [matRes, eqRes, tagRes, supRes] = await Promise.all([
-      supabase.from('materials').select('*, tag(tag_name, color), supplier(supplier_name, color)').order('name'),
-      supabase.from('equipment').select('*, tag(tag_name, color), supplier(supplier_name, color)').order('name'),
+
+    const [tagRes, supRes, locRes] = await Promise.all([
       supabase.from('tag').select('*').order('tag_name'),
-      supabase.from('supplier').select('*').order('supplier_name')
+      supabase.from('supplier').select('*').order('supplier_name'),
+      supabase.from('location').select('*').order('name')
     ])
-    
-    if (matRes.data) setMaterials(matRes.data)
-    if (eqRes.data) setEquipment(eqRes.data)
+
     if (tagRes.data) setTags(tagRes.data)
     if (supRes.data) setSuppliers(supRes.data)
-      
+    if (locRes.data) setLocations(locRes.data)
+
+    const [matRes, eqRes] = await Promise.all([
+      supabase.from('materials').select('*, tag(tag_name, color), supplier(supplier_name, color), location(name)'),
+      supabase.from('equipment').select('*, tag(tag_name, color), supplier(supplier_name, color), location(name)')
+    ])
+
+    if (matRes.data) {
+      // Sort materials: Deficits on top, then alphabetical by name
+      const sortedMats = matRes.data.sort((a, b) => {
+        const aDeficit = a.needed_stock || 0;
+        const bDeficit = b.needed_stock || 0;
+        if (bDeficit !== aDeficit) return bDeficit - aDeficit;
+        return a.name.localeCompare(b.name);
+      });
+      setMaterials(sortedMats)
+    }
+    if (eqRes.data) {
+      const sortedEq = eqRes.data.sort((a, b) => a.name.localeCompare(b.name));
+      setEquipment(sortedEq)
+    }
+
     setIsLoading(false)
   }
 
   useEffect(() => { fetchInventory() }, [])
 
-  const handleExport = () => {
-    const dataToExport = activeTab === "materials" ? materials : equipment
-    if (dataToExport.length === 0) return
+  // Surface a badge on the sidebar's "Inventory" item whenever any non-archived
+  // material is below its reorder point or has needed_stock requested. The
+  // count reflects the number of materials, not the magnitude of the deficit.
+  const inventoryAttentionCount = useMemo(() => {
+    return materials.reduce((count, item) => {
+      if (item?.status === "Archived") return count
+      const stock = Number(item?.current_in_stock ?? 0)
+      const reorderPoint = Number(item?.reorder_point ?? 0)
+      const needed = Number(item?.needed_stock ?? 0)
+      const belowReorder = reorderPoint > 0 && stock < reorderPoint
+      const hasNeeded = needed > 0
+      return belowReorder || hasNeeded ? count + 1 : count
+    }, 0)
+  }, [materials])
 
-    const headers = Object.keys(dataToExport[0]).filter(k => typeof dataToExport[0][k] !== 'object')
-    const csvRows = [
-      headers.join(','), 
-      ...dataToExport.map(row => headers.map(header => `"${row[header] || ''}"`).join(',')) 
-    ]
-    
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `PaintPro_${activeTab}_export.csv`
-    a.click()
-  }
+  useSidebarBadge("inventory", inventoryAttentionCount, "danger")
 
   const handleSaveItem = async (data: any, mode: 'add' | 'edit', type: 'materials' | 'equipment') => {
     const table = type === 'materials' ? 'materials' : 'equipment'
@@ -68,57 +99,13 @@ export default function AdminInventory() {
     const payload = { ...data }
     delete payload.tag
     delete payload.supplier
-    
-    const submittedTagName = payload.tag_name; delete payload.tag_name;
-    const submittedTagColor = payload.tag_color; delete payload.tag_color;
-    const submittedSupplierName = payload.supplier_name; delete payload.supplier_name;
-    const submittedSupplierColor = payload.supplier_color; delete payload.supplier_color;
+    delete payload.location
+
+    if (payload.tag_id === "") payload.tag_id = null;
+    if (payload.supplier_id === "") payload.supplier_id = null;
+    if (payload.location_id === "") payload.location_id = null;
 
     try {
-      if (submittedTagName && submittedTagName.trim() !== '') {
-        const existingTag = tags.find(t => t.tag_name.toLowerCase() === submittedTagName.trim().toLowerCase())
-        if (existingTag) {
-          payload.tag_id = existingTag.tag_id
-          if (existingTag.color !== submittedTagColor) {
-            await supabase.from('tag').update({ color: submittedTagColor }).eq('tag_id', existingTag.tag_id)
-          }
-        } else {
-          const { data: newTag } = await supabase.from('tag').insert([{ tag_name: submittedTagName.trim(), color: submittedTagColor }]).select().single()
-          if (newTag) payload.tag_id = newTag.tag_id
-        }
-      } else {
-        payload.tag_id = null
-      }
-
-      if (submittedSupplierName && submittedSupplierName.trim() !== '') {
-        const existingSup = suppliers.find(s => s.supplier_name.toLowerCase() === submittedSupplierName.trim().toLowerCase())
-        if (existingSup) {
-          payload.supplier_id = existingSup.supplier_id
-          if (existingSup.color !== submittedSupplierColor) {
-            await supabase.from('supplier').update({ color: submittedSupplierColor }).eq('supplier_id', existingSup.supplier_id)
-          }
-        } else {
-          const { data: newSup } = await supabase.from('supplier').insert([{ supplier_name: submittedSupplierName.trim(), color: submittedSupplierColor }]).select().single()
-          if (newSup) payload.supplier_id = newSup.supplier_id
-        }
-      } else {
-        payload.supplier_id = null
-      }
-
-      // STRICT CLEANUP
-      if (type === 'materials') {
-        delete payload.condition
-        delete payload.status
-        delete payload.equipment_id 
-      } else if (type === 'equipment') {
-        delete payload.current_in_stock
-        delete payload.reorder_point
-        delete payload.unit
-        delete payload.date_purchased
-        delete payload.notes
-        delete payload.material_id 
-      }
-
       if (mode === 'add') {
         const { error } = await supabase.from(table).insert([payload])
         if (error) throw error
@@ -127,7 +114,6 @@ export default function AdminInventory() {
         const { error } = await supabase.from(table).update(payload).eq(idField, payload[idField])
         if (error) throw error
       }
-      
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
     } catch (error) {
@@ -136,42 +122,96 @@ export default function AdminInventory() {
     }
   }
 
-  const handleDeleteItem = async (id: string, type: 'materials' | 'equipment') => {
-    const table = type === 'materials' ? 'materials' : 'equipment'
-    const idField = type === 'materials' ? 'material_id' : 'equipment_id'
-    
+  const handleQuickAddResolve = async () => {
+    if (!quickAddModal.item || quickAddModal.amount <= 0) return;
+
+    // Add the input amount to the current stock.
+    // The DB trigger we added will automatically reduce needed_stock based on this delta.
+    const newStock = (quickAddModal.item.current_in_stock || 0) + Number(quickAddModal.amount);
+
     try {
-      const { error } = await supabase.from(table).delete().eq(idField, id)
-      if (error) throw error
-      
-      setModalConfig({ isOpen: false, mode: 'view', item: null })
-      fetchInventory()
+      const { error } = await supabase
+        .from('materials')
+        .update({ current_in_stock: newStock, updated_at: new Date().toISOString() })
+        .eq('material_id', quickAddModal.item.material_id)
+
+      if (error) throw error;
+
+      setQuickAddModal({ isOpen: false, item: null, amount: 0 });
+      fetchInventory();
     } catch (error) {
-      console.error(`Error deleting from ${table}:`, error)
-      alert("Failed to delete item.")
+      console.error("Error resolving deficit:", error)
+      alert("Failed to update stock.");
     }
   }
 
-  const applyFilters = (items: any[]) => {
+  const handleArchiveItem = async (id: string, type: 'materials' | 'equipment', isArchiving: boolean) => {
+    const table = type === 'materials' ? 'materials' : 'equipment'
+    const idField = type === 'materials' ? 'material_id' : 'equipment_id'
+
+    const restoreStatus = type === 'materials' ? 'Active' : 'Available'
+    const newStatus = isArchiving ? 'Archived' : restoreStatus
+
+    try {
+      const { error } = await supabase.from(table).update({ status: newStatus }).eq(idField, id)
+      if (error) throw error
+
+      setModalConfig({ isOpen: false, mode: 'view', item: null })
+      fetchInventory()
+    } catch (error) {
+      console.error(`Error updating status in ${table}:`, error)
+      alert(`Failed to ${isArchiving ? 'archive' : 'restore'} item.`)
+    }
+  }
+
+  const applyFilters = (items: any[], type: "materials" | "equipment") => {
     return items.filter(item => {
-      const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesLocation = locationFilter === "All" || item.location === locationFilter
-      return matchesSearch && matchesLocation
+      const matchesSearch = item.name?.toLowerCase().includes(searchQuery.toLowerCase())
+
+      const isItemArchived = item.status === 'Archived'
+      if (!showArchived && isItemArchived) return false
+
+      const matchesLocation = locationFilter === "All" || item.location_id === locationFilter
+      const matchesTag = tagFilter === "All" || item.tag_id === tagFilter
+      const matchesSupplier = supplierFilter === "All" || item.supplier_id === supplierFilter
+      const matchesStatus = statusFilter === "All" || item.status === statusFilter
+
+      let matchesAlert = true
+      if (type === "materials" && alertFilter !== "All") {
+        const stock = item.current_in_stock ?? 0
+        const reorderPoint = item.reorder_point ?? 0
+        const neededStock = item.needed_stock ?? 0
+
+        if (alertFilter === "Deficit") {
+           matchesAlert = neededStock > 0;
+        } else if (alertFilter === "Reaching") {
+           matchesAlert = stock <= (reorderPoint + 1) && stock >= reorderPoint && neededStock === 0
+        } else if (alertFilter === "Below") {
+           matchesAlert = stock < reorderPoint && neededStock === 0
+        }
+      }
+
+      return matchesSearch && matchesLocation && matchesTag && matchesSupplier && matchesStatus && matchesAlert
     })
   }
 
-  const uniqueLocations = Array.from(new Set([...materials, ...equipment].map(item => item.location).filter(Boolean)))
-  const uniqueConditions = Array.from(new Set(equipment.map(item => item.condition).filter(Boolean)))
+  const hasActiveFilters = locationFilter !== "All" || tagFilter !== "All" || supplierFilter !== "All" || statusFilter !== "All" || alertFilter !== "All";
 
   return (
     <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden flex flex-col">
       <div className="flex items-center justify-between shrink-0">
         <h1 className="text-2xl font-semibold text-gray-900">Inventory Management</h1>
-        <div className="flex gap-3">
-          <button onClick={handleExport} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors">
-            <Download className="h-4 w-4" /> Export CSV
-          </button>
-          <button 
+        <div className="flex gap-4 items-center">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="rounded border-gray-300 text-[#00c065] focus:ring-[#00c065] w-4 h-4"
+            />
+            Show Archived
+          </label>
+          <button
             onClick={() => setModalConfig({ isOpen: true, mode: 'add', item: null })}
             className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90"
             style={{ backgroundColor: ACCENT }}
@@ -182,7 +222,12 @@ export default function AdminInventory() {
       </div>
 
       <div className="mt-6 flex-1 flex flex-col min-h-0 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-        <Tabs defaultValue="materials" onValueChange={(val) => setActiveTab(val as 'materials' | 'equipment')} className="flex-1 flex flex-col h-full">
+        <Tabs defaultValue="materials" onValueChange={(val) => {
+          setActiveTab(val as 'materials' | 'equipment')
+          setSearchQuery("")
+          setStatusFilter("All")
+          setAlertFilter("All")
+        }} className="flex-1 flex flex-col h-full">
           <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0">
             <TabsList className="bg-gray-100">
               <TabsTrigger value="materials" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Materials</TabsTrigger>
@@ -201,22 +246,73 @@ export default function AdminInventory() {
                 />
               </div>
 
-              {/* Updated Filter Button Style */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors outline-none focus:border-[#00c065] focus:ring-1 focus:ring-[#00c065]">
-                    <Filter className="h-4 w-4" /> {locationFilter === "All" ? "Filter Location" : locationFilter}
+                  <button className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors outline-none focus:outline-none focus:ring-0">
+                    <Filter className="h-4 w-4" /> Filters
+                    {hasActiveFilters && (
+                      <span className="flex h-2 w-2 rounded-full bg-[#00c065]"></span>
+                    )}
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuCheckboxItem checked={locationFilter === "All"} onCheckedChange={() => setLocationFilter("All")}>
-                    All Locations
-                  </DropdownMenuCheckboxItem>
-                  {uniqueLocations.map(loc => (
-                    <DropdownMenuCheckboxItem key={loc} checked={locationFilter === loc} onCheckedChange={() => setLocationFilter(loc)}>
-                      {loc}
+                <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
+
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Status</div>
+                  <DropdownMenuCheckboxItem checked={statusFilter === "All"} onCheckedChange={() => setStatusFilter("All")}>All Statuses</DropdownMenuCheckboxItem>
+                  {activeTab === "materials" ? (
+                    <>
+                      <DropdownMenuCheckboxItem checked={statusFilter === "Active"} onCheckedChange={() => setStatusFilter("Active")}>Active</DropdownMenuCheckboxItem>
+                      {/* Removed the Needs Reorder Status option here */}
+                    </>
+                  ) : (
+                    <>
+                      <DropdownMenuCheckboxItem checked={statusFilter === "Available"} onCheckedChange={() => setStatusFilter("Available")}>Available</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={statusFilter === "In Use"} onCheckedChange={() => setStatusFilter("In Use")}>In Use</DropdownMenuCheckboxItem>
+                    </>
+                  )}
+                  {showArchived && <DropdownMenuCheckboxItem checked={statusFilter === "Archived"} onCheckedChange={() => setStatusFilter("Archived")}>Archived</DropdownMenuCheckboxItem>}
+
+                  <div className="h-px bg-gray-100 my-1"></div>
+
+                  {activeTab === "materials" && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Inventory Alerts</div>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "All"} onCheckedChange={() => setAlertFilter("All")}>All Items</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "Deficit"} onCheckedChange={() => setAlertFilter("Deficit")}>Project Deficit (Needed)</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "Reaching"} onCheckedChange={() => setAlertFilter("Reaching")}>Reaching Re-Order Point</DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem checked={alertFilter === "Below"} onCheckedChange={() => setAlertFilter("Below")}>Below Re-Order Point</DropdownMenuCheckboxItem>
+                      <div className="h-px bg-gray-100 my-1"></div>
+                    </>
+                  )}
+
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Location</div>
+                  <DropdownMenuCheckboxItem checked={locationFilter === "All"} onCheckedChange={() => setLocationFilter("All")}>All Locations</DropdownMenuCheckboxItem>
+                  {locations.map(loc => (
+                    <DropdownMenuCheckboxItem key={loc.location_id} checked={locationFilter === loc.location_id} onCheckedChange={() => setLocationFilter(loc.location_id)}>
+                      {loc.name}
                     </DropdownMenuCheckboxItem>
                   ))}
+
+                  <div className="h-px bg-gray-100 my-1"></div>
+
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Tag</div>
+                  <DropdownMenuCheckboxItem checked={tagFilter === "All"} onCheckedChange={() => setTagFilter("All")}>All Tags</DropdownMenuCheckboxItem>
+                  {tags.map(t => (
+                    <DropdownMenuCheckboxItem key={t.tag_id} checked={tagFilter === t.tag_id} onCheckedChange={() => setTagFilter(t.tag_id)}>
+                      {t.tag_name}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+
+                  <div className="h-px bg-gray-100 my-1"></div>
+
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Supplier</div>
+                  <DropdownMenuCheckboxItem checked={supplierFilter === "All"} onCheckedChange={() => setSupplierFilter("All")}>All Suppliers</DropdownMenuCheckboxItem>
+                  {suppliers.map(s => (
+                    <DropdownMenuCheckboxItem key={s.supplier_id} checked={supplierFilter === s.supplier_id} onCheckedChange={() => setSupplierFilter(s.supplier_id)}>
+                      {s.supplier_name}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -224,28 +320,77 @@ export default function AdminInventory() {
 
           <div className="flex-1 overflow-hidden p-4 bg-gray-50/50">
             <TabsContent value="materials" className="h-full m-0 data-[state=active]:flex flex-col">
-              <InventoryTable data={applyFilters(materials)} type="materials" isLoading={isLoading} onRowClick={(item) => setModalConfig({ isOpen: true, mode: 'view', item })} />
+              <InventoryTable
+                data={applyFilters(materials, "materials")}
+                type="materials"
+                isLoading={isLoading}
+                onRowClick={(item: any) => setModalConfig({ isOpen: true, mode: 'view', item })}
+                onQuickAdd={(item: any) => setQuickAddModal({ isOpen: true, item: item, amount: item.needed_stock || 0 })}
+              />
             </TabsContent>
             <TabsContent value="equipment" className="h-full m-0 data-[state=active]:flex flex-col">
-              <InventoryTable data={applyFilters(equipment)} type="equipment" isLoading={isLoading} onRowClick={(item) => setModalConfig({ isOpen: true, mode: 'view', item })} />
+              <InventoryTable
+                data={applyFilters(equipment, "equipment")}
+                type="equipment"
+                isLoading={isLoading}
+                onRowClick={(item: any) => setModalConfig({ isOpen: true, mode: 'view', item })}
+              />
             </TabsContent>
           </div>
         </Tabs>
       </div>
 
-      <InventoryModal
-        isOpen={modalConfig.isOpen}
-        onClose={() => setModalConfig({ isOpen: false, mode: 'view', item: null })}
-        type={activeTab}
-        mode={modalConfig.mode}
-        item={modalConfig.item}
-        onSave={handleSaveItem}
-        onDelete={handleDeleteItem}
-        tags={tags}
-        suppliers={suppliers}
-        uniqueLocations={uniqueLocations}
-        uniqueConditions={uniqueConditions}
-      />
+      {modalConfig.isOpen && (
+        <InventoryModal
+          isOpen={modalConfig.isOpen}
+          onClose={() => setModalConfig({ isOpen: false, mode: 'view', item: null })}
+          type={activeTab}
+          mode={modalConfig.mode}
+          item={modalConfig.item}
+          onSave={handleSaveItem}
+          onArchive={(id, type, isArchiving) => handleArchiveItem(id, type, isArchiving)}
+          tags={tags}
+          suppliers={suppliers}
+          locations={locations}
+          refreshData={fetchInventory}
+        />
+      )}
+
+      {/* Quick Add Shortcut Modal */}
+      <Dialog open={quickAddModal.isOpen} onOpenChange={() => setQuickAddModal({ isOpen: false, item: null, amount: 0 })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Resolve Material Deficit</DialogTitle>
+            <DialogDescription>
+              Add newly purchased stock to clear the project deficit warning.
+            </DialogDescription>
+          </DialogHeader>
+          {quickAddModal.item && (
+            <div className="space-y-4 py-4">
+              <div className="p-3 bg-red-50 text-red-800 rounded-md border border-red-100 text-sm">
+                <strong>{quickAddModal.item.name}</strong> currently has a deficit of <strong>{quickAddModal.item.needed_stock} units</strong> required for upcoming projects.
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Units to Add to Stock</label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={quickAddModal.amount || ''}
+                    onChange={(e) => setQuickAddModal(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                  />
+                  <span className="text-sm text-gray-500 whitespace-nowrap">{quickAddModal.item.unit}</span>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setQuickAddModal({ isOpen: false, item: null, amount: 0 })} className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-700">Cancel</button>
+                <button onClick={handleQuickAddResolve} className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#00c065] text-white hover:bg-[#00a054]">Restock & Resolve</button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }

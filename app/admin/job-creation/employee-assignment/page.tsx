@@ -568,25 +568,25 @@ export default function EmployeeAssignmentPage() {
   }, [services]);
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
-        <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+    <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+      <div className="flex h-full flex-col gap-3 overflow-hidden px-6 pt-5 pb-4">
+        <div className="flex items-center gap-2 text-[18px] font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
           <span>Project</span>
           <ChevronRight
-            className="h-5 w-5 text-gray-300 shrink-0"
+            className="h-5 w-5 text-slate-300 dark:text-slate-500 shrink-0"
             aria-hidden
           />
           <span>Employee Assignment</span>
         </div>
 
         <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
             <div
               className="h-1 w-full shrink-0"
               style={{ backgroundColor: ACCENT }}
             />
 
-            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+            <div className="shrink-0 border-b border-slate-200 dark:border-slate-700 px-5 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -595,31 +595,31 @@ export default function EmployeeAssignmentPage() {
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                       Employee Assignment
                     </p>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600">
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                     Review assigned staff under each sub task before moving to
                     overview.
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                   Staff Review
                 </div>
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
-              <div className="h-full overflow-y-auto pr-2">
+              <div className="green-scrollbar h-full overflow-y-auto pr-2">
                 <div className="space-y-2.5">
                   {loading ? (
-                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                       Loading employee assignment...
                     </div>
                   ) : services.length === 0 ? (
-                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                       No employee assignments found for this project.
                     </div>
                   ) : (
@@ -629,7 +629,7 @@ export default function EmployeeAssignmentPage() {
                       return (
                         <div
                           key={group.id}
-                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                          className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                           <div
                             role="button"
                             tabIndex={0}
@@ -641,7 +641,7 @@ export default function EmployeeAssignmentPage() {
                               }
                             }}
                             className={`w-full cursor-pointer px-4 py-3 text-left transition ${
-                              isOpen ? "bg-emerald-50/40" : "bg-white"
+                              isOpen ? "bg-emerald-50/40 dark:bg-emerald-500/10" : "bg-white dark:bg-slate-900"
                             }`}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex min-w-0 items-center gap-3">
@@ -652,10 +652,10 @@ export default function EmployeeAssignmentPage() {
                                   style={{ backgroundColor: ACCENT }}
                                 />
                                 <div className="min-w-0">
-                                  <div className="text-[15px] font-semibold text-gray-900">
+                                  <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100">
                                     {group.title}
                                   </div>
-                                  <div className="mt-0.5 text-[12px] text-gray-500">
+                                  <div className="mt-0.5 text-[12px] text-slate-500 dark:text-slate-400">
                                     {group.children.length} sub task
                                     {group.children.length === 1 ? "" : "s"}
                                   </div>
@@ -663,7 +663,7 @@ export default function EmployeeAssignmentPage() {
                               </div>
 
                               <ChevronDown
-                                className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${
+                                className={`h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500 transition-transform ${
                                   isOpen ? "rotate-180" : ""
                                 }`}
                               />
@@ -673,20 +673,20 @@ export default function EmployeeAssignmentPage() {
                           {isOpen && (
                             <div className="px-5 pb-4">
                               {group.children.length === 0 ? (
-                                <div className="rounded-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-500">
+                                <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-[13px] text-slate-500 dark:text-slate-400">
                                   No subtasks found for this main task.
                                 </div>
                               ) : (
-                                <div className="divide-y divide-gray-200">
+                                <div className="divide-y divide-slate-200 dark:divide-slate-800">
                                   {group.children.map((step) => (
                                     <div key={step.id} className="py-2.5">
                                       <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[minmax(200px,260px)_minmax(0,1fr)_auto] lg:items-start">
                                         <div className="min-w-0 pt-1">
                                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                            <div className="truncate text-[13px] font-semibold text-gray-900">
+                                            <div className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                                               {step.title}
                                             </div>
-                                            <span className="text-[11px] text-gray-500">
+                                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
                                               {step.employees.length} assigned
                                               employee
                                               {step.employees.length === 1
@@ -698,7 +698,7 @@ export default function EmployeeAssignmentPage() {
 
                                         <div className="min-w-0">
                                           {step.employees.length === 0 ? (
-                                            <div className="inline-flex min-h-9 items-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 text-[12px] text-gray-500">
+                                            <div className="inline-flex min-h-9 items-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 text-[12px] text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400">
                                               No employee assigned yet.
                                             </div>
                                           ) : (
@@ -706,10 +706,10 @@ export default function EmployeeAssignmentPage() {
                                               {step.employees.map((employee) => (
                                                 <div
                                                   key={`${step.id}-${employee.id}`}
-                                                  className="inline-flex h-9 max-w-full min-w-0 items-center gap-2 rounded-md border border-gray-200 bg-white px-3">
-                                                  <UserRound className="h-4 w-4 shrink-0 text-gray-400" />
+                                                  className="inline-flex h-9 max-w-full min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-900">
+                                                  <UserRound className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
                                                   <span
-                                                    className="min-w-0 truncate text-[12px] font-medium text-gray-900"
+                                                    className="min-w-0 truncate text-[12px] font-medium text-slate-900 dark:text-slate-100"
                                                     title={employee.name}>
                                                     {employee.name}
                                                   </span>
@@ -725,7 +725,7 @@ export default function EmployeeAssignmentPage() {
                                             onClick={() =>
                                               openEmployeePicker(step)
                                             }
-                                            className="inline-flex h-8 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                            className="inline-flex h-8 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                             Change Employees
                                           </button>
                                         </div>
@@ -741,31 +741,29 @@ export default function EmployeeAssignmentPage() {
                     })
                   )}
                 </div>
-
-                <div className="h-6" />
               </div>
             </div>
           </section>
 
           <aside className="h-full min-h-0 flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
               <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">
+                <div className="text-[16px] font-semibold text-slate-900 dark:text-slate-100">
                   {cardTitle}
                 </div>
-                <div className="mt-1 text-[12px] text-gray-500">
+                <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
                   {cardSubtitle}
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 px-4 py-4">
-                <div className="flex items-center gap-2 text-[12px] text-gray-600">
-                  <Users className="h-4 w-4 text-gray-400" />
+              <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-4">
+                <div className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
+                  <Users className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                   {totalAssignedEmployees} assigned staff record
                   {totalAssignedEmployees === 1 ? "" : "s"}
                 </div>
 
-                <div className="mt-2 text-[12px] text-gray-500">
+                <div className="mt-2 text-[12px] text-slate-500 dark:text-slate-400">
                   {unassignedSubTasks} sub task
                   {unassignedSubTasks === 1 ? "" : "s"} without assigned staff
                 </div>
@@ -778,12 +776,12 @@ export default function EmployeeAssignmentPage() {
           </aside>
         </div>
 
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleGoBack}
             disabled={isNavigating !== null}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100">
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
             {isNavigating === "back" ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -827,6 +825,87 @@ export default function EmployeeAssignmentPage() {
         onGenerate={handleGenerateEmployeesForActiveSubTask}
         onSave={handleSaveEmployees}
       />
+
+      <style jsx global>{`
+        .green-scrollbar::-webkit-scrollbar {
+          width: 10px;
+        }
+        .green-scrollbar::-webkit-scrollbar-track {
+          background: #eaf7e4;
+          border-radius: 999px;
+        }
+        .dark .green-scrollbar::-webkit-scrollbar-track {
+          background: #0f172a;
+        }
+        .green-scrollbar::-webkit-scrollbar-thumb {
+          background: ${ACCENT};
+          border-radius: 999px;
+          border: 2px solid #eaf7e4;
+        }
+        .dark .green-scrollbar::-webkit-scrollbar-thumb {
+          border-color: #0f172a;
+        }
+        .green-scrollbar {
+          scrollbar-color: ${ACCENT} #eaf7e4;
+          scrollbar-width: thin;
+        }
+        .dark .green-scrollbar {
+          scrollbar-color: ${ACCENT} #0f172a;
+        }
+
+        .dark .fixed.inset-0 {
+          color: #e2e8f0;
+        }
+
+        .dark .fixed.inset-0 [class*="bg-white"] {
+          background-color: #0f172a !important;
+        }
+
+        .dark .fixed.inset-0 [class*="border-gray-200"],
+        .dark .fixed.inset-0 [class*="border-slate-200"] {
+          border-color: #334155 !important;
+        }
+
+        .dark .fixed.inset-0 [class*="text-gray-900"],
+        .dark .fixed.inset-0 [class*="text-slate-900"] {
+          color: #f8fafc !important;
+        }
+
+        .dark .fixed.inset-0 [class*="text-gray-700"],
+        .dark .fixed.inset-0 [class*="text-slate-700"] {
+          color: #e2e8f0 !important;
+        }
+
+        .dark .fixed.inset-0 [class*="text-gray-600"],
+        .dark .fixed.inset-0 [class*="text-gray-500"],
+        .dark .fixed.inset-0 [class*="text-slate-600"],
+        .dark .fixed.inset-0 [class*="text-slate-500"] {
+          color: #94a3b8 !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-white"],
+        .dark .fixed.inset-0 button[class*="border-gray-200"],
+        .dark .fixed.inset-0 button[class*="border-slate-200"] {
+          background-color: #0f172a !important;
+          border-color: #475569 !important;
+          color: #e2e8f0 !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-white"]:hover,
+        .dark .fixed.inset-0 button[class*="border-gray-200"]:hover,
+        .dark .fixed.inset-0 button[class*="border-slate-200"]:hover {
+          background-color: #1e293b !important;
+          color: #f8fafc !important;
+        }
+
+        .dark .fixed.inset-0 input,
+        .dark .fixed.inset-0 textarea,
+        .dark .fixed.inset-0 select {
+          background-color: #020617 !important;
+          border-color: #475569 !important;
+          color: #e2e8f0 !important;
+        }
+      `}</style>
     </div>
   );
 }

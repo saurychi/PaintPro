@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import CurrentJobCard, {
@@ -10,7 +9,6 @@ import CurrentJobCard, {
 import EmployeesCard from "../../components/dashboard/employeesCard";
 import JobProgressCard from "../../components/dashboard/jobProgressCard";
 import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
-import JobNumberCard from "@/components/jobNumberCard";
 import NotificationsCard from "@/components/dashboard/notificationsCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
@@ -62,66 +60,10 @@ type OverviewResponse = {
   details?: string;
 };
 
-const END_OF_WORK_STATUS_ORDER = [
-  "review_pending",
-  "invoice_pending",
-  "payment_pending",
-  "employee_management_pending",
-  "conclude_job_pending",
-] as const;
-
-const END_OF_WORK_STEP_CONFIG = [
-  {
-    id: "review-and-final-checks",
-    title: "Review and Final Checks",
-    pendingStatus: "review_pending",
-  },
-  {
-    id: "invoice-generation",
-    title: "Invoice Generation",
-    pendingStatus: "invoice_pending",
-  },
-  {
-    id: "receive-payment",
-    title: "Receive Payment",
-    pendingStatus: "payment_pending",
-  },
-  {
-    id: "employee-management",
-    title: "Employee Management",
-    pendingStatus: "employee_management_pending",
-  },
-  {
-    id: "conclude-job",
-    title: "Conclude Job",
-    pendingStatus: "conclude_job_pending",
-  },
-] as const;
-
-
 function normalizeStatus(value?: string | null) {
   return String(value || "")
     .trim()
     .toLowerCase();
-}
-
-function getEndOfWorkChildStatus(
-  projectStatus: string,
-  stepIndex: number,
-): StepVisualStatus {
-  const normalized = normalizeStatus(projectStatus);
-
-  if (normalized === "completed" || normalized === "cancelled") return "done";
-  if (normalized === "in_progress") return stepIndex === 0 ? "active" : "pending";
-
-  const activeIndex = END_OF_WORK_STATUS_ORDER.indexOf(
-    normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
-  );
-
-  if (activeIndex === -1) return "pending";
-  if (stepIndex < activeIndex) return "done";
-  if (stepIndex === activeIndex) return "active";
-  return "pending";
 }
 
 function asArray<T = unknown>(value: unknown): T[] {
@@ -286,6 +228,7 @@ function getStatusLabel(projectStatus: string) {
     cost_estimation_pending: "Cost Estimation Pending",
     overview_pending: "Overview Pending",
     quotation_pending: "Quotation Pending",
+    client_quotation_done: "Client Signed Quotation",
     ready_to_start: "Ready to Start",
     in_progress: "In Progress",
     review_pending: "Review Pending",
@@ -717,58 +660,10 @@ function buildProcessItems(args: {
     });
   }
 
-  const manageEndChildren: ProcessItem[] = END_OF_WORK_STEP_CONFIG.map(
-    (step, stepIndex) => {
-      const status = getEndOfWorkChildStatus(normalized, stepIndex);
-
-      return {
-        id: step.id,
-        title: step.title,
-        status,
-        startLabel: formatDateTime(projectEnd),
-        endLabel:
-          status === "done"
-            ? normalized === "cancelled" && step.id === "conclude-job"
-              ? "Cancelled"
-              : normalized === "completed" && step.id === "conclude-job"
-                ? "Completed"
-                : formatDateTime(projectEnd)
-            : status === "active"
-              ? "Working on it..."
-              : "-",
-      };
-    },
-  );
-
-  const manageEndStatus: StepVisualStatus = manageEndChildren.every(
-    (child) => child.status === "done",
-  )
-    ? "done"
-    : manageEndChildren.some((child) => child.status !== "pending")
-      ? "active"
-      : "pending";
-
-  items.push({
-    id: "manage-end-of-work",
-    title: "Manage End of Work",
-    status: manageEndStatus,
-    startLabel: formatDateTime(projectEnd),
-    endLabel:
-      normalized === "completed"
-        ? formatDateTime(projectEnd)
-        : normalized === "cancelled"
-          ? "Cancelled"
-          : manageEndStatus === "active"
-            ? "Working on it..."
-            : "-",
-    children: manageEndChildren,
-  });
-
   return items;
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const { isLoaded: isProjectTimeReferenceReady, referenceIso } =
     useProjectTimeReference();
 
@@ -1065,34 +960,15 @@ export default function DashboardPage() {
     setSelectedProject(nextProject);
   }
 
-  /**
-   * Dashboard layout percentages.
-   * Change only these values when adjusting the top/bottom dashboard height.
-   */
-  const dashboardTopHeight = "12fr";
-  const dashboardBottomHeight = "88fr";
-
-  /**
-   * Bottom section layout percentages.
-   * Change these if you want Progress / Right Panel to be wider or smaller.
-   */
-  const progressColumnWidth = "7fr";
-  const sideColumnWidth = "3fr";
-
   return (
-    <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
-      <h1 className="shrink-0 text-2xl font-semibold leading-8 text-gray-900">
+    <div className="flex min-h-screen flex-col bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 lg:grid lg:h-screen lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden lg:px-[1.4%] lg:py-[1.2%]">
+      <h1 className="shrink-0 text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
         Dashboard
       </h1>
 
-      <div
-        className="mt-[1.2%] grid min-h-0 overflow-hidden"
-        style={{
-          gridTemplateRows: `${dashboardTopHeight} minmax(0, ${dashboardBottomHeight})`,
-          rowGap: "2.2%",
-        }}>
+      <div className="mt-3 flex flex-col gap-3 sm:mt-4 sm:gap-4 lg:mt-[1.2%] lg:grid lg:min-h-0 lg:gap-0 lg:overflow-hidden lg:grid-rows-[12fr_minmax(0,88fr)] lg:gap-y-[2.2%]">
         {/* Top section */}
-        <section className="min-h-0 overflow-hidden">
+        <section className="lg:min-h-0 lg:overflow-hidden">
           <CurrentJobCard
             statusLabel={getStatusLabel(selectedStatus)}
             jobNo={
@@ -1106,18 +982,12 @@ export default function DashboardPage() {
             selectedProjectId={selectedProjectId}
             onDateChange={setSelectedDashboardDate}
             onProjectChange={handleDashboardProjectChange}
-            onCreateJob={() => router.push("/admin/job-creation/basic-details")}
           />
         </section>
 
         {/* Bottom section */}
-        <section
-          className="grid min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-none"
-          style={{
-            gridTemplateColumns: `${progressColumnWidth} ${sideColumnWidth}`,
-            columnGap: "1.2%",
-          }}>
-          <div className="min-h-0 overflow-hidden">
+        <section className="flex flex-col gap-3 sm:gap-4 lg:grid lg:min-h-0 lg:gap-0 lg:overflow-hidden lg:grid-cols-[7fr_3fr] lg:gap-x-[1.2%]">
+          <div className="h-[70vh] sm:h-[75vh] lg:h-auto lg:min-h-0 lg:overflow-hidden">
             <JobProgressCard
               selectedProject={selectedProject}
               projectId={selectedProjectId}
@@ -1129,22 +999,23 @@ export default function DashboardPage() {
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
               onFinishSubtask={handleFinishSubtask}
+              onRefresh={() => setRefreshKey((k) => k + 1)}
               currentUserId={currentUserId}
               employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
             />
           </div>
 
-          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-[2%] overflow-hidden">
-            <div className="min-h-0 overflow-hidden">
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-none lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] lg:gap-[2%] lg:overflow-hidden">
+            <div className="h-72 sm:h-80 lg:h-auto lg:min-h-0 lg:overflow-hidden">
               <EmployeesCard />
             </div>
 
-            <div className="min-h-0 overflow-hidden">
+            <div className="h-72 sm:h-80 lg:h-auto lg:min-h-0 lg:overflow-hidden">
               <NotificationsCard notifications={[]} />
             </div>
 
-            <div className="min-h-0 overflow-hidden">
+            <div className="h-80 md:col-span-2 sm:h-96 lg:h-auto lg:col-span-1 lg:min-h-0 lg:overflow-hidden">
               <DashboardInsightCard
                 processItems={processItems}
                 loadingDetails={loadingProjects || loadingDetails}

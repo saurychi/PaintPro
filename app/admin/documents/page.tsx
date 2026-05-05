@@ -22,6 +22,7 @@ import {
  Info,
  Plus,
  FileText,
+ ChevronDown,
 } from "lucide-react"
 
 
@@ -393,7 +394,6 @@ export default function AdminDocuments() {
 
  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
  const [filtersOpen, setFiltersOpen] = useState(false)
- const [sortOpen, setSortOpen] = useState(false)
  const [newOpen, setNewOpen] = useState(false)
 
 
@@ -464,14 +464,7 @@ export default function AdminDocuments() {
  }, [activeFolderId, folders])
 
 
- const sortLabel =
-   sortKey === "date_desc"
-     ? "Newest"
-     : sortKey === "date_asc"
-       ? "Oldest"
-       : sortKey === "name_asc"
-         ? "Name A-Z"
-         : "Name Z-A"
+
 
 
  const filterItems: { id: DocType; label: string; checked: boolean; setChecked: (v: boolean) => void }[] = [
@@ -480,6 +473,22 @@ export default function AdminDocuments() {
    { id: "RCP", label: "Receipts (RCP)", checked: filterRCP, setChecked: setFilterRCP },
    { id: "QTE", label: "Quotes (QTE)", checked: filterQTE, setChecked: setFilterQTE },
  ]
+
+
+ const activeFilterCount =
+   (tab !== "active" ? 1 : 0) +
+   (sortKey !== "date_desc" ? 1 : 0) +
+   filterItems.filter((item) => !item.checked).length
+
+ function clearDocumentFilters() {
+   setTab("active")
+   setSortKey("date_desc")
+   setFilterINV(true)
+   setFilterPAY(true)
+   setFilterRCP(true)
+   setFilterQTE(true)
+   setSelectedIds({})
+ }
 
 
  function pushToast(message: string, tone: Toast["tone"] = "default") {
@@ -631,7 +640,6 @@ export default function AdminDocuments() {
  function closeAll() {
    setOpenMenuKey(null)
    setFiltersOpen(false)
-   setSortOpen(false)
    setNewOpen(false)
  }
 
@@ -700,8 +708,52 @@ export default function AdminDocuments() {
    setViewOpen(true)
    setOpenMenuKey(null)
  }
+
+ function dataUrlToBlob(dataUrl: string) {
+   const [header, base64 = ""] = dataUrl.split(",")
+   const mimeType = header.match(/^data:(.+);base64$/)?.[1] || "application/octet-stream"
+   const binary = window.atob(base64)
+   const bytes = new Uint8Array(binary.length)
+
+   for (let i = 0; i < binary.length; i += 1) {
+     bytes[i] = binary.charCodeAt(i)
+   }
+
+   return new Blob([bytes], { type: mimeType })
+ }
+
+ function getPdfPreviewSrc(file: FileItem | null) {
+   if (!file?.content) return ""
+
+   if (file.content.startsWith("data:application/pdf;base64,")) {
+     return file.content
+   }
+
+   return `data:application/pdf;base64,${file.content}`
+ }
+
  async function actionDownloadFile(file: FileItem) {
    try {
+     if (file.contentType === "application/pdf") {
+       const safeName = file.name.replace(/[^\w\- ]+/g, "").trim() || "document"
+       const blob = dataUrlToBlob(getPdfPreviewSrc(file))
+       const url = window.URL.createObjectURL(blob)
+       const anchor = document.createElement("a")
+
+       anchor.href = url
+       anchor.download = `${safeName}.pdf`
+
+       document.body.appendChild(anchor)
+       anchor.click()
+       anchor.remove()
+
+       window.URL.revokeObjectURL(url)
+
+       pushToast("Exported PDF.", "success")
+       setOpenMenuKey(null)
+       return
+     }
+
      if (file.contentType === "text/html") {
        const response = await fetch(
          `/api/documents/export-pdf?documentId=${encodeURIComponent(file.id)}`
@@ -1138,7 +1190,7 @@ export default function AdminDocuments() {
 
  return (
    <div
-     className="min-h-full bg-[#f7f8fa] px-4 py-4 text-gray-900 dark:bg-slate-700 dark:text-slate-100 sm:px-6"
+     className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f7f8fa] px-4 pb-0 pt-4 text-gray-900 dark:bg-slate-700 dark:text-slate-100 sm:px-6"
      onClick={closeAll}
    >
      <ToastStack toasts={toasts} />
@@ -1156,23 +1208,26 @@ export default function AdminDocuments() {
      </div>
 
 
-     <div onClick={(e) => e.stopPropagation()}>
+     <div className="flex min-h-0 flex-1 flex-col" onClick={(e) => e.stopPropagation()}>
        {activeFolder && (
-         <div className="mb-3 flex flex-wrap items-center gap-2">
+         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold">
            <button
-             className="bg-transparent p-0 text-sm font-semibold text-[#00a054] hover:underline dark:text-emerald-300"
+             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[#00a054] transition-colors hover:bg-[#00c065]/10 dark:text-emerald-300 dark:hover:bg-[#00c065]/15"
              onClick={goBackToRoot}
              type="button"
+             title="Return to folders"
            >
+             <ChevronLeft className="h-4 w-4" />
              Folders
            </button>
-           <span className="text-gray-400 dark:text-slate-500">›</span>
-           <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">{activeFolder.name}</span>
-
-
-           <button className={cn(btnBase, "ml-1")} onClick={goBackToRoot} type="button">
-             <ChevronLeft className="h-4 w-4 text-gray-500 dark:text-slate-400" />
-             Back
+           <span className="text-gray-400 dark:text-slate-500">/</span>
+           <button
+             className="rounded-md px-1.5 py-1 text-gray-900 transition-colors hover:bg-gray-100 hover:text-[#047857] dark:text-slate-100 dark:hover:bg-slate-700 dark:hover:text-emerald-300"
+             onClick={() => openFolder(activeFolder.id)}
+             type="button"
+             title={`Open ${activeFolder.name}`}
+           >
+             {activeFolder.name}
            </button>
          </div>
        )}
@@ -1192,40 +1247,6 @@ export default function AdminDocuments() {
 
 
            <div className="flex flex-wrap items-center gap-3 lg:ml-auto lg:flex-nowrap">
-             <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-900/40">
-               <button
-                 type="button"
-                 className={cn(
-                   "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                   tab === "active"
-                     ? "bg-[#00c065]/10 text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300"
-                     : "text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700"
-                 )}
-                 onClick={() => {
-                   setTab("active")
-                   setSelectedIds({})
-                 }}
-               >
-                 Active
-               </button>
-               <button
-                 type="button"
-                 className={cn(
-                   "h-8 rounded-md px-3 text-sm font-semibold transition-colors",
-                   tab === "archived"
-                     ? "bg-[#00c065]/10 text-[#047857] dark:bg-[#00c065]/15 dark:text-emerald-300"
-                     : "text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700"
-                 )}
-                 onClick={() => {
-                   setTab("archived")
-                   setSelectedIds({})
-                 }}
-               >
-                 Archived
-               </button>
-             </div>
-
-
              <div className="relative" onClick={(e) => e.stopPropagation()}>
                <button className={btnPrimary} type="button" onClick={() => setNewOpen((v) => !v)}>
                  <Plus className="h-4 w-4" />
@@ -1256,67 +1277,114 @@ export default function AdminDocuments() {
 
 
              <div className="relative" onClick={(e) => e.stopPropagation()}>
-               <button className={btnBase} type="button" onClick={() => setFiltersOpen((v) => !v)}>
-                 <SlidersHorizontal className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+               <button
+                 type="button"
+                 onClick={() => setFiltersOpen((v) => !v)}
+                 className={cn(
+                   "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98]",
+                   filtersOpen || activeFilterCount > 0
+                     ? "border-[#00c065]/40 bg-[#00c065]/10 text-[#047857] dark:border-[#00c065]/40 dark:bg-[#00c065]/15 dark:text-emerald-300"
+                     : "border-gray-200 bg-white text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:bg-slate-700"
+                 )}
+               >
+                 <SlidersHorizontal className="h-4 w-4" />
                  Filters
+                 {activeFilterCount > 0 && (
+                   <span className="grid h-5 min-w-5 place-items-center rounded-full bg-[#00c065] px-1 text-[11px] font-bold text-white">
+                     {activeFilterCount}
+                   </span>
+                 )}
+                 <ChevronDown className={cn("h-4 w-4 transition-transform", filtersOpen && "rotate-180")} />
                </button>
 
 
                {filtersOpen && (
-                 <div className="absolute right-0 top-[calc(100%+10px)] z-[500] min-w-[288px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
-                   <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-400">
-                     Document Type
-                   </div>
-                   {filterItems.map((item) => (
-                     <label
-                       key={item.id}
-                       className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 dark:text-slate-200 dark:hover:bg-slate-700"
-                     >
-                       <input
-                         type="checkbox"
-                         className="h-4 w-4 accent-[#00c065]"
-                         checked={item.checked}
-                         onChange={(e) => item.setChecked(e.target.checked)}
-                       />
-                       <span>{item.label}</span>
-                     </label>
-                   ))}
-                   <div className="mt-2 border-t border-gray-100 px-3 pb-1 pt-2 text-xs text-gray-500 dark:border-slate-700/70 dark:text-slate-400">
-                     Archive is controlled by the Active/Archived tabs.
-                   </div>
-                 </div>
-               )}
-             </div>
-
-
-             <div className="relative" onClick={(e) => e.stopPropagation()}>
-               <button className={btnBase} type="button" onClick={() => setSortOpen((v) => !v)}>
-                 <span>Sort:</span>
-                 <span className="font-semibold text-gray-950 dark:text-slate-100">{sortLabel}</span>
-                 <ArrowUpDown className="h-4 w-4 text-gray-500 dark:text-slate-400" />
-               </button>
-
-
-               {sortOpen && (
-                 <div className="absolute right-0 top-[calc(100%+10px)] z-[500] min-w-[220px] rounded-xl border border-gray-200 bg-white p-2 shadow-lg shadow-gray-200/70 dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
-                   {([
-                     ["date_desc", "Newest"],
-                     ["date_asc", "Oldest"],
-                     ["name_asc", "Name A-Z"],
-                     ["name_desc", "Name Z-A"],
-                   ] as const).map(([key, label]) => (
-                     <button
-                       key={key}
-                       className={menuItem}
-                       type="button"
-                       onClick={() => {
-                         setSortKey(key)
-                         setSortOpen(false)
-                       }}
-                     >
-                       {label}
+                 <div className="absolute right-0 top-11 z-[500] w-[340px] rounded-xl border border-gray-200 bg-white p-3 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+                   <div className="mb-3 flex items-center justify-between gap-3 border-b border-gray-100 pb-2 dark:border-slate-700/70">
+                     <div>
+                       <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">Filter Documents</div>
+                       <div className="text-xs text-gray-500 dark:text-slate-400">Refine the documents list results.</div>
+                     </div>
+                     <button type="button" onClick={() => setFiltersOpen(false)} className={iconBtn} aria-label="Close filters">
+                       <X className="h-4 w-4" />
                      </button>
-                   ))}
+                   </div>
+
+                   <div className="space-y-3">
+                     <label className="block">
+                       <span className="mb-1 block text-xs font-semibold text-gray-500 dark:text-slate-400">View</span>
+                       <div className="relative">
+                         <Archive className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-slate-400" />
+                         <select
+                           value={tab}
+                           onChange={(e) => {
+                             setTab(e.target.value as ArchiveTab)
+                             setSelectedIds({})
+                           }}
+                           className="h-9 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-9 pr-9 text-sm font-semibold text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 focus:ring-2 focus:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:bg-slate-700"
+                         >
+                           <option value="active">Active documents</option>
+                           <option value="archived">Archived documents</option>
+                         </select>
+                         <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-slate-400" />
+                       </div>
+                     </label>
+
+                     <div>
+                       <span className="mb-1 block text-xs font-semibold text-gray-500 dark:text-slate-400">Document Type</span>
+                       <div className="grid grid-cols-2 gap-2">
+                         {filterItems.map((item) => (
+                           <label
+                             key={item.id}
+                             className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-700"
+                           >
+                             <input
+                               type="checkbox"
+                               className="h-4 w-4 accent-[#00c065]"
+                               checked={item.checked}
+                               onChange={(e) => item.setChecked(e.target.checked)}
+                             />
+                             <span>{item.label}</span>
+                           </label>
+                         ))}
+                       </div>
+                     </div>
+
+                     <label className="block">
+                       <span className="mb-1 block text-xs font-semibold text-gray-500 dark:text-slate-400">Sort by</span>
+                       <div className="relative">
+                         <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-slate-400" />
+                         <select
+                           value={sortKey}
+                           onChange={(e) => setSortKey(e.target.value as SortKey)}
+                           className="h-9 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-9 pr-9 text-sm font-semibold text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 focus:ring-2 focus:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:bg-slate-700"
+                         >
+                           <option value="date_desc">Newest</option>
+                           <option value="date_asc">Oldest</option>
+                           <option value="name_asc">Name A-Z</option>
+                           <option value="name_desc">Name Z-A</option>
+                         </select>
+                         <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-slate-400" />
+                       </div>
+                     </label>
+                   </div>
+
+                   <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-slate-700/70">
+                     <button
+                       type="button"
+                       onClick={clearDocumentFilters}
+                       className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-700"
+                     >
+                       Clear
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => setFiltersOpen(false)}
+                       className="inline-flex h-8 items-center rounded-lg bg-[#00c065] px-3 text-xs font-semibold text-white transition hover:bg-[#00a054]"
+                     >
+                       Apply filters
+                     </button>
+                   </div>
                  </div>
                )}
              </div>
@@ -1560,7 +1628,7 @@ export default function AdminDocuments() {
        )}
 
 
-       <section className="mt-4">
+       <section className="mt-3 flex min-h-0 flex-1 flex-col">
          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
            <div className="flex flex-wrap items-center gap-2">
              <div className="text-xs font-semibold text-gray-500 dark:text-slate-300">
@@ -1611,8 +1679,8 @@ export default function AdminDocuments() {
          </div>
 
 
-         <div className={cn(cardShell, cardAccent)}>
-           <div className="grid grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:border-slate-700/70 dark:bg-slate-800 dark:text-slate-400">
+         <div className={cn(cardShell, cardAccent, "flex min-h-0 flex-1 flex-col")}>
+           <div className="grid shrink-0 grid-cols-[52px_1fr_280px_180px_60px] items-center border-b border-gray-100 bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:border-slate-700/70 dark:bg-slate-800 dark:text-slate-400">
              <div className="flex justify-center">
                <input
                  type="checkbox"
@@ -1629,8 +1697,11 @@ export default function AdminDocuments() {
            </div>
 
 
-           <div className="divide-y divide-gray-100 dark:divide-slate-700/70">
-             {scopedFiles.map((f) => {
+           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white dark:bg-slate-800/25">
+             <div className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-slate-700/70">
+               {scopedFiles.length > 0 ? (
+                 <>
+                   {scopedFiles.map((f) => {
                const meta = typeMeta[f.type]
                const checked = Boolean(selectedIds[f.id])
                const key = `file:${f.id}`
@@ -1641,7 +1712,8 @@ export default function AdminDocuments() {
                    key={f.id}
                    onClick={() => openViewFile(f)}
                    className={cn(
-                     "grid cursor-pointer grid-cols-[52px_1fr_280px_180px_60px] items-center px-3 py-3 text-sm transition hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:hover:bg-slate-700/60",
+                     "grid cursor-pointer grid-cols-[52px_1fr_280px_180px_60px] items-center px-3 text-sm transition hover:bg-gray-50 max-[1220px]:grid-cols-[52px_1fr_220px_160px_60px] max-[920px]:grid-cols-[52px_1fr_0px_140px_60px] dark:hover:bg-slate-700/60",
+                     "min-h-[76px] py-3.5",
                      checked && "bg-[#00c065]/10 hover:bg-[#00c065]/10 dark:hover:bg-[#00c065]/15"
                    )}
                  >
@@ -1728,23 +1800,24 @@ export default function AdminDocuments() {
                    </ActionMenu>
                  </div>
                )
-             })}
-           </div>
-
-
-           {scopedFiles.length === 0 && !loading && (
-             <div className="px-3 py-12 text-center">
-               <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50 dark:bg-slate-700">
-                 <FileText className="h-5 w-5 text-gray-400 dark:text-slate-400" />
-               </div>
-               <div className="mt-3 text-sm font-semibold text-gray-950 dark:text-slate-100">
-                 No matching documents
-               </div>
-               <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
-                 Try changing your search, filters, or sort option.
-               </div>
+                   })}
+                   <div className="min-h-[28px] flex-1 bg-white dark:bg-slate-800/25" aria-hidden="true" />
+                 </>
+               ) : !loading ? (
+                 <div className="flex h-full min-h-[260px] flex-col items-center justify-center px-3 py-12 text-center">
+                 <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-gray-50 dark:bg-slate-700">
+                   <FileText className="h-5 w-5 text-gray-400 dark:text-slate-400" />
+                 </div>
+                 <div className="mt-3 text-sm font-semibold text-gray-950 dark:text-slate-100">
+                   No matching documents
+                 </div>
+                 <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                   Try changing your search, filters, or sort option.
+                 </div>
+                 </div>
+               ) : null}
              </div>
-           )}
+           </div>
          </div>
        </section>
      </div>
@@ -1754,7 +1827,7 @@ export default function AdminDocuments() {
        open={viewOpen}
        title={viewFile?.name ?? "Document Preview"}
        onClose={() => setViewOpen(false)}
-       size={viewFile?.contentType === "text/html" ? "wide" : "default"}
+       size={viewFile?.contentType === "text/html" || viewFile?.contentType === "application/pdf" ? "wide" : "default"}
      >
        <div className="space-y-3">
          <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1766,14 +1839,28 @@ export default function AdminDocuments() {
              <span>{viewFile?.sizeLabel ?? "—"}</span>
            </div>
 
-           {viewFile?.contentType === "text/html" && (
+           {(viewFile?.contentType === "text/html" || viewFile?.contentType === "application/pdf") && (
              <span className="rounded-full border border-[#00c065]/20 bg-[#00c065]/10 px-2.5 py-1 text-xs font-semibold text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300">
-               Rendered Preview
+               {viewFile?.contentType === "application/pdf" ? "PDF Preview" : "Rendered Preview"}
              </span>
            )}
          </div>
 
-         {viewFile?.contentType === "text/html" ? (
+         {viewFile?.contentType === "application/pdf" ? (
+           <div className="h-[72vh] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-inner dark:border-slate-700 dark:bg-slate-950/40">
+             {viewFile?.content ? (
+               <iframe
+                 title={viewFile?.name ?? "PDF Preview"}
+                 src={getPdfPreviewSrc(viewFile)}
+                 className="h-full w-full bg-white"
+               />
+             ) : (
+               <div className="flex h-full items-center justify-center text-sm text-gray-500 dark:text-slate-400">
+                 No PDF content saved for this document.
+               </div>
+             )}
+           </div>
+         ) : viewFile?.contentType === "text/html" ? (
            <div className="h-[72vh] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-inner dark:border-slate-700 dark:bg-slate-950/40">
              <iframe
                title={viewFile?.name ?? "Document Preview"}

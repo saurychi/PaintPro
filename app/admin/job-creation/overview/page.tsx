@@ -206,6 +206,18 @@ export default function OverviewPage() {
     }
   }
 
+  // The "Change" buttons next to each section need to flip the project's
+  // status back to the matching `*_pending` step so the corresponding
+  // assignment page accepts edits, then navigate there.
+  async function handleChangeNavigate(status: string, path: string) {
+    try {
+      await updateProjectStatus(status);
+      router.push(path);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to switch to that step.");
+    }
+  }
+
   async function handleGoBack() {
     try {
       setIsNavigating("back");
@@ -229,25 +241,25 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
-        <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+    <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+      <div className="flex h-full flex-col gap-3 overflow-hidden px-6 pt-5 pb-4">
+        <div className="flex items-center gap-2 text-[18px] font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
           <span>Project</span>
           <ChevronRight
-            className="h-5 w-5 text-gray-300 shrink-0"
+            className="h-5 w-5 text-slate-300 dark:text-slate-500 shrink-0"
             aria-hidden
           />
           <span>Overview</span>
         </div>
 
         <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 shadow-sm">
             <div
               className="h-1 w-full shrink-0"
               style={{ backgroundColor: ACCENT }}
             />
 
-            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+            <div className="shrink-0 border-b border-slate-200 dark:border-slate-700 px-5 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -256,16 +268,16 @@ export default function OverviewPage() {
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                       Project Overview
                     </p>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600">
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                     Review all generated project details before proceeding.
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                   Final Review
                 </div>
               </div>
@@ -274,11 +286,11 @@ export default function OverviewPage() {
             <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
               <div className="h-full overflow-y-auto pr-2 green-scrollbar">
                 {loading ? (
-                  <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                  <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                     Loading project overview...
                   </div>
                 ) : mainTasks.length === 0 ? (
-                  <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                  <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                     No overview data found for this project.
                   </div>
                 ) : (
@@ -291,10 +303,10 @@ export default function OverviewPage() {
                       return (
                         <div
                           key={task.project_task_id}
-                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                          className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                           <div
                             className={`w-full px-4 py-3 transition ${
-                              isOpen ? "bg-emerald-50/40" : "bg-white"
+                              isOpen ? "bg-emerald-50/50 dark:bg-emerald-500/10" : "bg-white dark:bg-slate-900"
                             }`}>
                             <div className="flex items-start justify-between gap-3">
                               <button
@@ -311,10 +323,10 @@ export default function OverviewPage() {
                                 />
 
                                 <div className="min-w-0">
-                                  <div className="text-[15px] font-semibold text-gray-900">
+                                  <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100">
                                     {task.title}
                                   </div>
-                                  <div className="mt-0.5 text-[12px] text-gray-500">
+                                  <div className="mt-0.5 text-[12px] text-slate-500 dark:text-slate-400">
                                     {task.subtasks.length} sub task
                                     {task.subtasks.length === 1
                                       ? ""
@@ -328,11 +340,12 @@ export default function OverviewPage() {
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    router.push(
+                                    void handleChangeNavigate(
+                                      "main_task_pending",
                                       `/admin/job-creation/main-task-assignment?projectId=${projectId}`,
                                     )
                                   }
-                                  className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                  className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                   <PencilLine className="h-3.5 w-3.5" />
                                   Change
                                 </button>
@@ -342,7 +355,7 @@ export default function OverviewPage() {
                                   onClick={() =>
                                     toggleMainTask(task.project_task_id)
                                   }
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-all duration-150 hover:bg-gray-50 hover:scale-[0.985] active:scale-95">
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 text-slate-500 dark:text-slate-400 transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:scale-[0.985] active:scale-95">
                                   <ChevronDown
                                     className={`h-4 w-4 transition-transform ${
                                       isOpen ? "rotate-180" : ""
@@ -357,25 +370,26 @@ export default function OverviewPage() {
                             <div className="space-y-4 px-5 pb-4">
                               <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                  <div className="text-[12px] font-semibold text-gray-700">
+                                  <div className="text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                                     Materials
                                   </div>
 
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      router.push(
+                                      void handleChangeNavigate(
+                                        "materials_pending",
                                         `/admin/job-creation/materials-assignment?projectId=${projectId}`,
                                       )
                                     }
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                     <PencilLine className="h-3.5 w-3.5" />
                                     Change
                                   </button>
                                 </div>
 
                                 {task.materials.length === 0 ? (
-                                  <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-[12px] text-gray-500">
+                                  <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-[12px] text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400">
                                     No materials assigned.
                                   </div>
                                 ) : (
@@ -383,23 +397,23 @@ export default function OverviewPage() {
                                     {task.materials.map((material) => (
                                       <div
                                         key={material.project_task_material_id}
-                                        className="rounded-md border border-gray-200 bg-white px-3 py-3">
+                                        className="rounded-md border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-slate-950/70">
                                         <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_130px_130px]">
                                           <div className="min-w-0">
-                                            <div className="text-[12px] font-medium text-gray-900">
+                                            <div className="text-[12px] font-medium text-slate-900 dark:text-slate-100">
                                               {material.name}
                                             </div>
-                                            <div className="mt-1 text-[11px] text-gray-500">
+                                            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                                               {material.unit || "Unit not set"}
                                             </div>
                                           </div>
 
-                                          <div className="text-[12px] text-gray-700 md:text-right">
+                                          <div className="text-[12px] text-slate-700 dark:text-slate-200 md:text-right">
                                             Qty:{" "}
                                             {material.estimated_quantity ?? 0}
                                           </div>
 
-                                          <div className="text-[12px] font-medium text-gray-800 md:text-right">
+                                          <div className="text-[12px] font-medium text-slate-800 dark:text-slate-100 md:text-right">
                                             {formatCurrency(
                                               material.estimated_cost,
                                             )}
@@ -413,25 +427,26 @@ export default function OverviewPage() {
 
                               <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                  <div className="text-[12px] font-semibold text-gray-700">
+                                  <div className="text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                                     Sub Tasks
                                   </div>
 
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      router.push(
+                                      void handleChangeNavigate(
+                                        "sub_task_pending",
                                         `/admin/job-creation/sub-task-assignment?projectId=${projectId}`,
                                       )
                                     }
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                     <PencilLine className="h-3.5 w-3.5" />
                                     Change
                                   </button>
                                 </div>
 
                                 {task.subtasks.length === 0 ? (
-                                  <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-[12px] text-gray-500">
+                                  <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-[12px] text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400">
                                     No subtasks assigned.
                                   </div>
                                 ) : (
@@ -439,40 +454,41 @@ export default function OverviewPage() {
                                     {task.subtasks.map((subtask) => (
                                       <div
                                         key={subtask.project_sub_task_id}
-                                        className="rounded-md border border-gray-200 bg-white px-3 py-3">
-                                        <div className="text-[13px] font-semibold text-gray-900">
+                                        className="rounded-md border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-slate-950/70">
+                                        <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                                           {subtask.description}
                                         </div>
 
                                         <div className="mt-3">
                                           <div className="mb-2 flex items-center justify-between gap-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                                               Schedule
                                             </div>
 
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                router.push(
+                                                void handleChangeNavigate(
+                                                  "schedule_pending",
                                                   `/admin/job-creation/project-schedule?projectId=${projectId}`,
                                                 )
                                               }
-                                              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                               <PencilLine className="h-3.5 w-3.5" />
                                               Change
                                             </button>
                                           </div>
 
-                                          <div className="grid grid-cols-1 gap-2 text-[12px] text-gray-700 lg:grid-cols-3">
+                                          <div className="grid grid-cols-1 gap-2 text-[12px] text-slate-700 dark:text-slate-200 lg:grid-cols-3">
                                             <div>
                                               Estimated Hours:{" "}
-                                              <span className="font-medium text-gray-900">
+                                              <span className="font-medium text-slate-900 dark:text-slate-100">
                                                 {subtask.estimated_hours ?? 0}
                                               </span>
                                             </div>
                                             <div>
                                               Start:{" "}
-                                              <span className="font-medium text-gray-900">
+                                              <span className="font-medium text-slate-900 dark:text-slate-100">
                                                 {formatDateTime(
                                                   subtask.scheduled_start_datetime,
                                                 )}
@@ -480,7 +496,7 @@ export default function OverviewPage() {
                                             </div>
                                             <div>
                                               End:{" "}
-                                              <span className="font-medium text-gray-900">
+                                              <span className="font-medium text-slate-900 dark:text-slate-100">
                                                 {formatDateTime(
                                                   subtask.scheduled_end_datetime,
                                                 )}
@@ -491,18 +507,19 @@ export default function OverviewPage() {
 
                                         <div className="mt-3">
                                           <div className="mb-2 flex items-center justify-between gap-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                                               Equipment
                                             </div>
 
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                router.push(
+                                                void handleChangeNavigate(
+                                                  "equipment_pending",
                                                   `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
                                                 )
                                               }
-                                              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                               <PencilLine className="h-3.5 w-3.5" />
                                               Change
                                             </button>
@@ -510,7 +527,7 @@ export default function OverviewPage() {
 
                                           {subtask.equipments_used.length ===
                                           0 ? (
-                                            <div className="text-[12px] text-gray-500">
+                                            <div className="text-[12px] text-slate-500 dark:text-slate-400">
                                               No equipment assigned.
                                             </div>
                                           ) : (
@@ -519,7 +536,7 @@ export default function OverviewPage() {
                                                 (equipment, index) => (
                                                   <span
                                                     key={`${subtask.project_sub_task_id}-${equipment.name}-${index}`}
-                                                    className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                                                    className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
                                                     {equipment.name}
                                                   </span>
                                                 ),
@@ -530,18 +547,19 @@ export default function OverviewPage() {
 
                                         <div className="mt-3">
                                           <div className="mb-2 flex items-center justify-between gap-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                                               Assigned Staff
                                             </div>
 
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                router.push(
+                                                void handleChangeNavigate(
+                                                  "employee_assignment_pending",
                                                   `/admin/job-creation/employee-assignment?projectId=${projectId}`,
                                                 )
                                               }
-                                              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                                              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95">
                                               <PencilLine className="h-3.5 w-3.5" />
                                               Change
                                             </button>
@@ -549,7 +567,7 @@ export default function OverviewPage() {
 
                                           {subtask.assigned_staff.length ===
                                           0 ? (
-                                            <div className="text-[12px] text-gray-500">
+                                            <div className="text-[12px] text-slate-500 dark:text-slate-400">
                                               No staff assigned.
                                             </div>
                                           ) : (
@@ -571,8 +589,8 @@ export default function OverviewPage() {
                                                       key={
                                                         staff.project_sub_task_staff_id
                                                       }
-                                                      className="rounded-md border border-gray-200 bg-white px-3 py-2">
-                                                      <div className="text-[12px] font-medium text-gray-900">
+                                                      className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950/70">
+                                                      <div className="text-[12px] font-medium text-slate-900 dark:text-slate-100">
                                                         {name}
                                                       </div>
 
@@ -583,7 +601,7 @@ export default function OverviewPage() {
                                                             (specialty) => (
                                                               <span
                                                                 key={`${staff.project_sub_task_staff_id}-${specialty}`}
-                                                                className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                                                                className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                                                                 {specialty}
                                                               </span>
                                                             ),
@@ -609,47 +627,45 @@ export default function OverviewPage() {
                     })}
                   </div>
                 )}
-
-                <div className="h-6" />
               </div>
             </div>
           </section>
 
           <aside className="h-full min-h-0 flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
               <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">
+                <div className="text-[16px] font-semibold text-slate-900 dark:text-slate-100">
                   {project?.project_code || "Project Overview"}
                 </div>
-                <div className="mt-1 text-[12px] text-gray-500">
+                <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
                   {project?.title ||
                     project?.site_address ||
                     "No project title"}
                 </div>
               </div>
 
-              <div className="border-t border-gray-200 px-4 py-4 space-y-2 text-[12px] text-gray-600">
+              <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-4 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
                 <div>
                   Budget:{" "}
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
                     {formatCurrency(project?.estimated_budget)}
                   </span>
                 </div>
                 <div>
                   Cost:{" "}
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
                     {formatCurrency(project?.estimated_cost)}
                   </span>
                 </div>
                 <div>
                   Profit:{" "}
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
                     {formatCurrency(project?.estimated_profit)}
                   </span>
                 </div>
                 <div>
                   Status:{" "}
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
                     {project?.status || "Unknown"}
                   </span>
                 </div>
@@ -662,12 +678,12 @@ export default function OverviewPage() {
           </aside>
         </div>
 
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleGoBack}
             disabled={isNavigating !== null}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100">
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-4 text-[13px] font-medium text-slate-700 dark:text-slate-200 transform transition-all duration-150 hover:bg-slate-50 dark:hover:bg-slate-800 hover:opacity-80 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100">
             {isNavigating === "back" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -701,14 +717,23 @@ export default function OverviewPage() {
           background: #eaf7e4;
           border-radius: 999px;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-track {
+          background: #0f172a;
+        }
         .green-scrollbar::-webkit-scrollbar-thumb {
           background: ${ACCENT};
           border-radius: 999px;
           border: 2px solid #eaf7e4;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-thumb {
+          border-color: #0f172a;
+        }
         .green-scrollbar {
           scrollbar-color: ${ACCENT} #eaf7e4;
           scrollbar-width: thin;
+        }
+        .dark .green-scrollbar {
+          scrollbar-color: ${ACCENT} #0f172a;
         }
       `}</style>
     </div>

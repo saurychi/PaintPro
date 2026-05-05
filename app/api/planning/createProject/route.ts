@@ -5,7 +5,9 @@ import {
   estimateMaterialsForSubTask,
   type ProjectDimensions,
 } from "@/lib/planning/materialEstimator";
+import { normalizeEquipmentUsageForStorage } from "@/lib/planning/equipmentUsage";
 import { buildProjectSchedule } from "@/lib/planning/projectScheduling";
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays";
 import {
   calculateProjectCostEstimation,
   type CostEstimationMainTask,
@@ -37,6 +39,15 @@ type GeneratedAssignedEmployeeInput = {
   id?: unknown;
   name?: unknown;
   role?: unknown;
+};
+
+type GeneratedEquipmentInput = {
+  equipment_id?: unknown;
+  equipmentId?: unknown;
+  id?: unknown;
+  name?: unknown;
+  notes?: unknown;
+  quantity?: unknown;
 };
 
 type GeneratedSubTaskInput = {
@@ -253,10 +264,21 @@ function parseGeneratedTasks(value: unknown) {
                 ? subTask.equipment
                     .filter(isObject)
                     .map((equipment) => ({
+                      equipment_id: asTrimmedString(
+                        (equipment as GeneratedEquipmentInput).equipment_id ??
+                          (equipment as GeneratedEquipmentInput).equipmentId ??
+                          (equipment as GeneratedEquipmentInput).id,
+                      ),
                       name: asTrimmedString(equipment.name),
                       notes: asNullableTrimmedString(equipment.notes),
+                      quantity: asNumberOrFallback(
+                        (equipment as GeneratedEquipmentInput).quantity,
+                        1,
+                      ),
                     }))
-                    .filter((equipment) => equipment.name)
+                    .filter(
+                      (equipment) => equipment.equipment_id || equipment.name,
+                    )
                 : [],
               duration: isObject(subTask.duration)
                 ? {
@@ -621,14 +643,21 @@ export async function POST(req: Request) {
 
   const projectCode = requestedProjectCode || (await generateProjectCode());
 
+  // Same set the schedule pages render — manual blocks + public holidays —
+  // so the fallback recompute on save also lands on a valid working day.
+  const unavailableDays = await listScheduleUnavailableDays(
+    req.headers.get("cookie"),
+  );
+
   const fallbackProjectSchedule = buildProjectSchedule({
     project: {
       scheduled_start_datetime: scheduledStartDatetime,
       scheduled_end_datetime: scheduledEndDatetime,
       dimensions: projectDimensions,
     },
-    generatedTasks: generatedTasks as any,
+    generatedTasks,
     existingBlocks: [],
+    unavailableDates: unavailableDays.map((day) => day.blockedDate),
   });
 
   const resolvedScheduledEndDatetime =
@@ -769,11 +798,27 @@ export async function POST(req: Request) {
       ])
   );
 
-  const materialMap = new Map<string, MaterialRow>(
-    catalogMaterials
-      .filter((row) => row.material_id && row.name)
-      .map((row) => [norm(String(row.name)), row])
-  );
+  // The materials catalog can hold multiple rows that share a name but are
+  // priced differently (e.g. same paint from two suppliers). When the
+  // estimator looks up a material by name, prefer the *cheapest* unit_cost
+  // so the project's estimated cost matches the lowest available source.
+  // Rows missing unit_cost still count (treated as 0) so they can be picked
+  // when no priced variant exists.
+  const materialMap = new Map<string, MaterialRow>();
+  for (const row of catalogMaterials) {
+    if (!row.material_id || !row.name) continue;
+    const key = norm(String(row.name));
+    const existing = materialMap.get(key);
+    if (!existing) {
+      materialMap.set(key, row);
+      continue;
+    }
+    const existingCost = Number(existing.unit_cost ?? Number.POSITIVE_INFINITY);
+    const candidateCost = Number(row.unit_cost ?? Number.POSITIVE_INFINITY);
+    if (candidateCost < existingCost) {
+      materialMap.set(key, row);
+    }
+  }
 
   const insertedProjectTasksForCost: Array<{
     project_task_id: string;
@@ -850,9 +895,9 @@ export async function POST(req: Request) {
         subTask.duration?.adjustedDurationHours ??
         null;
 
-      const equipmentPayload = Array.isArray(subTask.equipment)
-        ? subTask.equipment
-        : [];
+      const equipmentPayload = normalizeEquipmentUsageForStorage(
+        subTask.equipment,
+      );
 
       const { data: insertedProjectSubTask, error: projectSubTaskInsertError } =
         await supabaseAdmin
@@ -1016,6 +1061,13 @@ export async function POST(req: Request) {
       }
     }
   }
+
+  // (Stock decrement intentionally NOT done at draft/creation time. The
+  // materials-assignment page compares each project's planned quantity to
+  // current_in_stock and blocks "Next" when the project would over-consume
+  // — at which point the user either restocks or lowers the planned quantity.
+  // Actual stock consumption can be wired into the project lifecycle later,
+  // e.g. when the project moves into in_progress.)
 
   const insertedStaffUserIds = uniqueStrings(
     insertedProjectSubTaskStaffForCost.map((row) => row.user_id)

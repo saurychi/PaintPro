@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
+import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
 
 type CreateSubTaskModalProps = {
   open: boolean;
@@ -38,6 +39,10 @@ export default function CreateSubTaskModal({
 
   const [selectedEquipment, setSelectedEquipment] = useState<{ id: string; name: string }[]>([]);
   const [selectedMaterials, setSelectedMaterials] = useState<{ id: string; name: string }[]>([]);
+  const [equipmentPendingRemove, setEquipmentPendingRemove] =
+    useState<{ id: string; name: string } | null>(null);
+  const [materialPendingRemove, setMaterialPendingRemove] =
+    useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -128,20 +133,20 @@ export default function CreateSubTaskModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 px-4">
-      <div className="flex max-h-[80vh] w-full max-w-lg min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4">
+    <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/50 px-4">
+      <div className="flex max-h-[80vh] w-full max-w-lg min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 dark:border-slate-700 px-5 py-4">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-gray-900">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               Create Sub Task
             </h3>
-            <p className="mt-1 text-sm text-gray-600">{mainTaskTitle}</p>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{mainTaskTitle}</p>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition hover:bg-gray-100"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-slate-800"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -151,47 +156,47 @@ export default function CreateSubTaskModal({
         <div className="green-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="grid grid-cols-1 gap-4">
             <div>
-              <label className="mb-1 block text-[12px] font-semibold text-gray-700">
+              <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                 Description Name
               </label>
               <input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none"
+                className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-[12px] font-semibold text-gray-700">
+              <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                 Sort Order
               </label>
               <input
                 value={sortOrder}
                 onChange={(e) => setSortOrder(e.target.value)}
-                className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none"
+                className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-[12px] font-semibold text-gray-700">
+              <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                 Default Equipment
               </label>
 
-              <div className="rounded-md border border-gray-300 bg-white">
-                <div className="flex flex-wrap gap-2 border-b border-gray-200 px-3 py-2">
+              <div className="rounded-md border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-900">
+                <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
                   {selectedEquipment.length === 0 ? (
-                    <span className="text-[12px] text-gray-400">No equipment selected</span>
+                    <span className="text-[12px] text-slate-400 dark:text-slate-500">No equipment selected</span>
                   ) : (
                     selectedEquipment.map((item) => (
                       <span
                         key={item.id}
-                        className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700"
+                        className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300"
                       >
                         {item.name}
                         <button
                           type="button"
-                          onClick={() => removeEquipment(item.id)}
-                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-emerald-100"
+                          onClick={() => setEquipmentPendingRemove(item)}
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-emerald-100 dark:hover:bg-emerald-500/25"
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -209,16 +214,16 @@ export default function CreateSubTaskModal({
                         setEquipmentOpen(true);
                       }}
                       onFocus={() => setEquipmentOpen(true)}
-                      className="h-10 w-full rounded-md bg-white px-3 pr-10 text-[13px] text-gray-800 outline-none"
+                      className="h-10 w-full rounded-md bg-white px-3 dark:bg-slate-900 pr-10 text-[13px] text-slate-800 dark:text-slate-100 outline-none"
                       placeholder="Search equipment"
                     />
-                    <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-gray-500" />
+                    <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-slate-500 dark:text-slate-400" />
                   </div>
 
                   {equipmentOpen && (
-                    <div className="green-scrollbar absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-sm">
+                    <div className="green-scrollbar absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
                       {filteredEquipment.length === 0 ? (
-                        <div className="px-3 py-2 text-[12px] text-gray-500">
+                        <div className="px-3 py-2 text-[12px] text-slate-500 dark:text-slate-400">
                           No equipment found.
                         </div>
                       ) : (
@@ -227,7 +232,7 @@ export default function CreateSubTaskModal({
                             key={item.id}
                             type="button"
                             onClick={() => addEquipment(item)}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-gray-800 transition hover:bg-emerald-50"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-800 transition hover:bg-emerald-50 dark:text-slate-100 dark:hover:bg-emerald-500/15"
                           >
                             <Plus className="h-4 w-4 text-emerald-600" />
                             {item.name}
@@ -241,25 +246,25 @@ export default function CreateSubTaskModal({
             </div>
 
             <div>
-              <label className="mb-1 block text-[12px] font-semibold text-gray-700">
+              <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                 Default Materials
               </label>
 
-              <div className="rounded-md border border-gray-300 bg-white">
-                <div className="flex flex-wrap gap-2 border-b border-gray-200 px-3 py-2">
+              <div className="rounded-md border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-900">
+                <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
                   {selectedMaterials.length === 0 ? (
-                    <span className="text-[12px] text-gray-400">No materials selected</span>
+                    <span className="text-[12px] text-slate-400 dark:text-slate-500">No materials selected</span>
                   ) : (
                     selectedMaterials.map((item) => (
                       <span
                         key={item.id}
-                        className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700"
+                        className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300"
                       >
                         {item.name}
                         <button
                           type="button"
-                          onClick={() => removeMaterial(item.id)}
-                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-emerald-100"
+                          onClick={() => setMaterialPendingRemove(item)}
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-emerald-100 dark:hover:bg-emerald-500/25"
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -277,16 +282,16 @@ export default function CreateSubTaskModal({
                         setMaterialOpen(true);
                       }}
                       onFocus={() => setMaterialOpen(true)}
-                      className="h-10 w-full rounded-md bg-white px-3 pr-10 text-[13px] text-gray-800 outline-none"
+                      className="h-10 w-full rounded-md bg-white px-3 dark:bg-slate-900 pr-10 text-[13px] text-slate-800 dark:text-slate-100 outline-none"
                       placeholder="Search materials"
                     />
-                    <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-gray-500" />
+                    <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-slate-500 dark:text-slate-400" />
                   </div>
 
                   {materialOpen && (
-                    <div className="green-scrollbar absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-sm">
+                    <div className="green-scrollbar absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
                       {filteredMaterials.length === 0 ? (
-                        <div className="px-3 py-2 text-[12px] text-gray-500">
+                        <div className="px-3 py-2 text-[12px] text-slate-500 dark:text-slate-400">
                           No materials found.
                         </div>
                       ) : (
@@ -295,7 +300,7 @@ export default function CreateSubTaskModal({
                             key={item.id}
                             type="button"
                             onClick={() => addMaterial(item)}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-gray-800 transition hover:bg-emerald-50"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-800 transition hover:bg-emerald-50 dark:text-slate-100 dark:hover:bg-emerald-500/15"
                           >
                             <Plus className="h-4 w-4 text-emerald-600" />
                             {item.name}
@@ -310,11 +315,11 @@ export default function CreateSubTaskModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700 px-5 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transition hover:bg-gray-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 dark:bg-slate-900 text-[12px] font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             Cancel
           </button>
@@ -330,6 +335,60 @@ export default function CreateSubTaskModal({
           </button>
         </div>
       </div>
+
+      <ConfirmDeleteModal
+        open={Boolean(equipmentPendingRemove)}
+        title="Remove equipment?"
+        description={
+          equipmentPendingRemove
+            ? `Remove "${equipmentPendingRemove.name}" from this subtask draft?`
+            : "Remove this equipment from this subtask draft?"
+        }
+        confirmLabel="Remove"
+        onCancel={() => setEquipmentPendingRemove(null)}
+        onConfirm={() => {
+          if (equipmentPendingRemove) removeEquipment(equipmentPendingRemove.id);
+          setEquipmentPendingRemove(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        open={Boolean(materialPendingRemove)}
+        title="Remove material?"
+        description={
+          materialPendingRemove
+            ? `Remove "${materialPendingRemove.name}" from this subtask draft?`
+            : "Remove this material from this subtask draft?"
+        }
+        confirmLabel="Remove"
+        onCancel={() => setMaterialPendingRemove(null)}
+        onConfirm={() => {
+          if (materialPendingRemove) removeMaterial(materialPendingRemove.id);
+          setMaterialPendingRemove(null);
+        }}
+      />
+
+      <style jsx global>{`
+        .dark .fixed.inset-0 button[class*="bg-white"] {
+          background-color: #0f172a !important;
+          border-color: #475569 !important;
+          color: #e2e8f0 !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-white"]:hover {
+          background-color: #1e293b !important;
+          color: #f8fafc !important;
+        }
+
+        .dark .fixed.inset-0 button[class*="bg-red"],
+        .dark .fixed.inset-0 button[class*="bg-rose"],
+        .dark .fixed.inset-0 button[class*="text-red"],
+        .dark .fixed.inset-0 button[class*="text-rose"] {
+          background-color: rgba(244, 63, 94, 0.16) !important;
+          border-color: rgba(244, 63, 94, 0.38) !important;
+          color: #fda4af !important;
+        }
+      `}</style>
     </div>
   );
 }

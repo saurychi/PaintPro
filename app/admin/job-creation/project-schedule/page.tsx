@@ -100,6 +100,34 @@ function addHoursToIso(startIso: string | null, hours: number | null) {
   return end.toISOString();
 }
 
+function localDateKey(date: Date) {
+  // Match the YYYY-MM-DD shape stored in unavailable_days.blocked_date,
+  // computed from the LOCAL day so a 23:00 timestamp doesn't accidentally
+  // match the next UTC date.
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function snapToAvailableDay(
+  iso: string | null,
+  unavailable: Set<string>,
+): { iso: string | null; skippedDays: number } {
+  if (!iso) return { iso, skippedDays: 0 };
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { iso, skippedDays: 0 };
+
+  let skipped = 0;
+  // Bound the loop so a misconfigured set can't spin forever.
+  while (unavailable.has(localDateKey(date)) && skipped < 365) {
+    date.setDate(date.getDate() + 1);
+    skipped += 1;
+  }
+
+  return { iso: date.toISOString(), skippedDays: skipped };
+}
+
 function diffHours(startIso: string | null, endIso: string | null) {
   if (!startIso || !endIso) return null;
 
@@ -158,6 +186,10 @@ export default function ProjectSchedulePage() {
 
   const [jobNo, setJobNo] = useState("Project Schedule");
   const [siteName, setSiteName] = useState("Review the generated schedule");
+
+  const [unavailableDates, setUnavailableDates] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [isDirty, setIsDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState<
@@ -377,6 +409,27 @@ export default function ProjectSchedulePage() {
 
     loadSchedule();
   }, [projectId]);
+
+  useEffect(() => {
+    async function loadUnavailableDates() {
+      try {
+        const response = await fetch("/api/schedule/unavailable-days");
+        if (!response.ok) return;
+        const data = await response.json();
+        const days = Array.isArray(data?.unavailableDays)
+          ? data.unavailableDays
+          : [];
+        const set = new Set<string>();
+        for (const day of days) {
+          if (typeof day?.blockedDate === "string") set.add(day.blockedDate);
+        }
+        setUnavailableDates(set);
+      } catch {
+        // Non-fatal: scheduling still works, we just won't auto-skip blocks.
+      }
+    }
+    loadUnavailableDates();
+  }, []);
 
   useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent) {
@@ -599,6 +652,9 @@ export default function ProjectSchedulePage() {
     field: "estimatedHours" | "scheduledStartDatetime" | "scheduledEndDatetime",
     rawValue: string,
   ) {
+    let totalSkippedDays = 0;
+    const blockedDates = unavailableDates;
+
     setServices((prev) => {
       const next = prev.map((group) => ({
         ...group,
@@ -635,7 +691,12 @@ export default function ProjectSchedulePage() {
       }
 
       if (field === "scheduledStartDatetime") {
-        target.scheduledStartDatetime = fromInputDateTimeLocal(rawValue);
+        const snapped = snapToAvailableDay(
+          fromInputDateTimeLocal(rawValue),
+          blockedDates,
+        );
+        totalSkippedDays += snapped.skippedDays;
+        target.scheduledStartDatetime = snapped.iso;
         target.scheduledEndDatetime = addHoursToIso(
           target.scheduledStartDatetime,
           target.estimatedHours,
@@ -659,7 +720,12 @@ export default function ProjectSchedulePage() {
         const currentStep =
           next[currRef.groupIndex].children[currRef.childIndex];
 
-        currentStep.scheduledStartDatetime = previousStep.scheduledEndDatetime;
+        const cascaded = snapToAvailableDay(
+          previousStep.scheduledEndDatetime,
+          blockedDates,
+        );
+        totalSkippedDays += cascaded.skippedDays;
+        currentStep.scheduledStartDatetime = cascaded.iso;
         currentStep.scheduledEndDatetime = addHoursToIso(
           currentStep.scheduledStartDatetime,
           currentStep.estimatedHours,
@@ -669,29 +735,37 @@ export default function ProjectSchedulePage() {
       return next;
     });
 
+    if (totalSkippedDays > 0) {
+      toast.message(
+        `Skipped ${totalSkippedDays} unavailable day${
+          totalSkippedDays === 1 ? "" : "s"
+        }.`,
+      );
+    }
+
     setIsDirty(true);
   }
 
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
-      <div className="h-full overflow-hidden px-6 pt-5 pb-5 flex flex-col gap-4">
-        <div className="flex items-center gap-2 text-[18px] font-semibold text-gray-900 whitespace-nowrap">
+    <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+      <div className="flex h-full flex-col gap-3 overflow-hidden px-6 pt-5 pb-4">
+        <div className="flex items-center gap-2 text-[18px] font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
           <span>Project</span>
           <ChevronRight
-            className="h-5 w-5 text-gray-300 shrink-0"
+            className="h-5 w-5 text-slate-300 dark:text-slate-500 shrink-0"
             aria-hidden
           />
           <span>Project Schedule</span>
         </div>
 
         <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
             <div
               className="h-1 w-full shrink-0"
               style={{ backgroundColor: ACCENT }}
             />
 
-            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+            <div className="shrink-0 border-b border-slate-200 dark:border-slate-700 px-5 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -700,17 +774,17 @@ export default function ProjectSchedulePage() {
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                       Project Schedule
                     </p>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600">
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                     Review estimated hours and scheduled date/time of each sub
                     task.
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                   Schedule Review
                 </div>
               </div>
@@ -720,11 +794,11 @@ export default function ProjectSchedulePage() {
               <div className="h-full overflow-y-auto pr-2 green-scrollbar">
                 <div className="space-y-2.5">
                   {loading ? (
-                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                       Loading project schedule...
                     </div>
                   ) : services.length === 0 ? (
-                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500">
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-4 text-sm text-slate-500 dark:text-slate-400">
                       No scheduled subtasks found for this project.
                     </div>
                   ) : (
@@ -735,7 +809,7 @@ export default function ProjectSchedulePage() {
                       return (
                         <div
                           key={group.id}
-                          className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                          className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                           <div
                             role="button"
                             tabIndex={0}
@@ -747,7 +821,7 @@ export default function ProjectSchedulePage() {
                               }
                             }}
                             className={`flex w-full items-center justify-between px-4 py-3 text-left transition cursor-pointer ${
-                              isOpen ? "bg-emerald-50/40" : "bg-white"
+                              isOpen ? "bg-emerald-50/40 dark:bg-emerald-500/10" : "bg-white dark:bg-slate-900"
                             }`}>
                             <div className="flex min-w-0 items-center gap-3">
                               <div
@@ -759,16 +833,16 @@ export default function ProjectSchedulePage() {
 
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="truncate text-[13px] font-semibold text-gray-900">
+                                  <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                                     {group.title}
                                   </span>
                                 </div>
-                                <div className="mt-0.5 text-[12px] text-gray-500">
+                                <div className="mt-0.5 text-[12px] text-slate-500 dark:text-slate-400">
                                   {group.children.length} sub task
                                   {group.children.length === 1 ? "" : "s"}
                                 </div>
 
-                                <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-gray-500">
+                                <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
                                   <span>{summary.totalHours} hrs total</span>
                                   <span>
                                     Start:{" "}
@@ -782,7 +856,7 @@ export default function ProjectSchedulePage() {
                             </div>
 
                             <ChevronDown
-                              className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${
+                              className={`h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500 transition-transform ${
                                 isOpen ? "rotate-180" : ""
                               }`}
                             />
@@ -791,24 +865,24 @@ export default function ProjectSchedulePage() {
                           {isOpen ? (
                             <div className="px-5 pb-4">
                               {group.children.length === 0 ? (
-                                <div className="px-3 py-3 text-[12px] text-gray-500">
+                                <div className="px-3 py-3 text-[12px] text-slate-500 dark:text-slate-400">
                                   No subtasks under this main task.
                                 </div>
                               ) : (
-                                <div className="divide-y divide-gray-200">
+                                <div className="divide-y divide-slate-200 dark:divide-slate-800">
                                   {group.children.map((step) => (
                                     <div key={step.id} className="py-3">
                                       <div className="grid grid-cols-1 gap-3 pl-2 lg:grid-cols-[minmax(0,1.2fr)_170px_1fr_1fr]">
                                         <div className="min-w-0">
-                                          <div className="text-[13px] font-semibold text-gray-900">
+                                          <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                                             {step.title}
                                           </div>
                                         </div>
 
-                                        <div className="flex items-start gap-2 text-[12px] text-gray-700">
-                                          <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                                        <div className="flex items-start gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                                          <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
                                           <div className="w-full">
-                                            <div className="text-gray-500 mb-1">
+                                            <div className="text-slate-500 dark:text-slate-400 mb-1">
                                               Estimated Hours
                                             </div>
                                             <input
@@ -824,15 +898,15 @@ export default function ProjectSchedulePage() {
                                                   e.target.value,
                                                 )
                                               }
-                                              className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[12px] text-gray-800 outline-none transition focus:border-emerald-500"
+                                              className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                                             />
                                           </div>
                                         </div>
 
-                                        <div className="flex items-start gap-2 text-[12px] text-gray-700">
-                                          <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                                        <div className="flex items-start gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                                          <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
                                           <div className="w-full">
-                                            <div className="text-gray-500 mb-1">
+                                            <div className="text-slate-500 dark:text-slate-400 mb-1">
                                               Start Datetime
                                             </div>
                                             <input
@@ -848,15 +922,15 @@ export default function ProjectSchedulePage() {
                                                   e.target.value,
                                                 )
                                               }
-                                              className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[12px] text-gray-800 outline-none transition focus:border-emerald-500"
+                                              className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                                             />
                                           </div>
                                         </div>
 
-                                        <div className="flex items-start gap-2 text-[12px] text-gray-700">
-                                          <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                                        <div className="flex items-start gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                                          <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
                                           <div className="w-full">
-                                            <div className="text-gray-500 mb-1">
+                                            <div className="text-slate-500 dark:text-slate-400 mb-1">
                                               End Datetime
                                             </div>
                                             <input
@@ -872,7 +946,7 @@ export default function ProjectSchedulePage() {
                                                   e.target.value,
                                                 )
                                               }
-                                              className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[12px] text-gray-800 outline-none transition focus:border-emerald-500"
+                                              className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                                             />
                                           </div>
                                         </div>
@@ -888,24 +962,22 @@ export default function ProjectSchedulePage() {
                     })
                   )}
                 </div>
-
-                <div className="h-6" />
               </div>
             </div>
           </section>
 
           <aside className="h-full min-h-0 flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
               <div className="px-4 py-4">
-                <div className="text-[16px] font-semibold text-gray-900">
+                <div className="text-[16px] font-semibold text-slate-900 dark:text-slate-100">
                   {jobNo}
                 </div>
-                <div className="mt-1 text-[12px] text-gray-500">{siteName}</div>
+                <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">{siteName}</div>
               </div>
 
-              <div className="border-t border-gray-200 px-4 py-4">
-                <div className="flex items-center gap-2 text-[12px] text-gray-600">
-                  <Clock3 className="h-4 w-4 text-gray-400" />
+              <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-4">
+                <div className="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
+                  <Clock3 className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                   {totalSubTasks} scheduled sub task
                   {totalSubTasks === 1 ? "" : "s"}
                 </div>
@@ -918,12 +990,12 @@ export default function ProjectSchedulePage() {
           </aside>
         </div>
 
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleGoBack}
             disabled={isNavigatingBack}
-            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-700 transition duration-150 hover:bg-gray-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70">
+            className="inline-flex h-10 w-28 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-700 transition duration-150 hover:bg-slate-50 hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
             {isNavigatingBack ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -950,13 +1022,13 @@ export default function ProjectSchedulePage() {
       </div>
 
       {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Save changes?
               </h3>
-              <p className="mt-1 text-sm text-gray-600">
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                 Do you want to save your schedule changes before leaving this
                 page?
               </p>
@@ -970,14 +1042,14 @@ export default function ProjectSchedulePage() {
                   setPendingAction(null);
                   setIsNavigatingNext(false);
                 }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
                 Cancel
               </button>
 
               <button
                 type="button"
                 onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 transform transition-all duration-150 hover:bg-gray-50 hover:opacity-80 hover:scale-[0.985] active:scale-95">
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
                 Don't Save
               </button>
 
@@ -1009,14 +1081,23 @@ export default function ProjectSchedulePage() {
           background: #eaf7e4;
           border-radius: 999px;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-track {
+          background: #0f172a;
+        }
         .green-scrollbar::-webkit-scrollbar-thumb {
           background: ${ACCENT};
           border-radius: 999px;
           border: 2px solid #eaf7e4;
         }
+        .dark .green-scrollbar::-webkit-scrollbar-thumb {
+          border-color: #0f172a;
+        }
         .green-scrollbar {
           scrollbar-color: ${ACCENT} #eaf7e4;
           scrollbar-width: thin;
+        }
+        .dark .green-scrollbar {
+          scrollbar-color: ${ACCENT} #0f172a;
         }
       `}</style>
     </div>

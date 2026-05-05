@@ -4,6 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
   Home,
   Users,
@@ -17,6 +18,8 @@ import {
   ChevronRight,
   ChevronDown,
   Menu,
+  Moon,
+  Sun,
   X,
 } from "lucide-react";
 
@@ -29,6 +32,12 @@ import {
   SidebarMenuButton,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  SidebarBadgeDot,
+  SidebarBadgePill,
+  type SidebarBadgeTone,
+  useSidebarBadges,
+} from "@/components/sidebar-badges";
 import { cn } from "@/lib/utils";
 
 type SubItem = {
@@ -331,8 +340,91 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const { open, setOpen } = useSidebar();
   const pathname = usePathname();
   const menuItems = ITEMS_BY_ROLE[role];
+  const rawBadges = useSidebarBadges();
+
+  // Aggregate child badges up to their parent so a parent menu shows the
+  // total even when its children are hidden. Numeric labels are summed; if any
+  // contributing badge is non-numeric we fall back to a count of distinct
+  // badges. A parent's own explicit badge takes precedence over the rollup.
+  // We also track which parent keys got their badge from a rollup so the
+  // render can hide those when the parent is expanded (the children's own
+  // badges are visible at that point — duplicating on the parent is noisy).
+  const { badges, rollupParentKeys } = React.useMemo(() => {
+    const merged: Record<string, ReturnType<typeof useSidebarBadges>[string]> = {
+      ...rawBadges,
+    };
+    const rollupKeys = new Set<string>();
+
+    const tonePriority: Record<SidebarBadgeTone, number> = {
+      neutral: 0,
+      info: 1,
+      success: 2,
+      warning: 3,
+      danger: 4,
+    };
+
+    for (const item of menuItems) {
+      if (rawBadges[item.key]) continue; // explicit parent badge wins
+      const subItems = item.subItems ?? [];
+      if (subItems.length === 0) continue;
+
+      let total = 0;
+      let allNumeric = true;
+      let contributing = 0;
+      let strongestTone: SidebarBadgeTone = "neutral";
+
+      for (const subItem of subItems) {
+        const childBadge = rawBadges[subItem.key];
+        if (!childBadge) continue;
+        contributing += 1;
+        const childTone: SidebarBadgeTone = childBadge.tone ?? "neutral";
+        if (tonePriority[childTone] > tonePriority[strongestTone]) {
+          strongestTone = childTone;
+        }
+        const numeric = Number(childBadge.label);
+        if (Number.isFinite(numeric)) {
+          total += numeric;
+        } else {
+          allNumeric = false;
+        }
+      }
+
+      if (contributing === 0) continue;
+
+      const label = allNumeric ? String(total) : String(contributing);
+      merged[item.key] = {
+        label,
+        tone: strongestTone,
+      };
+      rollupKeys.add(item.key);
+    }
+
+    return { badges: merged, rollupParentKeys: rollupKeys };
+  }, [rawBadges, menuItems]);
+
+  // Returns the badge to actually render for a parent menu row, given whether
+  // it's currently expanded. Rollup badges hide when expanded; explicit
+  // badges always show.
+  function getParentBadgeToRender(itemKey: string, expanded: boolean) {
+    const badge = badges[itemKey];
+    if (!badge) return null;
+    if (expanded && rollupParentKeys.has(itemKey)) return null;
+    return badge;
+  }
   const desktopScrollRef = React.useRef<HTMLDivElement | null>(null);
   const resolvedUser = user ?? FALLBACK_SIDEBAR_USER;
+  const { resolvedTheme, setTheme } = useTheme();
+  const [themeMounted, setThemeMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setThemeMounted(true);
+  }, []);
+
+  const isDark = themeMounted && resolvedTheme === "dark";
+
+  function toggleTheme() {
+    setTheme(isDark ? "light" : "dark");
+  }
 
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [desktopScrollFade, setDesktopScrollFade] = React.useState({
@@ -523,6 +615,18 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                             >
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
+                              {(() => {
+                                const badge = getParentBadgeToRender(
+                                  item.key,
+                                  isExpanded,
+                                );
+                                return badge ? (
+                                  <SidebarBadgePill
+                                    badge={badge}
+                                    className="ml-auto"
+                                  />
+                                ) : null;
+                              })()}
                             </Link>
 
                             <button
@@ -576,7 +680,15 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                         : "text-gray-500 hover:bg-gray-50",
                                     )}
                                   >
-                                    {subItem.title}
+                                    <span className="truncate">
+                                      {subItem.title}
+                                    </span>
+                                    {badges[subItem.key] ? (
+                                      <SidebarBadgePill
+                                        badge={badges[subItem.key]!}
+                                        className="ml-auto"
+                                      />
+                                    ) : null}
                                   </Link>
                                 );
                               })}
@@ -596,6 +708,12 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                         >
                           <Icon className="h-5 w-5 shrink-0" />
                           <span className="truncate">{item.title}</span>
+                          {badges[item.key] ? (
+                            <SidebarBadgePill
+                              badge={badges[item.key]!}
+                              className="ml-auto"
+                            />
+                          ) : null}
                         </Link>
                       )}
                     </div>
@@ -633,6 +751,49 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                   </div>
                   <div className="truncate text-xs text-gray-500">
                     {resolvedUser.email || ""}
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                        roleBadgeClass(effectiveRole),
+                      )}
+                    >
+                      {effectiveRole.toUpperCase()}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      className={cn(
+                        "relative inline-flex h-8 w-[58px] shrink-0 items-center rounded-full border px-1 transition-all duration-300",
+                        isDark
+                          ? "border-slate-700 bg-slate-900"
+                          : "border-amber-200 bg-amber-50",
+                      )}
+                    >
+                      <span className="absolute left-2 text-amber-500">
+                        <Sun className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="absolute right-2 text-slate-400">
+                        <Moon className="h-3.5 w-3.5" />
+                      </span>
+                      <span
+                        className={cn(
+                          "relative z-10 grid h-6 w-6 place-items-center rounded-full bg-white shadow-sm transition-transform duration-300",
+                          isDark ? "translate-x-6" : "translate-x-0",
+                        )}
+                      >
+                        {isDark ? (
+                          <Moon className="h-3.5 w-3.5 text-slate-700" />
+                        ) : (
+                          <Sun className="h-3.5 w-3.5 text-amber-500" />
+                        )}
+                      </span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -745,6 +906,18 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                               className="flex min-w-0 flex-1 items-center gap-3 px-3 text-sm font-medium transition-all duration-200">
                               <Icon className="h-5 w-5 shrink-0" />
                               <span className="truncate">{item.title}</span>
+                              {(() => {
+                                const badge = getParentBadgeToRender(
+                                  item.key,
+                                  isExpanded,
+                                );
+                                return badge ? (
+                                  <SidebarBadgePill
+                                    badge={badge}
+                                    className="ml-auto mr-1"
+                                  />
+                                ) : null;
+                              })()}
                             </Link>
 
                             <button
@@ -796,7 +969,15 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                         ? "bg-[#00BF63]/10 text-[#00BF63]"
                                         : "text-gray-500 hover:bg-gray-50",
                                     )}>
-                                    {subItem.title}
+                                    <span className="truncate">
+                                      {subItem.title}
+                                    </span>
+                                    {badges[subItem.key] ? (
+                                      <SidebarBadgePill
+                                        badge={badges[subItem.key]!}
+                                        className="ml-auto"
+                                      />
+                                    ) : null}
                                   </Link>
                                 );
                               })}
@@ -815,7 +996,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                           <Link
                             href={item.url}
                             className={cn(
-                              "w-full overflow-visible transition-all duration-200 ease-out",
+                              "w-full overflow-visible transition-all duration-200 ease-out relative",
                               open
                                 ? "flex h-10 items-center gap-3 px-3 rounded-md text-sm font-medium hover:scale-[1.01]"
                                 : cn(
@@ -832,9 +1013,22 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                 "transition-transform duration-200",
                               )}
                             />
-                            {open && (
-                              <span className="truncate">{item.title}</span>
-                            )}
+                            {open ? (
+                              <>
+                                <span className="truncate">{item.title}</span>
+                                {badges[item.key] ? (
+                                  <SidebarBadgePill
+                                    badge={badges[item.key]!}
+                                    className="ml-auto"
+                                  />
+                                ) : null}
+                              </>
+                            ) : badges[item.key] ? (
+                              <SidebarBadgeDot
+                                badge={badges[item.key]!}
+                                className="absolute right-2 top-2"
+                              />
+                            ) : null}
                           </Link>
                         </SidebarMenuButton>
                       )}
@@ -847,14 +1041,14 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-linear-to-b from-white via-white/95 to-transparent transition-opacity duration-200",
+                "pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-linear-to-b from-sidebar via-sidebar/95 to-transparent transition-opacity duration-200",
                 desktopScrollFade.showTop ? "opacity-100" : "opacity-0",
               )}
             />
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-linear-to-t from-white via-white/95 to-transparent transition-opacity duration-200",
+                "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-linear-to-t from-sidebar via-sidebar/95 to-transparent transition-opacity duration-200",
                 desktopScrollFade.showBottom ? "opacity-100" : "opacity-0",
               )}
             />
@@ -893,6 +1087,27 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                 )}
               </div>
 
+              {!open && (
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                  title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                  className={cn(
+                    "mt-2 relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-all duration-300",
+                    isDark
+                      ? "border-slate-700 bg-slate-900 text-slate-200"
+                      : "border-amber-200 bg-amber-50 text-amber-500",
+                  )}
+                >
+                  {isDark ? (
+                    <Moon className="h-3.5 w-3.5" />
+                  ) : (
+                    <Sun className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
+
               {open && (
                 <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-gray-900">
@@ -902,7 +1117,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                   {resolvedUser.email || ""}
                 </div>
 
-                  <div className="mt-2">
+                  <div className="mt-2 flex items-center gap-2">
                     <span
                       className={cn(
                         "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
@@ -911,6 +1126,38 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                     >
                       {effectiveRole.toUpperCase()}
                     </span>
+
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                      className={cn(
+                        "relative inline-flex h-8 w-[58px] shrink-0 items-center rounded-full border px-1 transition-all duration-300",
+                        isDark
+                          ? "border-slate-700 bg-slate-900"
+                          : "border-amber-200 bg-amber-50",
+                      )}
+                    >
+                      <span className="absolute left-2 text-amber-500">
+                        <Sun className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="absolute right-2 text-slate-400">
+                        <Moon className="h-3.5 w-3.5" />
+                      </span>
+                      <span
+                        className={cn(
+                          "relative z-10 grid h-6 w-6 place-items-center rounded-full bg-white shadow-sm transition-transform duration-300",
+                          isDark ? "translate-x-6" : "translate-x-0",
+                        )}
+                      >
+                        {isDark ? (
+                          <Moon className="h-3.5 w-3.5 text-slate-700" />
+                        ) : (
+                          <Sun className="h-3.5 w-3.5 text-amber-500" />
+                        )}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}

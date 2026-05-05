@@ -533,51 +533,18 @@ export async function GET(request: Request) {
       </div>
 
       <div class="section card">
-        <div class="heading">Cost Breakdown</div>
-        <table>
-          <thead>
-            <tr>
-              <th>Main Task</th>
-              <th class="text-right">Materials</th>
-              <th class="text-right">Labor</th>
-              <th class="text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${mainTasks
-              .map(
-                (task) => `
-                  <tr>
-                    <td>${escapeHtml(task.title)}</td>
-                    <td class="text-right">${escapeHtml(formatCurrency(task.materialTotal))}</td>
-                    <td class="text-right">${escapeHtml(formatCurrency(task.laborTotal))}</td>
-                    <td class="text-right">${escapeHtml(formatCurrency(task.totalCost))}</td>
-                  </tr>
-                `,
-              )
-              .join("")}
-          </tbody>
-        </table>
+        <div class="heading">Included Work</div>
+        <ul class="scope-list">
+          ${mainTasks
+            .map(
+              (task) => `<li><strong>${escapeHtml(task.title)}</strong></li>`,
+            )
+            .join("")}
+        </ul>
       </div>
 
       <div class="section">
         <div class="summary-box">
-          <div class="summary-row">
-            <span>Materials Total</span>
-            <span>${escapeHtml(formatCurrency(summary.materialTotal))}</span>
-          </div>
-          <div class="summary-row">
-            <span>Labor Total</span>
-            <span>${escapeHtml(formatCurrency(summary.laborTotal))}</span>
-          </div>
-          <div class="summary-row">
-            <span>Cost Total</span>
-            <span>${escapeHtml(formatCurrency(summary.totalCost))}</span>
-          </div>
-          <div class="summary-row">
-            <span>Markup / Profit</span>
-            <span>${escapeHtml(formatCurrency(summary.profitAmount))}</span>
-          </div>
           <div class="summary-row total">
             <span>Total Quotation</span>
             <span>${escapeHtml(formatCurrency(summary.quotationTotal))}</span>

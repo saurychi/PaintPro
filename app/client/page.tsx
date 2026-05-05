@@ -25,73 +25,12 @@ type OverviewResponse = {
   details?: string;
 };
 
-const END_OF_WORK_STATUS_ORDER = [
-  "review_pending",
-  "invoice_pending",
-  "payment_pending",
-  "employee_management_pending",
-  "conclude_job_pending",
-] as const;
-
-const END_OF_WORK_STEP_CONFIG = [
-  {
-    id: "review-and-final-checks",
-    title: "Review and Final Checks",
-    pendingStatus: "review_pending",
-  },
-  {
-    id: "invoice-generation",
-    title: "Invoice Generation",
-    pendingStatus: "invoice_pending",
-  },
-  {
-    id: "receive-payment",
-    title: "Receive Payment",
-    pendingStatus: "payment_pending",
-  },
-  {
-    id: "employee-management",
-    title: "Employee Management",
-    pendingStatus: "employee_management_pending",
-  },
-  {
-    id: "conclude-job",
-    title: "Conclude Job",
-    pendingStatus: "conclude_job_pending",
-  },
-] as const;
-
 // ─── helpers (same pattern as admin/page.tsx) ─────────────────────────────────
 
 function normalizeStatus(value?: string | null) {
   return String(value || "")
     .trim()
     .toLowerCase();
-}
-
-function isEndOfWorkStatus(status: string) {
-  return END_OF_WORK_STATUS_ORDER.includes(
-    status as (typeof END_OF_WORK_STATUS_ORDER)[number],
-  );
-}
-
-function getEndOfWorkChildStatus(
-  projectStatus: string,
-  stepIndex: number,
-): StepVisualStatus {
-  const normalized = normalizeStatus(projectStatus);
-
-  if (normalized === "completed" || normalized === "cancelled") return "done";
-  if (normalized === "in_progress") return stepIndex === 0 ? "active" : "pending";
-
-  const activeIndex = END_OF_WORK_STATUS_ORDER.indexOf(
-    normalized as (typeof END_OF_WORK_STATUS_ORDER)[number],
-  );
-
-  if (activeIndex === -1) return "pending";
-  if (stepIndex < activeIndex) return "done";
-  if (stepIndex === activeIndex) return "active";
-  return "pending";
 }
 
 function asArray<T = unknown>(value: unknown): T[] {
@@ -275,40 +214,9 @@ function collectEmployeeLabels(subTask: Record<string, unknown>) {
   return unique(labels);
 }
 
-// Ordered list of project-status values that represent the job-creation workflow.
-// A project moves through these sequentially; each value means "this step is now active".
-const JOB_CREATION_STATUSES = [
-  "main_task_pending",
-  "sub_task_pending",
-  "materials_pending",
-  "equipment_pending",
-  "schedule_pending",
-  "employee_assignment_pending",
-  "cost_estimation_pending",
-  "overview_pending",
-  "quotation_pending",
-];
-
-function getProjectPhase(
-  normalized: string,
-): "job_creation" | "ready" | "in_progress" | "completed" | "cancelled" {
-  if (JOB_CREATION_STATUSES.includes(normalized)) return "job_creation";
-  if (normalized === "ready_to_start") return "ready";
-  if (normalized === "in_progress" || isEndOfWorkStatus(normalized)) {
-    return "in_progress";
-  }
-  if (normalized === "completed") return "completed";
-  if (normalized === "cancelled") return "cancelled";
-  return "job_creation";
-}
-
 function buildProcessItems(
   mainTasks: Record<string, unknown>[],
-  projectEnd: string | null,
-  projectStatus: string,
 ): ProcessItem[] {
-  const normalized = normalizeStatus(projectStatus);
-  const phase = getProjectPhase(normalized);
   const items: ProcessItem[] = [];
 
   // "Start of Work" is active once job creation is done (ready_to_start),
@@ -429,53 +337,6 @@ function buildProcessItems(
     });
   }
 
-  const manageEndChildren: ProcessItem[] = END_OF_WORK_STEP_CONFIG.map(
-    (step, stepIndex) => {
-      const status = getEndOfWorkChildStatus(normalized, stepIndex);
-
-      return {
-        id: step.id,
-        title: step.title,
-        status,
-        startLabel: formatDateTime(projectEnd),
-        endLabel:
-          status === "done"
-            ? normalized === "cancelled" && step.id === "conclude-job"
-              ? "Cancelled"
-              : normalized === "completed" && step.id === "conclude-job"
-                ? "Completed"
-                : formatDateTime(projectEnd)
-            : status === "active"
-              ? "Working on it..."
-              : "-",
-      };
-    },
-  );
-
-  const manageEndStatus: StepVisualStatus = manageEndChildren.every(
-    (child) => child.status === "done",
-  )
-    ? "done"
-    : manageEndChildren.some((child) => child.status !== "pending")
-      ? "active"
-      : "pending";
-
-  items.push({
-    id: "manage-end-of-work",
-    title: "Manage End of Work",
-    status: manageEndStatus,
-    startLabel: formatDateTime(projectEnd),
-    endLabel:
-      phase === "completed"
-        ? formatDateTime(projectEnd)
-        : phase === "cancelled"
-          ? "Cancelled"
-          : manageEndStatus === "active"
-            ? "Working on it..."
-            : "-",
-    children: manageEndChildren,
-  });
-
   return items;
 }
 
@@ -492,6 +353,7 @@ export default function ClientDashboardPage() {
 
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!projectId) return;
@@ -538,19 +400,13 @@ export default function ClientDashboardPage() {
     }
 
     load();
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
   const projectStatus = readString(project?.status, project?.rawStatus);
 
-  const projectEnd =
-    readString(
-      project?.scheduled_end_datetime,
-      project?.scheduledEndDatetime,
-    ) || null;
-
   const processItems = useMemo(
-    () => buildProcessItems(mainTasks, projectEnd, projectStatus),
-    [mainTasks, projectEnd, projectStatus],
+    () => buildProcessItems(mainTasks),
+    [mainTasks],
   );
 
   const reviewSummary = useMemo(() => {
@@ -670,6 +526,7 @@ export default function ClientDashboardPage() {
               openSubtaskIds={openSubtaskIds}
               toggleProcessRow={toggleProcessRow}
               toggleSubtaskRow={toggleSubtaskRow}
+              onRefresh={() => setRefreshKey((k) => k + 1)}
               employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
             />

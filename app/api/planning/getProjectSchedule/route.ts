@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
-import { buildProjectSchedule } from "@/lib/planning/projectScheduling"
+import {
+  buildProjectSchedule,
+  type SchedulingGeneratedMainTask,
+} from "@/lib/planning/projectScheduling"
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays"
 
 function isObj(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -165,6 +169,14 @@ export async function POST(req: Request) {
       }
     }
 
+    // Pull manual blocks + public holidays (the same set the schedule pages
+    // render in red) so the scheduler skips both kinds when laying out
+    // subtasks. Without the cookie-driven holiday settings, the user would
+    // see freshly generated projects overlap holidays on the calendar.
+    const unavailableDays = await listScheduleUnavailableDays(
+      req.headers.get("cookie"),
+    )
+
     const schedule = buildProjectSchedule({
       project: {
         scheduled_start_datetime:
@@ -177,8 +189,9 @@ export async function POST(req: Request) {
             : null,
         dimensions: isObj(project.dimensions) ? project.dimensions : null,
       },
-      generatedTasks: generatedTasks as any,
+      generatedTasks: generatedTasks as SchedulingGeneratedMainTask[],
       existingBlocks,
+      unavailableDates: unavailableDays.map((day) => day.blockedDate),
     })
 
     return NextResponse.json(schedule)

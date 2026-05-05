@@ -37,6 +37,7 @@ export type ProjectSchedulingInput = {
   }
   generatedTasks: SchedulingGeneratedMainTask[]
   existingBlocks?: ExistingScheduledBlock[]
+  unavailableDates?: string[]
 }
 
 export type ProjectSubTaskScheduleItem = {
@@ -120,31 +121,66 @@ function moveToNextWorkdayStart(date: Date) {
   return next
 }
 
-function clampToWorkingTime(date: Date) {
-  const next = cloneDate(date)
-  const dayStart = startOfWorkday(next)
-  const dayEnd = endOfWorkday(next)
+function toDateKey(date: Date) {
+  // Compare against the LOCAL calendar day (matches how unavailable_days
+  // stores blocked_date — a DATE column, no timezone). Using
+  // date.toISOString().slice(0, 10) returns the UTC date, which lands on
+  // the wrong day whenever the server's local working hours straddle UTC
+  // midnight (e.g., NZ/AU early morning).
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const dd = String(date.getDate()).padStart(2, "0")
+  return `${yyyy}-${mm}-${dd}`
+}
 
-  if (next < dayStart) return dayStart
-  if (next >= dayEnd) return moveToNextWorkdayStart(next)
+function moveToNextAvailableWorkdayStart(date: Date, unavailableDateSet: Set<string>) {
+  let next = cloneDate(date)
+
+  while (unavailableDateSet.has(toDateKey(next))) {
+    next = moveToNextWorkdayStart(next)
+  }
 
   return next
 }
 
-function addWorkingHours(start: Date, hours: number) {
+function clampToWorkingTime(date: Date, unavailableDateSet = new Set<string>()) {
+  const next = cloneDate(date)
+  const availableDay = moveToNextAvailableWorkdayStart(next, unavailableDateSet)
+
+  if (availableDay.getTime() !== next.getTime()) {
+    return availableDay
+  }
+
+  const dayStart = startOfWorkday(next)
+  const dayEnd = endOfWorkday(next)
+
+  if (next < dayStart) return dayStart
+  if (next >= dayEnd) {
+    return moveToNextAvailableWorkdayStart(moveToNextWorkdayStart(next), unavailableDateSet)
+  }
+
+  return next
+}
+
+function addWorkingHours(start: Date, hours: number, unavailableDateSet = new Set<string>()) {
   let remainingMs = Math.max(0, hours) * 60 * 60 * 1000
-  let cursor = clampToWorkingTime(start)
+  let cursor = clampToWorkingTime(start, unavailableDateSet)
 
   if (remainingMs === 0) {
     return cloneDate(cursor)
   }
 
   while (remainingMs > 0) {
+    cursor = moveToNextAvailableWorkdayStart(cursor, unavailableDateSet)
+
     const dayEnd = endOfWorkday(cursor)
     const availableToday = dayEnd.getTime() - cursor.getTime()
 
     if (availableToday <= 0) {
-      cursor = moveToNextWorkdayStart(cursor)
+      cursor = moveToNextAvailableWorkdayStart(
+        moveToNextWorkdayStart(cursor),
+        unavailableDateSet
+      )
       continue
     }
 
@@ -153,7 +189,10 @@ function addWorkingHours(start: Date, hours: number) {
     remainingMs -= chunk
 
     if (remainingMs > 0) {
-      cursor = moveToNextWorkdayStart(cursor)
+      cursor = moveToNextAvailableWorkdayStart(
+        moveToNextWorkdayStart(cursor),
+        unavailableDateSet
+      )
     }
   }
 
@@ -190,20 +229,21 @@ function findNextFreeSlot(args: {
   durationHours: number
   assignedUserId: string | null
   blocksByUser: Map<string, Array<{ start: Date; end: Date }>>
+  unavailableDateSet: Set<string>
 }) {
-  const { desiredStart, durationHours, assignedUserId, blocksByUser } = args
+  const { desiredStart, durationHours, assignedUserId, blocksByUser, unavailableDateSet } = args
 
   if (!assignedUserId) {
-    const start = clampToWorkingTime(desiredStart)
-    const end = addWorkingHours(start, durationHours)
+    const start = clampToWorkingTime(desiredStart, unavailableDateSet)
+    const end = addWorkingHours(start, durationHours, unavailableDateSet)
     return { start, end }
   }
 
   const blocks = blocksByUser.get(assignedUserId) ?? []
-  let candidateStart = clampToWorkingTime(desiredStart)
+  let candidateStart = clampToWorkingTime(desiredStart, unavailableDateSet)
 
   while (true) {
-    const candidateEnd = addWorkingHours(candidateStart, durationHours)
+    const candidateEnd = addWorkingHours(candidateStart, durationHours, unavailableDateSet)
 
     const conflictingBlock = blocks.find((block) =>
       overlaps(candidateStart, candidateEnd, block.start, block.end)
@@ -216,7 +256,7 @@ function findNextFreeSlot(args: {
       }
     }
 
-    candidateStart = clampToWorkingTime(conflictingBlock.end)
+    candidateStart = clampToWorkingTime(conflictingBlock.end, unavailableDateSet)
   }
 }
 
@@ -263,7 +303,11 @@ export function buildProjectSchedule(
     blocksByUser.set(userId, blocks)
   }
 
-  let projectCursor = clampToWorkingTime(scheduledStart)
+  const unavailableDateSet = new Set(
+    (input.unavailableDates ?? []).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+  )
+
+  let projectCursor = clampToWorkingTime(scheduledStart, unavailableDateSet)
   let latestEnd: Date | null = null
 
   const scheduledItems: ProjectSubTaskScheduleItem[] = flattened.map((item) => {
@@ -272,6 +316,7 @@ export function buildProjectSchedule(
       durationHours: item.estimatedHours ?? 1,
       assignedUserId: item.assignedUserId,
       blocksByUser,
+      unavailableDateSet,
     })
 
     if (item.assignedUserId) {

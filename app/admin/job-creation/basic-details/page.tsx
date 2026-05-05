@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  ChevronDown,
   ChevronRight,
   RefreshCw,
   Settings2,
@@ -16,12 +17,6 @@ import MeasurementModal, {
   type MeasurementRow,
 } from "@/components/project-creation/MeasurementModal";
 import StaffMessageModal from "@/components/project-creation/StaffMessageModal";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type {
   ScaleBandKey,
   ScalePresetKey,
@@ -33,12 +28,13 @@ import {
   type ProjectScaledField,
 } from "@/lib/planning/materialEstimator";
 import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
-import { PhoneCountryPicker } from "@/components/PhoneCountryPicker";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
+import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
+import { useProjectNow } from "@/lib/time/useProjectNow";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
-const BORDER = "border border-gray-200";
+const BORDER = "border border-gray-200 dark:border-slate-700";
 const SESSION_DRAFT_KEY = "paintpro_job_creation_draft";
 
 type MaterialOut = {
@@ -48,8 +44,12 @@ type MaterialOut = {
 };
 
 type EquipmentOut = {
+  equipment_id?: string;
+  equipmentId?: string;
+  id?: string;
   name: string;
   notes?: string;
+  quantity?: number;
 };
 
 type DurationOut = {
@@ -100,8 +100,8 @@ type StaffUsersResponse = {
   staffUsers?: Array<{
     id: string | number | null;
     username?: string | null;
-      email?: string | null;
-      specialties?: unknown;
+    email?: string | null;
+    specialties?: unknown;
   }>;
 };
 
@@ -402,6 +402,8 @@ export default function BasicDetails() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get("projectId") || "";
+  const { settings: holidaySettings } = useHolidaySettings();
+  const { now: projectNow } = useProjectNow();
 
   const [projectCode, setProjectCode] = useState(() => generateProjectCode());
   const [projectName, setProjectName] = useState("");
@@ -453,8 +455,23 @@ export default function BasicDetails() {
     email: string;
     specialties: string[];
   };
-  type StaffConvMessage = { id: string; senderId: string; senderType: "admin" | "employee"; text: string; createdAt: string; };
-  type StaffConvData = { id: string; employeeId: string; employeeName: string; employeeEmail?: string; employeeRole?: string; employeeAvatarUrl?: string | null; lastMessage?: string; messages: StaffConvMessage[]; };
+  type StaffConvMessage = {
+    id: string;
+    senderId: string;
+    senderType: "admin" | "employee";
+    text: string;
+    createdAt: string;
+  };
+  type StaffConvData = {
+    id: string;
+    employeeId: string;
+    employeeName: string;
+    employeeEmail?: string;
+    employeeRole?: string;
+    employeeAvatarUrl?: string | null;
+    lastMessage?: string;
+    messages: StaffConvMessage[];
+  };
 
   const [surfaceMsgOpen, setSurfaceMsgOpen] = useState(false);
   const [surfaceMsgEmployees, setSurfaceMsgEmployees] = useState<
@@ -471,10 +488,16 @@ export default function BasicDetails() {
   const [surfaceMsgApplyingMeasurementId, setSurfaceMsgApplyingMeasurementId] =
     useState<string | null>(null);
   const [recipientPickerOpen, setRecipientPickerOpen] = useState(false);
-  const [surfaceMsgConversations, setSurfaceMsgConversations] = useState<StaffConvData[]>([]);
-  const [surfaceMsgConversationsLoading, setSurfaceMsgConversationsLoading] = useState(false);
-  const [surfaceMsgConversationError, setSurfaceMsgConversationError] = useState<string | null>(null);
-  const [surfaceMsgSpecsEmployeeIds, setSurfaceMsgSpecsEmployeeIds] = useState<string[]>([]);
+  const [surfaceMsgConversations, setSurfaceMsgConversations] = useState<
+    StaffConvData[]
+  >([]);
+  const [surfaceMsgConversationsLoading, setSurfaceMsgConversationsLoading] =
+    useState(false);
+  const [surfaceMsgConversationError, setSurfaceMsgConversationError] =
+    useState<string | null>(null);
+  const [surfaceMsgSpecsEmployeeIds, setSurfaceMsgSpecsEmployeeIds] = useState<
+    string[]
+  >([]);
   const surfaceMsgEmployeesLoadedRef = useRef(false);
   const surfaceMsgConversationsLoadedRef = useRef(false);
 
@@ -500,7 +523,11 @@ export default function BasicDetails() {
       if (draft.selectedPhoneCountry)
         setSelectedPhoneCountry(draft.selectedPhoneCountry);
       if (draft.description) setDescription(draft.description);
-      if (draft.selectedClientId) setSelectedClientId(draft.selectedClientId);
+      if (draft.selectedClientId) {
+        setSelectedClientId(draft.selectedClientId);
+      } else {
+        clearSelectedClientForm();
+      }
       if (draft.assignmentDay) setAssignmentDay(draft.assignmentDay);
       if (
         Array.isArray(draft.measurementRows) &&
@@ -686,26 +713,24 @@ export default function BasicDetails() {
   }, []);
 
   const surfaceMsgDisplayConversations = useMemo(() => {
-    let convs = [...surfaceMsgConversations];
+    const convs = [...surfaceMsgConversations];
 
-    // Inject a synthetic placeholder for a newly selected employee with no prior conv
-    if (
-      surfaceMsgEmployeeId &&
-      !convs.some((c) => c.employeeId === surfaceMsgEmployeeId)
-    ) {
-      const emp = surfaceMsgEmployees.find((e) => e.id === surfaceMsgEmployeeId);
-      if (emp) {
-        convs = [
-          {
-            id: surfaceMsgEmployeeId,
-            employeeId: surfaceMsgEmployeeId,
-            employeeName: emp.name,
-            employeeEmail: emp.email,
-            messages: [] as StaffConvMessage[],
-          },
-          ...convs,
-        ];
-      }
+    // Synth placeholders for every picked recipient that has no real conv yet,
+    // so successive picks all stay visible instead of replacing each other.
+    const syntheticEmployeeIds = new Set<string>(surfaceMsgSpecsEmployeeIds);
+    if (surfaceMsgEmployeeId) syntheticEmployeeIds.add(surfaceMsgEmployeeId);
+
+    for (const empId of syntheticEmployeeIds) {
+      if (convs.some((c) => c.employeeId === empId)) continue;
+      const emp = surfaceMsgEmployees.find((e) => e.id === empId);
+      if (!emp) continue;
+      convs.unshift({
+        id: empId,
+        employeeId: empId,
+        employeeName: emp.name,
+        employeeEmail: emp.email,
+        messages: [] as StaffConvMessage[],
+      });
     }
 
     // Pin specs-sent conversations to the top, preserving their send order
@@ -723,12 +748,19 @@ export default function BasicDetails() {
     }
 
     return convs;
-  }, [surfaceMsgEmployeeId, surfaceMsgConversations, surfaceMsgEmployees, surfaceMsgSpecsEmployeeIds]);
+  }, [
+    surfaceMsgEmployeeId,
+    surfaceMsgConversations,
+    surfaceMsgEmployees,
+    surfaceMsgSpecsEmployeeIds,
+  ]);
 
   const surfaceMsgSpecsConvIds = useMemo(
     () =>
       surfaceMsgSpecsEmployeeIds.map((empId) => {
-        const real = surfaceMsgConversations.find((c) => c.employeeId === empId);
+        const real = surfaceMsgConversations.find(
+          (c) => c.employeeId === empId,
+        );
         return real?.id ?? empId;
       }),
     [surfaceMsgSpecsEmployeeIds, surfaceMsgConversations],
@@ -741,10 +773,6 @@ export default function BasicDetails() {
     );
     return real?.id ?? surfaceMsgEmployeeId;
   }, [surfaceMsgEmployeeId, surfaceMsgConversations]);
-
-  const hasProjectNameInputs = Boolean(
-    description.trim() && clientName.trim() && address.trim(),
-  );
 
   const [availableDateEvents, setAvailableDateEvents] = useState<
     Array<{
@@ -761,8 +789,12 @@ export default function BasicDetails() {
     const missingFields: string[] = [];
 
     if (!description.trim()) missingFields.push("description");
-    if (!clientName.trim()) missingFields.push("client name");
-    if (!address.trim()) missingFields.push("site address");
+    if (!selectedClientId) {
+      missingFields.push("client");
+    } else {
+      if (!clientName.trim()) missingFields.push("selected client name");
+      if (!address.trim()) missingFields.push("selected client address");
+    }
 
     if (missingFields.length > 0) {
       toast.error(`Please fill out: ${missingFields.join(", ")}`);
@@ -831,9 +863,10 @@ export default function BasicDetails() {
       return {
         ...row,
         sizeBand: nextBand,
-        estimatedValue: row.isManualOverride && !row.isMeasurementPending
-          ? row.estimatedValue
-          : preset.bands[nextBand].suggested,
+        estimatedValue:
+          row.isManualOverride && !row.isMeasurementPending
+            ? row.estimatedValue
+            : preset.bands[nextBand].suggested,
         isMeasurementPending: false,
       };
     });
@@ -926,31 +959,6 @@ export default function BasicDetails() {
     });
   }
 
-  function handlePhoneCountryChange(callingCode: string) {
-    setSelectedPhoneCountry(callingCode);
-
-    const trimmedPhone = clientPhone.trim();
-
-    if (!trimmedPhone) {
-      setClientPhone(callingCode);
-      return;
-    }
-
-    const matchedExistingCode = phoneCountryOptions.find((item) =>
-      trimmedPhone.startsWith(item.calling_code),
-    );
-
-    if (matchedExistingCode) {
-      setClientPhone(
-        `${callingCode}${trimmedPhone.slice(matchedExistingCode.calling_code.length)}`,
-      );
-      return;
-    }
-
-    const normalizedPhone = trimmedPhone.replace(/^\+/, "");
-    setClientPhone(`${callingCode}${normalizedPhone}`);
-  }
-
   function handleNewClientPhoneCountryChange(callingCode: string) {
     setNewClientPhoneCountry(callingCode);
 
@@ -976,24 +984,50 @@ export default function BasicDetails() {
     setNewClientPhone(`${callingCode}${normalizedPhone}`);
   }
 
-  function handleClientSelect(clientId: string) {
-    setSelectedClientId(clientId);
+  function resolvePhoneCountry(phone: string | null | undefined) {
+    const rawPhone = String(phone ?? "").trim();
 
-    const client = clients.find((item) => item.client_id === clientId);
-    if (!client) return;
+    if (!rawPhone) return "+63";
 
+    const matchedCountry = phoneCountryOptions.find((item) =>
+      rawPhone.startsWith(item.calling_code),
+    );
+
+    if (matchedCountry) {
+      return matchedCountry.calling_code;
+    }
+
+    const extractedCountry = rawPhone.match(/^(\+\d+)/)?.[1];
+    return extractedCountry || "+63";
+  }
+
+  function clearSelectedClientForm() {
+    setSelectedClientId("");
+    setClientName("");
+    setClientEmail("");
+    setClientPhone("+63");
+    setSelectedPhoneCountry("+63");
+    setAddress("");
+  }
+
+  function applyClientToForm(client: ClientOption) {
+    setSelectedClientId(client.client_id);
     setClientName(client.full_name ?? "");
     setClientEmail(client.email ?? "");
     setClientPhone(client.phone ?? "");
     setAddress(client.address ?? "");
+    setSelectedPhoneCountry(resolvePhoneCountry(client.phone));
+  }
 
-    const matchedCountry = phoneCountryOptions.find((item) =>
-      (client.phone ?? "").startsWith(item.calling_code),
-    );
-
-    if (matchedCountry) {
-      setSelectedPhoneCountry(matchedCountry.calling_code);
+  function handleClientSelect(clientId: string) {
+    if (!clientId) {
+      clearSelectedClientForm();
+      return;
     }
+
+    const client = clients.find((item) => item.client_id === clientId);
+    if (!client) return;
+    applyClientToForm(client);
   }
 
   function openCreateClientModal() {
@@ -1071,12 +1105,7 @@ export default function BasicDetails() {
         ),
       );
 
-      setSelectedClientId(createdClient.client_id);
-      setClientName(createdClient.full_name ?? "");
-      setClientEmail(createdClient.email ?? "");
-      setClientPhone(createdClient.phone ?? "");
-      setAddress(createdClient.address ?? "");
-
+      applyClientToForm(createdClient);
       setIsCreateClientModalOpen(false);
       toast.success("Client created successfully.");
     } catch (error: any) {
@@ -1138,7 +1167,9 @@ export default function BasicDetails() {
 
       if (surfaceKeys.length > 0) {
         setMeasurementRows(
-          surfaceKeys.map((key) => makeRecommendedSurfaceRow(surfacePresets, key)),
+          surfaceKeys.map((key) =>
+            makeRecommendedSurfaceRow(surfacePresets, key),
+          ),
         );
       }
 
@@ -1235,24 +1266,40 @@ export default function BasicDetails() {
         nextTasks.map(async (task) => {
           const subTasks = await Promise.all(
             task.sub_tasks.map(async (subTask) => {
-              const equipmentData = await postJson<GetEquipmentApiResponse>(
-                "/api/planning/getEquipment",
-                {
-                  taskName: task.name,
-                  subTaskTitle: subTask.title,
-                },
-              );
+              // Equipment is a soft dependency — it can be filled in / fixed
+              // up later on the equipment-assignment page. A single bad
+              // catalog entry shouldn't kill the whole save flow, so log and
+              // continue with an empty list for that subtask.
+              try {
+                const equipmentData = await postJson<GetEquipmentApiResponse>(
+                  "/api/planning/getEquipment",
+                  {
+                    taskName: task.name,
+                    subTaskTitle: subTask.title,
+                  },
+                );
 
-              if ("error" in equipmentData) {
-                throw new Error(equipmentData.error);
+                if ("error" in equipmentData) {
+                  console.warn(
+                    `Equipment lookup failed for "${task.name}" / "${subTask.title}":`,
+                    equipmentData.error,
+                  );
+                  return { ...subTask, equipment: [] };
+                }
+
+                return {
+                  ...subTask,
+                  equipment: Array.isArray(equipmentData.equipment)
+                    ? equipmentData.equipment
+                    : [],
+                };
+              } catch (error) {
+                console.warn(
+                  `Equipment lookup threw for "${task.name}" / "${subTask.title}":`,
+                  error,
+                );
+                return { ...subTask, equipment: [] };
               }
-
-              return {
-                ...subTask,
-                equipment: Array.isArray(equipmentData.equipment)
-                  ? equipmentData.equipment
-                  : [],
-              };
             }),
           );
 
@@ -1482,20 +1529,32 @@ export default function BasicDetails() {
       toast.error("Please select a scheduled start date.");
       return;
     }
+    if (!selectedClientId) {
+      toast.error("Please choose an existing client or create a new one.");
+      return;
+    }
     if (!siteAddress) {
-      toast.error("Please enter the site address.");
+      toast.error(
+        "The selected client has no address. Update the client record or choose another client.",
+      );
       return;
     }
     if (!cName) {
-      toast.error("Please enter the client name.");
+      toast.error(
+        "The selected client has no name. Update the client record or choose another client.",
+      );
       return;
     }
     if (!cEmail || !/^\S+@\S+\.\S+$/.test(cEmail)) {
-      toast.error("Please enter a valid client email.");
+      toast.error(
+        "The selected client has an invalid email. Update the client record or choose another client.",
+      );
       return;
     }
     if (!cPhone) {
-      toast.error("Please enter the client phone.");
+      toast.error(
+        "The selected client has no phone number. Update the client record or choose another client.",
+      );
       return;
     }
     if (!description.trim()) {
@@ -1517,6 +1576,28 @@ export default function BasicDetails() {
 
       const nextTasks = await generateProjectDraft(previewTasks);
 
+      // The scheduler skips unavailable days (holidays + manual blocks) when
+      // laying out subtasks, so trust its first-subtask start over the user's
+      // raw pick — otherwise projects.scheduled_start_datetime would point at
+      // a blocked day while subtasks actually begin later.
+      let earliestSubtaskStartMs: number | null = null;
+      for (const task of nextTasks) {
+        for (const subTask of task.sub_tasks ?? []) {
+          const iso = (subTask as { scheduledStartDatetime?: string | null })
+            .scheduledStartDatetime;
+          if (!iso) continue;
+          const ms = new Date(iso).getTime();
+          if (!Number.isFinite(ms)) continue;
+          if (earliestSubtaskStartMs === null || ms < earliestSubtaskStartMs) {
+            earliestSubtaskStartMs = ms;
+          }
+        }
+      }
+      const effectiveStartDatetime =
+        earliestSubtaskStartMs !== null
+          ? new Date(earliestSubtaskStartMs).toISOString()
+          : scheduledStartDatetime;
+
       setLoading(true);
       setGenerationStage("Saving project draft");
 
@@ -1527,27 +1608,6 @@ export default function BasicDetails() {
       if (!creatorId) {
         throw new Error("You must be signed in to create a project.");
       }
-
-      console.log(
-        "createProject payload first subtask",
-        nextTasks?.[0]?.sub_tasks?.[0],
-      );
-
-      console.log(
-        "createProject payload",
-        JSON.stringify(
-          nextTasks.map((task) => ({
-            name: task.name,
-            sub_tasks: task.sub_tasks.map((subTask) => ({
-              title: subTask.title,
-              assignedEmployees: subTask.assignedEmployees,
-              requiredEmployeeCount: subTask.requiredEmployeeCount,
-            })),
-          })),
-          null,
-          2,
-        ),
-      );
 
       const createProjectResponse = await fetch("/api/planning/createProject", {
         method: "POST",
@@ -1568,7 +1628,7 @@ export default function BasicDetails() {
             title,
             description: description.trim() || null,
             site_address: siteAddress,
-            scheduled_start_datetime: scheduledStartDatetime,
+            scheduled_start_datetime: effectiveStartDatetime,
             scheduled_end_datetime: scheduledEnd || null,
             end_date: null,
             status: "main_task_pending",
@@ -1630,7 +1690,7 @@ export default function BasicDetails() {
           basicDetails: {
             projectName: title,
             projectCode: projectRow.project_code,
-            scheduled_start_datetime: scheduledStartDatetime,
+            scheduled_start_datetime: effectiveStartDatetime,
             scheduled_end_datetime: scheduledEnd || null,
             address: siteAddress,
             clientName: cName,
@@ -1686,6 +1746,19 @@ export default function BasicDetails() {
   }, []);
 
   useEffect(() => {
+    if (!selectedClientId) return;
+
+    const selectedClient = clients.find(
+      (client) => client.client_id === selectedClientId,
+    );
+
+    if (!selectedClient) return;
+    applyClientToForm(selectedClient);
+  }, [clients, selectedClientId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function loadUnavailableScheduleDates() {
       try {
         const response = await fetch("/api/schedule/getUnavailableDates", {
@@ -1704,7 +1777,41 @@ export default function BasicDetails() {
           ? data.unavailableDates
           : [];
 
-        const today = new Date();
+        let holidayDates: Set<string> = new Set();
+
+        if (holidaySettings.enabled && holidaySettings.countryCode) {
+          const today = projectNow;
+          const years = Array.from(
+            new Set([today.getFullYear(), today.getFullYear() + 1]),
+          );
+
+          const holidayResults = await Promise.all(
+            years.map(async (year) => {
+              try {
+                const res = await fetch(
+                  `/api/holidays?country=${encodeURIComponent(
+                    holidaySettings.countryCode,
+                  )}&year=${year}`,
+                );
+                if (!res.ok) return [] as string[];
+                const json = await res.json();
+                return Array.isArray(json?.holidays)
+                  ? (json.holidays as Array<{ date: string }>).map(
+                      (h) => h.date,
+                    )
+                  : [];
+              } catch {
+                return [] as string[];
+              }
+            }),
+          );
+
+          holidayDates = new Set(holidayResults.flat());
+        }
+
+        if (cancelled) return;
+
+        const today = projectNow;
         const events: Array<{
           title: string;
           date: string;
@@ -1718,19 +1825,33 @@ export default function BasicDetails() {
 
           const dateKey = current.toISOString().slice(0, 10);
           const isUnavailable = unavailableDates.includes(dateKey);
+          const isHoliday = holidayDates.has(dateKey);
+
+          let className: string;
+          let title: string;
+
+          if (isUnavailable) {
+            className = "fc-unavailable-day";
+            title = "Unavailable";
+          } else if (isHoliday) {
+            className = "fc-holiday-day";
+            title = "Holiday";
+          } else {
+            className = "fc-available-day";
+            title = "Available";
+          }
 
           events.push({
-            title: isUnavailable ? "Unavailable" : "Available",
+            title,
             date: dateKey,
             display: "background",
-            className: isUnavailable
-              ? "fc-unavailable-day"
-              : "fc-available-day",
+            className,
           });
         }
 
         setAvailableDateEvents(events);
       } catch (error) {
+        if (cancelled) return;
         console.error("Failed to load unavailable schedule dates:", error);
 
         setAvailableDateEvents([]);
@@ -1738,7 +1859,11 @@ export default function BasicDetails() {
     }
 
     loadUnavailableScheduleDates();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [holidaySettings.enabled, holidaySettings.countryCode, projectNow]);
 
   const isBusy = saving || loading;
 
@@ -1761,13 +1886,8 @@ export default function BasicDetails() {
     setProjectName("");
     setScheduledStart("");
     setScheduledEnd("");
-    setAddress("");
-    setClientName("");
-    setClientEmail("");
-    setClientPhone("+63");
-    setSelectedPhoneCountry("+63");
+    clearSelectedClientForm();
     setDescription("");
-    setSelectedClientId("");
     setAssignmentDay("monday");
     setMeasurementRows([]);
     setPreviewTasks([]);
@@ -1882,7 +2002,9 @@ export default function BasicDetails() {
       surfaceMsgConversationsLoadedRef.current = true;
     } catch (error) {
       setSurfaceMsgConversationError(
-        error instanceof Error ? error.message : "Failed to load conversations.",
+        error instanceof Error
+          ? error.message
+          : "Failed to load conversations.",
       );
       surfaceMsgConversationsLoadedRef.current = false;
     } finally {
@@ -1987,10 +2109,9 @@ export default function BasicDetails() {
         }),
       });
 
-      const data =
-        (await response.json().catch(() => null)) as
-          | ExtractSurfaceMeasurementsApiResponse
-          | null;
+      const data = (await response
+        .json()
+        .catch(() => null)) as ExtractSurfaceMeasurementsApiResponse | null;
 
       if (!response.ok) {
         throw new Error(
@@ -2041,23 +2162,23 @@ export default function BasicDetails() {
 
   return (
     <>
-      <div className="flex h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 w-full flex-col px-4 py-3">
+      <div className="flex h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 w-full flex-col px-4 py-3 dark:bg-slate-950">
         <div className="mb-3 flex items-center gap-2 shrink-0">
-          <div className="text-xl font-semibold text-gray-900">Project</div>
-          <ChevronRight className="h-5 w-5 text-gray-300" aria-hidden />
-          <div className="text-xl font-semibold text-gray-900">
+          <div className="text-xl font-semibold text-gray-900 dark:text-slate-100">Project</div>
+          <ChevronRight className="h-5 w-5 text-gray-300 dark:text-slate-600" aria-hidden />
+          <div className="text-xl font-semibold text-gray-900 dark:text-slate-100">
             Project Creation
           </div>
         </div>
 
         <div className="min-h-0 flex-1">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
             <div
               className="h-1 w-full shrink-0"
               style={{ backgroundColor: ACCENT }}
             />
 
-            <div className="shrink-0 border-b border-gray-200 px-5 py-3">
+            <div className="shrink-0 border-b border-gray-200 px-5 py-3 dark:border-slate-800">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -2066,50 +2187,50 @@ export default function BasicDetails() {
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                       Basic Details
                     </p>
                   </div>
-                  <p className="mt-1 text-sm text-gray-600">
+                  <p className="mt-1 text-sm text-gray-600 dark:text-slate-400">
                     Complete the setup before generating the next step.
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300">
                   Draft Setup
                 </div>
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5 dark:bg-slate-950/30">
               <div className="grid h-full min-h-0 grid-cols-12 grid-rows-[auto_minmax(0,1fr)] gap-3">
-                <div className="col-span-12 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3">
+                <div className="col-span-12 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
                   <div className="mb-3 flex items-center gap-2">
                     <span
                       className="h-2 w-2 rounded-full"
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                       Project Overview
                     </p>
                   </div>
 
                   <div className="grid grid-cols-12 gap-2 items-end">
                     <div className="col-span-3 min-w-0">
-                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
+                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600 dark:text-slate-400">
                         Project Code
                       </label>
                       <input
                         value={projectCode}
                         readOnly
-                        className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 shadow-sm outline-none"
+                        className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 shadow-sm outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       />
                     </div>
 
                     <div className="col-span-6 min-w-0">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <label className="block text-[11px] font-medium text-gray-600">
+                        <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-400">
                           Project Name
                         </label>
 
@@ -2129,7 +2250,8 @@ export default function BasicDetails() {
                             if (!isGeneratingProjectName) {
                               e.currentTarget.style.backgroundColor = ACCENT;
                             }
-                          }}>
+                          }}
+                        >
                           {isGeneratingProjectName ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
@@ -2145,20 +2267,21 @@ export default function BasicDetails() {
                         value={projectName}
                         onChange={(e) => setProjectName(e.target.value)}
                         placeholder="Enter project name"
-                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
+                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500`}
                         style={{ ["--tw-ring-color" as any]: ACCENT }}
                       />
                     </div>
 
                     <div className="col-span-3 min-w-0">
-                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
+                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600 dark:text-slate-400">
                         Scheduled Start Date
                       </label>
 
                       <button
                         type="button"
                         onClick={() => setIsScheduleCalendarOpen(true)}
-                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50`}>
+                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700`}
+                      >
                         {scheduledStart || "Select start date"}
                       </button>
 
@@ -2171,35 +2294,35 @@ export default function BasicDetails() {
                   </div>
                 </div>
 
-                <div className="col-span-5 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="col-span-5 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
                   <div className="mb-3 flex items-center gap-2">
                     <span
                       className="h-2 w-2 rounded-full"
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                       Client Details
                     </p>
                   </div>
 
                   <div className="grid grid-cols-12 gap-2">
                     <div className="col-span-12 min-w-0">
-                      <label className="text-[11px] font-medium text-gray-600">
+                      <label className="text-[11px] font-medium text-gray-600 dark:text-slate-400">
                         Site Address
                       </label>
                       <textarea
                         value={address}
-                        onChange={(e) => setAddress(e.target.value)}
+                        readOnly
+                        disabled
                         placeholder="Enter site address"
                         rows={2}
-                        className={`mt-1.5 min-h-[72px] w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}
+                        className={`mt-1.5 min-h-[72px] w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none disabled:cursor-default disabled:opacity-100 disabled:text-gray-900 dark:bg-slate-800 dark:text-slate-100 dark:disabled:text-slate-100 dark:placeholder:text-slate-500`}
                       />
                     </div>
 
                     <div className="col-span-8 min-w-0">
-                      <label className="text-[11px] font-medium text-gray-600">
+                      <label className="text-[11px] font-medium text-gray-600 dark:text-slate-400">
                         Client Name
                       </label>
                       <select
@@ -2207,7 +2330,8 @@ export default function BasicDetails() {
                         onChange={(e) => handleClientSelect(e.target.value)}
                         className={`mt-1.5 h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
                         style={{ ["--tw-ring-color" as any]: ACCENT }}
-                        disabled={clientsLoading}>
+                        disabled={clientsLoading}
+                      >
                         <option value="">
                           {clientsLoading
                             ? "Loading clients..."
@@ -2216,7 +2340,8 @@ export default function BasicDetails() {
                         {clients.map((client) => (
                           <option
                             key={client.client_id}
-                            value={client.client_id}>
+                            value={client.client_id}
+                          >
                             {client.full_name || "Unnamed Client"}
                           </option>
                         ))}
@@ -2237,33 +2362,35 @@ export default function BasicDetails() {
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = ACCENT;
-                        }}>
+                        }}
+                      >
                         Create New Client
                       </button>
                     </div>
 
                     <div className="col-span-12 min-w-0">
-                      <label className="text-[11px] font-medium text-gray-600">
+                      <label className="text-[11px] font-medium text-gray-600 dark:text-slate-400">
                         Client Phone
                       </label>
 
                       <div className="mt-1.5 grid grid-cols-[104px_minmax(0,1fr)] gap-2">
                         <div className="min-w-0">
-                          <PhoneCountryPicker
-                            value={selectedPhoneCountry}
-                            options={phoneCountryOptions}
-                            onChange={handlePhoneCountryChange}
-                          />
+                          <div className="flex h-[42px] w-full items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-normal text-gray-900 shadow-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                            <span className="truncate">
+                              {selectedPhoneCountry}
+                            </span>
+                            <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+                          </div>
                         </div>
 
                         <div
-                          className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm focus-within:ring-2`}
-                          style={{ ["--tw-ring-color" as any]: ACCENT }}>
-                          <span className="shrink-0 px-3 text-sm text-gray-500">
+                          className={`flex h-9 min-w-0 w-full items-center overflow-hidden rounded-lg border ${BORDER} bg-white shadow-sm dark:bg-slate-800`}
+                        >
+                          <span className="shrink-0 px-3 text-sm text-gray-500 dark:text-slate-400">
                             {selectedPhoneCountry}
                           </span>
 
-                          <span className="h-5 w-px shrink-0 bg-gray-200" />
+                          <span className="h-5 w-px shrink-0 bg-gray-200 dark:bg-slate-700" />
 
                           <input
                             value={
@@ -2271,13 +2398,10 @@ export default function BasicDetails() {
                                 ? clientPhone.slice(selectedPhoneCountry.length)
                                 : clientPhone
                             }
-                            onChange={(e) =>
-                              setClientPhone(
-                                `${selectedPhoneCountry}${e.target.value.replace(/^\+/, "")}`,
-                              )
-                            }
+                            readOnly
+                            disabled
                             placeholder="000-000-0000"
-                            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none"
+                            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none disabled:cursor-default disabled:opacity-100 disabled:text-gray-900 dark:text-slate-100 dark:disabled:text-slate-100 dark:placeholder:text-slate-500"
                           />
                         </div>
                       </div>
@@ -2285,14 +2409,14 @@ export default function BasicDetails() {
                   </div>
                 </div>
 
-                <div className="col-span-7 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col">
+                <div className="col-span-7 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className="h-2 w-2 rounded-full"
                       style={{ backgroundColor: ACCENT }}
                       aria-hidden="true"
                     />
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                       Description
                     </p>
                   </div>
@@ -2300,14 +2424,14 @@ export default function BasicDetails() {
                   <div className="flex min-h-0 flex-1 flex-col gap-2.5">
                     {/* Description + Recommend Surfaces */}
                     <div className="flex flex-1 min-h-0 flex-col gap-1.5">
-                      <label className="text-[11px] font-medium text-gray-600">
+                      <label className="text-[11px] font-medium text-gray-600 dark:text-slate-400">
                         Project Description
                       </label>
                       <textarea
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         placeholder="Write a summary of the project scope (e.g. interior repaint of 3-bedroom house)"
-                        className={`flex-1 min-h-0 w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2`}
+                        className={`flex-1 min-h-0 w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500`}
                         style={{ ["--tw-ring-color" as any]: ACCENT }}
                       />
                       <button
@@ -2329,7 +2453,8 @@ export default function BasicDetails() {
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = ACCENT;
-                        }}>
+                        }}
+                      >
                         {isGeneratingTasks ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -2343,9 +2468,10 @@ export default function BasicDetails() {
 
                     {/* Configured surfaces */}
                     <div
-                      className={`rounded-xl border ${BORDER} bg-gray-50 p-2`}>
+                      className={`rounded-xl border ${BORDER} bg-gray-50 p-2 dark:bg-slate-800/60`}
+                    >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
                           Configured Surfaces
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -2353,7 +2479,8 @@ export default function BasicDetails() {
                             <button
                               type="button"
                               onClick={handleOpenSurfaceMsg}
-                              className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100">
+                              className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
+                            >
                               <MessageSquare className="h-3 w-3" />
                               Message Employee
                             </button>
@@ -2369,7 +2496,8 @@ export default function BasicDetails() {
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.backgroundColor = ACCENT;
-                            }}>
+                            }}
+                          >
                             <Settings2 className="h-3 w-3" />
                             Edit
                           </button>
@@ -2377,7 +2505,7 @@ export default function BasicDetails() {
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {summaryChips.length === 0 ? (
-                          <span className="text-[11px] text-gray-400">
+                          <span className="text-[11px] text-gray-400 dark:text-slate-500">
                             Enter a description and click Recommend Surfaces, or
                             edit manually.
                           </span>
@@ -2386,12 +2514,13 @@ export default function BasicDetails() {
                             {summaryChips.slice(0, 6).map((chip) => (
                               <span
                                 key={chip.id}
-                                className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                                className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                              >
                                 {chip.label}
                               </span>
                             ))}
                             {measurementRows.length > 6 ? (
-                              <span className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                              <span className="inline-flex rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                                 +{measurementRows.length - 6} more
                               </span>
                             ) : null}
@@ -2404,23 +2533,25 @@ export default function BasicDetails() {
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-2.5">
+            <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <button
                     type="button"
-                    className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/15"
                     onClick={handleRemoveDraft}
-                    disabled={isBusy || !hasChanges}>
+                    disabled={isBusy || !hasChanges}
+                  >
                     Remove Changes
                   </button>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    className="w-[140px] rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-300"
+                    className="w-[140px] rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     onClick={() => router.back()}
-                    disabled={isBusy}>
+                    disabled={isBusy}
+                  >
                     Go Back
                   </button>
                   <button
@@ -2438,7 +2569,8 @@ export default function BasicDetails() {
                       if (!isBusy) {
                         e.currentTarget.style.backgroundColor = ACCENT;
                       }
-                    }}>
+                    }}
+                  >
                     {isBusy ? "Processing..." : "Generate"}
                   </button>
                 </div>
@@ -2509,6 +2641,26 @@ export default function BasicDetails() {
         applyingMeasurementMessageId={surfaceMsgApplyingMeasurementId}
         onSend={handleSendSurfaceMsg}
         onCreateNew={handleOpenSurfaceMsgRecipientPicker}
+        recipientPickerOpen={recipientPickerOpen}
+        onRecipientPickerOpenChange={setRecipientPickerOpen}
+        recipientOptions={surfaceMsgEmployees}
+        loadingRecipients={surfaceMsgLoadingEmployees}
+        recipientLoadError={surfaceMsgLoadError}
+        onRetryLoadRecipients={() => {
+          void handleSurfaceMsgProceed(true);
+        }}
+        onSelectRecipient={(emp) => {
+          const hasExisting = surfaceMsgConversations.some(
+            (c) => c.employeeId === emp.id,
+          );
+          if (!hasExisting) {
+            setSurfaceMsgText(formatSurfaceMessage());
+            setSurfaceMsgSpecsEmployeeIds((prev) =>
+              prev.includes(emp.id) ? prev : [...prev, emp.id],
+            );
+          }
+          setSurfaceMsgEmployeeId(emp.id);
+        }}
         onFillSpecs={() => {
           setSurfaceMsgText(formatSurfaceMessage());
           if (surfaceMsgEmployeeId) {
@@ -2534,81 +2686,25 @@ export default function BasicDetails() {
         }}
       />
 
-      {/* Recipient Picker Modal */}
-      <Dialog open={recipientPickerOpen} onOpenChange={setRecipientPickerOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Pick a recipient</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2">
-            {surfaceMsgLoadError ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                <p className="font-semibold">Could not load employees</p>
-                <p className="mt-1 text-xs leading-5">{surfaceMsgLoadError}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleSurfaceMsgProceed(true);
-                  }}
-                  className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 transition hover:bg-red-100">
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Retry
-                </button>
-              </div>
-            ) : null}
-            {surfaceMsgEmployees.length === 0 &&
-              !surfaceMsgLoadingEmployees && (
-                <div className="text-gray-500 text-sm">
-                  No employees available.
-                </div>
-              )}
-            {surfaceMsgLoadingEmployees && (
-              <div className="text-gray-500 text-sm">Loading employees...</div>
-            )}
-            {surfaceMsgEmployees.map((emp) => (
-              <button
-                key={emp.id}
-                className="w-full rounded border px-4 py-2 text-left hover:bg-gray-100"
-                onClick={() => {
-                  const hasExisting = surfaceMsgConversations.some(
-                    (c) => c.employeeId === emp.id,
-                  );
-                  if (!hasExisting) {
-                    setSurfaceMsgText(formatSurfaceMessage());
-                    setSurfaceMsgSpecsEmployeeIds((prev) =>
-                      prev.includes(emp.id) ? prev : [...prev, emp.id],
-                    );
-                  }
-                  setSurfaceMsgEmployeeId(emp.id);
-                  setRecipientPickerOpen(false);
-                }}>
-                {emp.name}{" "}
-                <span className="text-xs text-gray-400">{emp.email}</span>
-              </button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {loading ? (
-        <div className="fixed inset-0 z-80 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
+        <div className="fixed inset-0 z-80 flex items-center justify-center bg-white/80 backdrop-blur-sm dark:bg-slate-950/80">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/30">
             <div className="flex flex-col items-center text-center">
-              <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
+              <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-500/10">
                 <Loader2 className="h-7 w-7 animate-spin text-emerald-600" />
               </div>
 
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
                 Generating Project Setup
               </h2>
 
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-gray-600 dark:text-slate-400">
                 PaintPro is generating the project setup and preparing it for
                 saving.
               </p>
 
               {generationStage ? (
-                <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
+                <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>{generationStage}</span>
                 </div>
@@ -2621,6 +2717,7 @@ export default function BasicDetails() {
       <ScheduleCalendarModal
         open={isScheduleCalendarOpen}
         selectedDate={scheduledStart}
+        initialDate={projectNow}
         availableDateEvents={availableDateEvents}
         onClose={() => setIsScheduleCalendarOpen(false)}
         onSelectDate={(date) => {

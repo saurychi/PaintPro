@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Plus, X } from "lucide-react";
+import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
 import type {
   ScaleBandKey,
   ScalePresetKey,
@@ -64,6 +65,13 @@ export default function MeasurementModal({
   const [isAddSurfaceModalOpen, setIsAddSurfaceModalOpen] = useState(false);
   const [newSurfacePresetKey, setNewSurfacePresetKey] =
     useState<ScalePresetKey>(allPresetKeys[0] ?? "interior_wall_area_m2");
+  const [measurementPendingDelete, setMeasurementPendingDelete] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+  const [selectedMeasurementIdsForDelete, setSelectedMeasurementIdsForDelete] =
+    useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   function openAddSurfaceModal() {
     const firstPresetKey = allPresetKeys[0];
@@ -76,6 +84,20 @@ export default function MeasurementModal({
 
   function closeAddSurfaceModal() {
     setIsAddSurfaceModalOpen(false);
+  }
+
+  function toggleMeasurementDeleteSelection(id: string) {
+    setSelectedMeasurementIdsForDelete((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function removeSelectedMeasurements(ids: Set<string>) {
+    ids.forEach((id) => onRemove(id));
+    setSelectedMeasurementIdsForDelete(new Set());
   }
 
   function confirmAddSurface() {
@@ -92,17 +114,17 @@ export default function MeasurementModal({
       <div className="relative flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
         <div className="h-1.5 w-full shrink-0 bg-[#00c065]" />
 
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 bg-linear-to-r from-emerald-950/50 via-slate-900 to-slate-900 px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4">
           <div className="min-w-0">
-            <div className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-300">
+            <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-[#00a054]">
               Project Measurements
             </div>
 
-            <h2 className="mt-3 text-lg font-semibold text-white">
+            <h2 className="mt-3 text-lg font-semibold text-gray-900">
               Edit Measurements
             </h2>
 
-            <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-300">
+            <p className="mt-1 max-w-2xl text-sm leading-5 text-gray-500">
               Select the surface type, choose a quick size scale, then refine
               the exact measurement if needed.
             </p>
@@ -122,14 +144,25 @@ export default function MeasurementModal({
               {rows.length} measurement{rows.length === 1 ? "" : "s"} added
             </div>
 
-            <button
-              type="button"
-              onClick={openAddSurfaceModal}
-              disabled={loadingPresets || allPresetKeys.length === 0}
-              className="inline-flex items-center gap-2 rounded-full bg-[#00c065] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
-              <Plus className="h-4 w-4" />
-              Add Measurement
-            </button>
+            <div className="flex items-center gap-2">
+              {selectedMeasurementIdsForDelete.size > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100"
+                >
+                  Remove ({selectedMeasurementIdsForDelete.size})
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={openAddSurfaceModal}
+                disabled={loadingPresets || allPresetKeys.length === 0}
+                className="inline-flex items-center gap-2 rounded-full bg-[#00c065] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
+                <Plus className="h-4 w-4" />
+                Add Measurement
+              </button>
+            </div>
           </div>
 
           <div
@@ -177,7 +210,18 @@ export default function MeasurementModal({
                     <div
                       key={row.id}
                       className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(220px,0.7fr)_auto]">
+                      <div className="grid gap-4 xl:grid-cols-[32px_minmax(0,1.25fr)_minmax(220px,0.7fr)_auto]">
+                        <label className="flex h-9 items-center xl:justify-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedMeasurementIdsForDelete.has(row.id)}
+                            onChange={() =>
+                              toggleMeasurementDeleteSelection(row.id)
+                            }
+                            className="h-4 w-4 rounded border-gray-300 accent-[#00c065]"
+                            aria-label={`Select ${preset.label} for deletion`}
+                          />
+                        </label>
                         <div className="min-w-0">
                           <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                             Surface Type
@@ -284,7 +328,12 @@ export default function MeasurementModal({
                         <div className="flex items-start justify-end">
                           <button
                             type="button"
-                            onClick={() => onRemove(row.id)}
+                            onClick={() =>
+                              setMeasurementPendingDelete({
+                                id: row.id,
+                                label: preset.label,
+                              })
+                            }
                             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                             aria-label="Remove measurement">
                             <X className="h-4 w-4" />
@@ -318,16 +367,16 @@ export default function MeasurementModal({
         </div>
 
         {isAddSurfaceModalOpen ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 px-4 backdrop-blur-[1px]">
-            <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-950/30 px-4 backdrop-blur-[1px]">
+            <div className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
               <div className="h-1.5 w-full bg-[#00c065]" />
 
-              <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-linear-to-r from-emerald-950/50 via-slate-900 to-slate-900 px-5 py-4">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4">
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-white">
+                  <h3 className="text-base font-semibold text-gray-900">
                     Add Measurement
                   </h3>
-                  <p className="mt-1 text-sm leading-5 text-slate-300">
+                  <p className="mt-1 text-sm leading-5 text-gray-500">
                     Choose the surface type. The new row will start at medium
                     scale.
                   </p>
@@ -336,13 +385,13 @@ export default function MeasurementModal({
                 <button
                   type="button"
                   onClick={closeAddSurfaceModal}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-800 text-slate-300 shadow-sm transition hover:bg-slate-700 hover:text-white">
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:bg-gray-50 hover:text-gray-700">
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
               <div className="px-5 py-4">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                   Surface Type
                 </label>
 
@@ -351,7 +400,7 @@ export default function MeasurementModal({
                   onChange={(e) =>
                     setNewSurfacePresetKey(e.target.value as ScalePresetKey)
                   }
-                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-slate-800 px-3 text-sm text-white outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-900/40">
+                  className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100">
                   {allPresetKeys.map((key) => (
                     <option key={key} value={key}>
                       {surfacePresets[key].label}
@@ -360,7 +409,7 @@ export default function MeasurementModal({
                 </select>
               </div>
 
-              <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
+              <div className="flex items-center justify-end gap-3 border-t border-gray-100 px-5 py-4">
                 <button
                   type="button"
                   onClick={closeAddSurfaceModal}
@@ -380,6 +429,36 @@ export default function MeasurementModal({
           </div>
         ) : null}
       </div>
+
+      <ConfirmDeleteModal
+        open={Boolean(measurementPendingDelete)}
+        title="Remove measurement?"
+        description={
+          measurementPendingDelete
+            ? `Remove "${measurementPendingDelete.label}" from this project?`
+            : "Remove this measurement from this project?"
+        }
+        confirmLabel="Remove"
+        onCancel={() => setMeasurementPendingDelete(null)}
+        onConfirm={() => {
+          if (measurementPendingDelete) onRemove(measurementPendingDelete.id);
+          setMeasurementPendingDelete(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        open={bulkDeleteOpen}
+        title="Remove selected measurements?"
+        description={`Remove ${selectedMeasurementIdsForDelete.size} selected measurement${
+          selectedMeasurementIdsForDelete.size === 1 ? "" : "s"
+        } from this project?`}
+        confirmLabel="Remove selected"
+        onCancel={() => setBulkDeleteOpen(false)}
+        onConfirm={() => {
+          removeSelectedMeasurements(selectedMeasurementIdsForDelete);
+          setBulkDeleteOpen(false);
+        }}
+      />
     </div>
   );
 }

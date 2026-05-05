@@ -1,32 +1,36 @@
 "use client"
 
-import Image from "next/image"
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
+import {
+  fetchConversations,
+  fetchMessages,
+  postMessage,
+  fetchAvailableUsers,
+  markConversationAsRead,
+  type Message
+} from "@/lib/messages"
+import { supabase } from '@/lib/supabaseClient'
 import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { supabase } from "@/lib/supabaseClient"
+import { useClientProject } from "../ClientShellClient"
 
 const ACCENT = "#00c065"
 
 function roleKey(role: string | null | undefined) {
-  return String(role || "").trim().toLowerCase()
+  const raw = String(role || "").trim().toLowerCase()
+  // The project creator is always shown as "Project Manager" to the client,
+  // whether they're a manager or an admin.
+  if (raw === "admin" || raw === "manager") return "manager"
+  return raw
 }
 
 function roleLabel(role: string) {
   if (!role || role === "all") return "All"
+  if (role === "manager") return "Project Manager"
   return role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-type MessageRow = {
-  id: string
-  conversation_id: string
-  sender_id: string | null
-  client_id: string | null
-  content: string
-  created_at: string
-}
-
-type ConversationRow = {
+type ConversationSummary = {
   id: string
   name: string
   role: string
@@ -41,44 +45,48 @@ type AvailableUser = {
   username: string
   role: string
   profile_image_url: string | null
+  kind?: "user" | "client"
+  clientId?: string
+  projectId?: string
   assignedTasks?: string
 }
 
-type ProjectChatResponse = {
-  conversations?: Array<{
-    id: string
-    name: string
-    role: string
-    profile_image_url: string | null
-    lastMessage: string
-    lastActivity: number
-  }>
-  clientId?: string | null
-  error?: string
-  details?: string
+type ConversationPayload = {
+  conversation_id: string
+  users?: {
+    username?: string | null
+    role?: string | null
+    profile_image_url?: string | null
+  } | null
+  latest_message?: {
+    content?: string | null
+    created_at: string
+  } | null
+  last_read_at?: string | null
 }
 
-type ConversationCreateResponse = {
-  conversationId?: string
-  error?: string
-  details?: string
-}
+export default function AdminMessages() {
+  // The client portal supports two access modes:
+  //   1. Auth mode — supabase.auth has a user.
+  //   2. Project-cookie mode — the client is identified by the
+  //      paintpro_client_project_id cookie (no auth user).
+  // The conversations API resolves both modes via cookies, so we just need to
+  // know that we're in a valid client context to kick off the fetch. We treat
+  // either an auth user OR a bound projectId as "ready to load".
+  const { projectId: clientProjectId } = useClientProject()
 
-function readError(data: { error?: string; details?: string } | null, fallback: string) {
-  return [data?.error, data?.details].filter(Boolean).join(": ") || fallback
-}
-
-export default function ClientMessages() {
+  // UI State
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [loadErr, setLoadErr] = useState<string | null>(null)
 
-  const [currentClientId, setCurrentClientId] = useState<string | null>(null)
-  const [conversations, setConversations] = useState<ConversationRow[]>([])
-  const [chatHistory, setChatHistory] = useState<MessageRow[]>([])
+  // Data State
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [chatHistory, setChatHistory] = useState<Message[]>([])
 
+  // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([])
   const [userSearchQuery, setUserSearchQuery] = useState("")
@@ -88,28 +96,48 @@ export default function ClientMessages() {
   const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false)
   const [recipientLoadError, setRecipientLoadError] = useState<string | null>(null)
 
+  // Message actions state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState("")
   const [visibleDotsId, setVisibleDotsId] = useState<string | null>(null)
 
+  // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const showDots = (messageId: string) => {
+  const showDots = (msgId: string) => {
     if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
-    setVisibleDotsId(messageId)
+    setVisibleDotsId(msgId)
   }
-
   const startHideDots = () => {
     dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
   }
 
-  const isOwnMessage = useCallback((message: Pick<MessageRow, "client_id">) => {
-    return Boolean(currentClientId && message.client_id === currentClientId)
-  }, [currentClientId])
+  // 1. Get current user
+  useEffect(() => {
+    const getUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          setCurrentUserId(user.id)
+          return
+        }
+      } catch (error) {
+        console.error("Error fetching auth user:", error)
+      }
+      // No Supabase session. If we *also* don't have a project cookie there's
+      // nothing to load — drop the spinner. Otherwise leave it running and let
+      // loadConversations clear it once the cookie-mode fetch lands.
+      if (!clientProjectId) {
+        setIsLoading(false)
+      }
+    }
+    getUser()
+  }, [clientProjectId])
 
+  // 2. Auto-Scroll to bottom function
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -118,208 +146,163 @@ export default function ClientMessages() {
     scrollToBottom()
   }, [chatHistory])
 
-  const loadConversations = useCallback(async (selectChatId?: string, fallbackActiveChatId?: string | null) => {
+  // 3. Helper function to load/refresh conversations
+  const loadConversations = useCallback(async (userId: string, selectChatId?: string) => {
     try {
-      setLoadErr(null)
+      const data = await fetchConversations(userId) as ConversationPayload[]
+      const mappedConvos = data.map((cp) => {
+        // Calculate unread status by comparing timestamps
+        const lastMsg = cp.latest_message
+        const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
+        const lastMsgTime = lastMsg ? new Date(lastMsg.created_at).getTime() : 0
+        const isUnread = lastMsgTime > lastReadAt
 
-      const response = await fetch("/api/messages/project-chat", { cache: "no-store" })
-      const data = (await response.json().catch(() => null)) as ProjectChatResponse | null
+        return {
+          id: cp.conversation_id,
+          name: cp.users?.username || "Unknown User",
+          role: "Project Manager",
+          profile_image_url: cp.users?.profile_image_url || null,
+          lastMessage: lastMsg?.content || "Say hello!",
+          unread: isUnread,
+          lastActivity: lastMsgTime
+        }
+      })
 
-      if (!response.ok) {
-        throw new Error(readError(data, "Failed to load conversations."))
-      }
+      mappedConvos.sort((a, b) => b.lastActivity - a.lastActivity)
 
-      setCurrentClientId(data?.clientId ?? null)
-
-      const mappedConversations: ConversationRow[] = (data?.conversations ?? []).map((conversation) => ({
-        ...conversation,
-        unread: false,
-      }))
-
-      mappedConversations.sort((a, b) => b.lastActivity - a.lastActivity)
-      setConversations(mappedConversations)
+      setConversations(mappedConvos)
 
       if (selectChatId) {
         setActiveChatId(selectChatId)
-      } else if (!mappedConversations.some((chat) => chat.id === fallbackActiveChatId)) {
-        setActiveChatId(mappedConversations[0]?.id ?? null)
+      } else if (mappedConvos.length > 0) {
+        setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
       }
-    } catch (error: unknown) {
+    } catch (error) {
       console.error("Error loading conversations:", error)
-      setLoadErr(error instanceof Error ? error.message : "Failed to load conversations.")
       setConversations([])
-      setActiveChatId(null)
     } finally {
       setIsLoading(false)
     }
   }, [])
 
+  // 4. Initial Load — pick up pendingConvId from staff Message button if present.
+  // We fire as long as we know who the client is (via auth OR project cookie).
+  // The conversations API uses the cookies to resolve project-scoped chats for
+  // guest clients that don't have a Supabase auth user.
   useEffect(() => {
-    void loadConversations(undefined, null)
-    return () => {
-      if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
-    }
-  }, [loadConversations])
+    if (!currentUserId && !clientProjectId) return
+    const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined
+    if (pendingConvId) localStorage.removeItem("pendingConvId")
+    loadConversations(currentUserId ?? "", pendingConvId)
+  }, [currentUserId, clientProjectId, loadConversations])
 
+  // 5. When user CLICKS a chat, Mark as Read in DB
   useEffect(() => {
-    if (!activeChatId) {
-      setChatHistory([])
-      return
+    if (activeChatId && currentUserId) {
+      markConversationAsRead(activeChatId, currentUserId)
+      setConversations(prev => prev.map(c =>
+        c.id === activeChatId ? { ...c, unread: false } : c
+      ))
     }
+  }, [activeChatId, currentUserId])
 
-    const loadMessages = async () => {
-      try {
-        const response = await fetch(
-          `/api/messages/project-chat/messages?conversationId=${encodeURIComponent(activeChatId)}`,
-          { cache: "no-store" }
-        )
+  // 6. Fetch Chat History
+  useEffect(() => {
+    if (!activeChatId) return
 
-        const data = (await response.json().catch(() => null)) as
-          | MessageRow[]
-          | { error?: string; details?: string }
-          | null
-
-        if (!response.ok) {
-          throw new Error(
-            readError(
-              Array.isArray(data) ? null : data,
-              "Failed to load messages."
-            )
-          )
-        }
-
-        setChatHistory(Array.isArray(data) ? data : [])
-      } catch (error) {
-        console.error("Error loading messages:", error)
-      }
+    async function loadMessages() {
+      const msgs = await fetchMessages(activeChatId!)
+      setChatHistory(msgs)
     }
-
-    setConversations((prev) =>
-      prev.map((conversation) =>
-        conversation.id === activeChatId ? { ...conversation, unread: false } : conversation
-      )
-    )
-
-    void loadMessages()
+    loadMessages()
   }, [activeChatId])
 
+  // Focus input whenever a conversation is opened
   useEffect(() => {
-    if (activeChatId) {
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
+    if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
+  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
   useEffect(() => {
+    if (!currentUserId) return
+
     const channel = supabase
-      .channel("client-project-chat-listener")
+      .channel(`global-chat-listener`)
       .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        (payload: { new: MessageRow }) => {
-          const newMessage = payload.new
-          const ownMessage = isOwnMessage(newMessage)
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
+        (payload) => {
+          const newMessage = payload.new as Message
 
           if (newMessage.conversation_id === activeChatId) {
-            if (!ownMessage) {
+            // It's the chat we are currently looking at
+            if (newMessage.sender_id !== currentUserId) {
               setChatHistory((prev) => [...prev, newMessage])
+              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
             }
           }
 
-          setConversations((prev) => {
-            const updated = prev.map((conversation) =>
-              conversation.id === newMessage.conversation_id
+          // <-- NEW: Update the sidebar for ALL incoming messages and bump to top
+          setConversations(prev => {
+            const updated = prev.map(c =>
+              c.id === newMessage.conversation_id
                 ? {
-                    ...conversation,
-                    unread: !ownMessage && conversation.id !== activeChatId,
+                    ...c,
+                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
                     lastMessage: newMessage.content,
-                    lastActivity: new Date(newMessage.created_at).getTime(),
+                    lastActivity: new Date(newMessage.created_at).getTime()
                   }
-                : conversation
+                : c
             )
-
+            // Re-sort the array so this chat jumps to the top
             return updated.sort((a, b) => b.lastActivity - a.lastActivity)
           })
         }
       )
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [activeChatId, isOwnMessage])
+    return () => { supabase.removeChannel(channel) }
+  }, [activeChatId, currentUserId])
 
+  // 8. Handle Sending a Message
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !activeChatId) return
-
+    if (!inputMessage.trim() || !activeChatId || !currentUserId) return
     setIsSending(true)
     try {
-      const response = await fetch("/api/messages/project-chat/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId: activeChatId,
-          content: inputMessage.trim(),
-        }),
-      })
+      const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
+      setChatHistory((prev) => [...prev, sentMsg])
 
-      const data = (await response.json().catch(() => null)) as
-        | MessageRow
-        | { error?: string; details?: string }
-        | null
-
-      if (!response.ok || !data || Array.isArray(data)) {
-        throw new Error(readError(data as { error?: string; details?: string } | null, "Failed to send message."))
-      }
-
-      if ("client_id" in data && data.client_id) {
-        setCurrentClientId(data.client_id)
-      }
-
-      setChatHistory((prev) => [...prev, data as MessageRow])
-      setConversations((prev) => {
-        const updated = prev.map((conversation) =>
-          conversation.id === activeChatId
-            ? {
-                ...conversation,
-                unread: false,
-                lastMessage: inputMessage.trim(),
-                lastActivity: Date.now(),
-              }
-            : conversation
+      // <-- NEW: Update sidebar instantly for ourselves and bump to top
+      setConversations(prev => {
+        const updated = prev.map(c =>
+          c.id === activeChatId
+            ? { ...c, lastMessage: inputMessage, unread: false, lastActivity: Date.now() }
+            : c
         )
-
         return updated.sort((a, b) => b.lastActivity - a.lastActivity)
       })
+
       setInputMessage("")
     } catch (error) {
       console.error("Error sending message:", error)
     } finally {
       setIsSending(false)
+      // Focus after isSending clears so the input is no longer disabled
       setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") {
-      void handleSendMessage()
-    }
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleSendMessage()
   }
 
   const handleDelete = async (messageId: string) => {
     setOpenMenuId(null)
     startHideDots()
     try {
-      const response = await fetch(
-        `/api/messages/project-chat/messages?messageId=${encodeURIComponent(messageId)}`,
-        { method: "DELETE" }
-      )
-
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string; details?: string } | null
-        throw new Error(readError(data, "Failed to delete message."))
-      }
-
-      setChatHistory((prev) => prev.filter((message) => message.id !== messageId))
+      const res = await fetch(`/api/messages/manage?messageId=${messageId}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Failed to delete")
+      setChatHistory((prev) => prev.filter((m) => m.id !== messageId))
     } catch (error) {
       console.error("Error deleting message:", error)
     }
@@ -327,28 +310,15 @@ export default function ClientMessages() {
 
   const handleSaveEdit = async (messageId: string) => {
     if (!editText.trim()) return
-
     try {
-      const response = await fetch("/api/messages/project-chat/messages", {
+      const res = await fetch("/api/messages/manage", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId, content: editText.trim() }),
       })
-
-      const data = (await response.json().catch(() => null)) as
-        | MessageRow
-        | { error?: string; details?: string }
-        | null
-
-      if (!response.ok || !data || Array.isArray(data)) {
-        throw new Error(readError(data as { error?: string; details?: string } | null, "Failed to update message."))
-      }
-
-      setChatHistory((prev) =>
-        prev.map((message) =>
-          message.id === messageId ? { ...message, content: (data as MessageRow).content } : message
-        )
-      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || "Failed to update")
+      setChatHistory((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
       setEditingId(null)
       startHideDots()
     } catch (error) {
@@ -356,6 +326,7 @@ export default function ClientMessages() {
     }
   }
 
+  // Modal Handlers
   const loadAvailableRecipients = useCallback(async (force = false) => {
     if (hasLoadedRecipients && !force) return
 
@@ -363,29 +334,20 @@ export default function ClientMessages() {
     setRecipientLoadError(null)
 
     try {
-      const response = await fetch("/api/messages/project-chat/users", { cache: "no-store" })
-      const data = (await response.json().catch(() => null)) as
-        | AvailableUser[]
-        | { error?: string; details?: string }
-        | null
-
-      if (!response.ok) {
-        throw new Error(readError(Array.isArray(data) ? null : data, "Failed to load users."))
-      }
-
-      setAvailableUsers(Array.isArray(data) ? data : [])
+      const users = await fetchAvailableUsers(currentUserId ?? "") as AvailableUser[]
+      setAvailableUsers(users)
       setHasLoadedRecipients(true)
     } catch (error: unknown) {
-      console.error("Error loading users:", error)
+      console.error("Error loading recipients:", error)
       setAvailableUsers([])
       setHasLoadedRecipients(false)
       setRecipientLoadError(
-        error instanceof Error ? error.message : "Failed to load users."
+        error instanceof Error ? error.message : "Failed to load recipients."
       )
     } finally {
       setIsLoadingRecipients(false)
     }
-  }, [hasLoadedRecipients])
+  }, [currentUserId, hasLoadedRecipients])
 
   const handleOpenNewChat = () => {
     setIsNewChatOpen(true)
@@ -397,22 +359,22 @@ export default function ClientMessages() {
     }
   }
 
-  const handleStartConversation = async (targetUserId: string) => {
+  const handleStartConversation = async (recipient: AvailableUser) => {
+    if (!currentUserId) return
     setIsCreatingChat(true)
     try {
-      const response = await fetch("/api/messages/project-chat", {
+      const res = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId }),
+        body: JSON.stringify(
+          recipient.kind === "client"
+            ? { targetClientId: recipient.clientId, projectId: recipient.projectId }
+            : { targetUserId: recipient.id }
+        ),
       })
-
-      const data = (await response.json().catch(() => null)) as ConversationCreateResponse | null
-
-      if (!response.ok || !data?.conversationId) {
-        throw new Error(readError(data, "Failed to start conversation."))
-      }
-
-      await loadConversations(data.conversationId, activeChatId)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || "Failed to start conversation.")
+      await loadConversations(currentUserId, data.conversationId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
       setSelectedRoleFilter("all")
@@ -429,7 +391,7 @@ export default function ClientMessages() {
       ...Array.from(
         new Set(
           availableUsers
-            .map((user) => roleKey(user.role))
+            .map((u) => roleKey(u.role))
             .filter(Boolean)
         )
       ).sort(),
@@ -440,23 +402,20 @@ export default function ClientMessages() {
   const filteredUsers = useMemo(() => {
     const query = userSearchQuery.toLowerCase()
 
-    return availableUsers.filter((user) => {
-      const normalizedRole = roleKey(user.role)
+    return availableUsers.filter((u) => {
+      const normalizedRole = roleKey(u.role)
+      const matchesSearch =
+        u.username.toLowerCase().includes(query) ||
+        normalizedRole.includes(query) ||
+        (u.assignedTasks ?? "").toLowerCase().includes(query)
       const matchesRole = selectedRoleFilter === "all" || normalizedRole === selectedRoleFilter
 
-      return (
-        matchesRole &&
-        (
-          user.username.toLowerCase().includes(query) ||
-          normalizedRole.includes(query) ||
-          (user.assignedTasks ?? "").toLowerCase().includes(query)
-        )
-      )
+      return matchesSearch && matchesRole
     })
   }, [availableUsers, selectedRoleFilter, userSearchQuery])
 
   const activeChat = useMemo(
-    () => conversations.find((conversation) => conversation.id === activeChatId) || null,
+    () => conversations.find((c) => c.id === activeChatId) || null,
     [activeChatId, conversations]
   )
 
@@ -466,10 +425,12 @@ export default function ClientMessages() {
         <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
         <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
           <div className="flex gap-6 h-full overflow-hidden">
-            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
-              <p className="text-sm font-semibold text-gray-900 mb-3 shrink-0">Conversations</p>
+            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
+                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
+              </div>
               <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
+                <Loader2 className="h-5 w-5 text-gray-300 animate-spin dark:text-slate-500" />
               </div>
             </aside>
             <div className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm flex items-center justify-center min-w-0">
@@ -487,57 +448,77 @@ export default function ClientMessages() {
 
       <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
         <div className="flex gap-6 h-full overflow-hidden">
-          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm overflow-hidden flex flex-col min-w-[260px]">
-            <div className="flex items-center justify-between mb-3 shrink-0">
-              <p className="text-sm font-semibold text-gray-900">Conversations</p>
+
+          {/* Conversation Sidebar */}
+          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
+                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">Recent message threads</p>
+              </div>
               <button
                 onClick={handleOpenNewChat}
                 aria-label="Start new message"
                 title="Start new message"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00c065] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-[#00c065]/50 dark:hover:bg-[#00c065]/10 dark:hover:text-[#00c065]"
               >
                 <UserPlus className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="space-y-2 overflow-y-auto pr-1 min-h-0 custom-scrollbar">
-              {loadErr ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
-                  {loadErr}
-                </div>
-              ) : null}
+            <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
+              {conversations.map((chat) => {
+                const isActive = activeChatId === chat.id
 
-              {conversations.map((chat) => (
-                <button
-                  key={chat.id}
-                  onClick={() => setActiveChatId(chat.id)}
-                  className={[
-                    "w-full text-left rounded-lg border bg-white p-3 shadow-sm transition-colors hover:bg-gray-50",
-                    activeChatId === chat.id ? "border-[#00c065]" : "border-gray-200",
-                  ].join(" ")}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {chat.unread ? <span className="h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" /> : null}
-                        <p className="text-sm font-semibold text-gray-900 truncate">{chat.name}</p>
+                return (
+                  <button
+                    key={chat.id}
+                    onClick={() => setActiveChatId(chat.id)}
+                    className={[
+                      "group relative w-full text-left border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 dark:border-slate-800",
+                      isActive
+                        ? "bg-emerald-50/70 dark:bg-[#00c065]/10"
+                        : "bg-white hover:bg-gray-50 dark:bg-slate-900 dark:hover:bg-slate-800/70",
+                    ].join(" ")}
+                  >
+                    <span
+                      className={[
+                        "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-opacity",
+                        isActive ? "opacity-100 bg-[#00c065]" : "opacity-0 bg-transparent",
+                      ].join(" ")}
+                    />
+                    <div className="flex items-start gap-3 pl-1">
+                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {chat.profile_image_url ? (
+                          <img src={chat.profile_image_url} alt={chat.name} className="h-full w-full rounded-full object-cover" />
+                        ) : (
+                          <span>{chat.name.slice(0, 2).toUpperCase()}</span>
+                        )}
+                        {chat.unread ? <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900" /> : null}
                       </div>
-                      <p className={`mt-1 text-xs line-clamp-1 ${chat.unread ? "font-bold text-gray-900" : "text-gray-600"}`}>
-                        {chat.lastMessage}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              ))}
 
-              {!loadErr && conversations.length === 0 ? (
-                <div className="text-sm text-gray-400 mt-4 text-center">No active chats</div>
-              ) : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{chat.name}</p>
+                        </div>
+                        <p className={`mt-1 line-clamp-1 text-xs leading-5 ${chat.unread ? 'font-semibold text-gray-900 dark:text-slate-100' : 'text-gray-500 dark:text-slate-400'}`}>
+                          {chat.lastMessage}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+              {conversations.length === 0 && (
+                <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-slate-500">No active chats</div>
+              )}
             </div>
           </aside>
 
+          {/* Chat Area */}
           {activeChat ? (
             <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
+              {/* Header */}
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
@@ -553,105 +534,73 @@ export default function ClientMessages() {
                 </div>
               </div>
 
+              {/* Messages List */}
               <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
-                {chatHistory.length === 0 ? (
+                {chatHistory.length === 0 && (
                   <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
-                ) : null}
-
-                {openMenuId ? (
-                  <div
-                    className="fixed inset-0 z-10"
-                    onClick={() => {
-                      setOpenMenuId(null)
-                      startHideDots()
-                    }}
-                  />
-                ) : null}
-
-                {chatHistory.map((message) => {
-                  const isMe = isOwnMessage(message)
-                  const timeString = new Date(message.created_at).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
-                  const isEditing = editingId === message.id
-                  const menuOpen = openMenuId === message.id
-                  const dotsVisible = visibleDotsId === message.id || menuOpen
+                )}
+                {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
+                {chatHistory.map((msg) => {
+                  const isMe = msg.sender_id === currentUserId
+                  const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  const isEditing = editingId === msg.id
+                  const menuOpen = openMenuId === msg.id
+                  const dotsVisible = visibleDotsId === msg.id || menuOpen
 
                   return (
                     <div
-                      key={message.id}
+                      key={msg.id}
                       className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}
-                      onMouseEnter={() => isMe && showDots(message.id)}
+                      onMouseEnter={() => isMe && showDots(msg.id)}
                       onMouseLeave={() => isMe && startHideDots()}
                     >
-                      {isMe ? (
+                      {/* Dots button — left of bubble for sent messages */}
+                      {isMe && (
                         <div className="relative shrink-0 mb-0.5">
                           <button
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => setOpenMenuId(menuOpen ? null : message.id)}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
                             className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
                           >
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </button>
-                          {menuOpen ? (
+                          {menuOpen && (
                             <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
                               <button
-                                onClick={() => {
-                                  setEditingId(message.id)
-                                  setEditText(message.content)
-                                  setOpenMenuId(null)
-                                  startHideDots()
-                                }}
+                                onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
                                 className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
                               >
                                 Edit
                               </button>
                               <button
-                                onClick={() => void handleDelete(message.id)}
+                                onClick={() => handleDelete(msg.id)}
                                 className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
                               >
                                 Delete
                               </button>
                             </div>
-                          ) : null}
+                          )}
                         </div>
-                      ) : null}
+                      )}
 
+                      {/* Bubble + timestamp */}
                       <div className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
                         {isEditing ? (
                           <div className="w-full flex flex-col gap-1">
                             <input
                               autoFocus
                               value={editText}
-                              onChange={(event) => setEditText(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  void handleSaveEdit(message.id)
-                                }
-                                if (event.key === "Escape") {
-                                  setEditingId(null)
-                                }
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEdit(msg.id)
+                                if (e.key === 'Escape') setEditingId(null)
                               }}
                               className="px-3 py-2 text-sm rounded-lg border-2 outline-none"
                               style={{ borderColor: ACCENT }}
                             />
                             <div className="flex gap-2 justify-end">
-                              <button
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => setEditingId(null)}
-                                className="text-xs text-gray-400 hover:text-gray-600"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => void handleSaveEdit(message.id)}
-                                className="text-xs font-semibold"
-                                style={{ color: ACCENT }}
-                              >
-                                Save
-                              </button>
+                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveEdit(msg.id)} className="text-xs font-semibold" style={{ color: ACCENT }}>Save</button>
                             </div>
                           </div>
                         ) : (
@@ -662,7 +611,7 @@ export default function ClientMessages() {
                             ].join(" ")}
                             style={isMe ? { backgroundColor: ACCENT } : undefined}
                           >
-                            {message.content}
+                            {msg.content}
                           </div>
                         )}
                         <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
@@ -670,10 +619,11 @@ export default function ClientMessages() {
                     </div>
                   )
                 })}
-
+                {/* Auto-scroll target */}
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Input Area */}
               <div className="p-4 border-t border-gray-200 shrink-0">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
                   <input
@@ -682,12 +632,12 @@ export default function ClientMessages() {
                     placeholder="Enter your message..."
                     className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
                     value={inputMessage}
-                    onChange={(event) => setInputMessage(event.target.value)}
+                    onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
                   />
                   <button
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => void handleSendMessage()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleSendMessage}
                     disabled={isSending || !inputMessage.trim()}
                     className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
                     style={{ backgroundColor: ACCENT }}
@@ -707,21 +657,21 @@ export default function ClientMessages() {
         </div>
       </div>
 
+      {/* --- NEW CHAT MODAL --- */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
-        <DialogContent className="max-w-md bg-white border-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] p-0">
-          <div className="h-1.5 w-full bg-[#00c065]" />
-          <DialogHeader className="bg-emerald-50/70 p-6 pb-4 border-b border-emerald-100">
-            <DialogTitle className="text-xl font-semibold">New Message</DialogTitle>
+        <DialogContent className="max-w-md border-0 border-t-[6px] border-t-[#00c065] bg-white p-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] dark:bg-slate-900 dark:border-slate-700 dark:border-t-[#00c065]">
+          <DialogHeader className="border-b border-gray-200 bg-white px-6 py-5 dark:border-slate-700 dark:bg-slate-900">
+            <DialogTitle className="text-lg font-semibold text-gray-900 dark:text-slate-100">New Message</DialogTitle>
 
             <div className="relative mt-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-slate-500" />
               <input
                 type="text"
                 placeholder="Search by name, role, or task..."
                 value={userSearchQuery}
-                onChange={(event) => setUserSearchQuery(event.target.value)}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
                 disabled={isLoadingRecipients}
-                className="w-full pl-9 pr-4 py-2 bg-gray-50 border-0 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00c065]/20"
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00c065]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
             </div>
 
@@ -735,8 +685,8 @@ export default function ClientMessages() {
                   className={[
                     "rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                     selectedRoleFilter === role
-                      ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065]"
-                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
+                      ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065] dark:border-[#00c065]/50 dark:bg-[#00c065]/10 dark:text-[#00c065]"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/70",
                   ].join(" ")}
                 >
                   {roleLabel(role)}
@@ -745,53 +695,47 @@ export default function ClientMessages() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto bg-white p-2 custom-scrollbar dark:bg-slate-900">
             {isLoadingRecipients ? (
               <div className="flex min-h-[220px] items-center justify-center">
                 <Loader2 className="h-5 w-5 animate-spin text-[#00c065]" />
               </div>
             ) : recipientLoadError ? (
               <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 px-6 text-center">
-                <p className="text-sm text-red-600">{recipientLoadError}</p>
+                <p className="text-sm text-red-600 dark:text-red-400">{recipientLoadError}</p>
                 <button
                   type="button"
                   onClick={() => void loadAvailableRecipients(true)}
-                  className="rounded-lg border border-[#00c065]/30 bg-emerald-50 px-3 py-2 text-xs font-semibold text-[#00c065] transition-colors hover:bg-emerald-100"
+                  className="rounded-lg border border-[#00c065]/30 bg-emerald-50 px-3 py-2 text-xs font-semibold text-[#00c065] transition-colors hover:bg-emerald-100 dark:border-[#00c065]/40 dark:bg-[#00c065]/10 dark:hover:bg-[#00c065]/15"
                 >
                   Try Again
                 </button>
               </div>
             ) : filteredUsers.length === 0 ? (
-              <p className="text-center text-gray-400 text-sm py-8">No users found.</p>
+              <p className="py-8 text-center text-sm text-gray-400 dark:text-slate-500">No users found.</p>
             ) : (
               <div className="space-y-1">
                 {filteredUsers.map((user) => (
                   <button
                     key={user.id}
-                    onClick={() => void handleStartConversation(user.id)}
+                    onClick={() => handleStartConversation(user)}
                     disabled={isCreatingChat}
-                    className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
+                    className="w-full flex items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-gray-50 disabled:opacity-50 dark:hover:bg-slate-800/80"
                   >
-                    <div className="relative h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200 overflow-hidden">
+                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200 dark:border-slate-700 dark:bg-slate-800">
                       {user.profile_image_url ? (
-                        <Image
-                          src={user.profile_image_url}
-                          alt={user.username}
-                          fill
-                          className="object-cover"
-                          sizes="40px"
-                        />
+                        <img src={user.profile_image_url} alt={user.username} className="h-full w-full rounded-full object-cover" />
                       ) : (
-                        <span className="text-sm font-semibold text-gray-600">
+                        <span className="text-sm font-semibold text-gray-600 dark:text-slate-300">
                           {user.username.slice(0, 2).toUpperCase()}
                         </span>
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{user.username}</p>
-                      <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                      <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{user.username}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400">{roleLabel(roleKey(user.role))}</p>
                       {user.assignedTasks ? (
-                        <p className="mt-0.5 text-[11px] text-gray-400 line-clamp-2">{user.assignedTasks}</p>
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-400 dark:text-slate-500">{user.assignedTasks}</p>
                       ) : null}
                     </div>
                   </button>
