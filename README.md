@@ -169,11 +169,14 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - material_id
 - tag_id
 - supplier_id
+- location_id
 - name
 - unit
 - unit_cost
 - reorder_point
-- location
+- needed_stock
+- current_in_stock
+- status
 - date_purchased
 - notes
 - created_at
@@ -183,11 +186,11 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - equipment_id
 - tag_id
 - supplier_id
+- location_id
 - name
-- unit_cost
-- condition
-- location
+- unit
 - status
+- notes
 - created_at
 - updated_at
 
