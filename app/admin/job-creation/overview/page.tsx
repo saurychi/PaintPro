@@ -206,6 +206,18 @@ export default function OverviewPage() {
     }
   }
 
+  // The "Change" buttons next to each section need to flip the project's
+  // status back to the matching `*_pending` step so the corresponding
+  // assignment page accepts edits, then navigate there.
+  async function handleChangeNavigate(status: string, path: string) {
+    try {
+      await updateProjectStatus(status);
+      router.push(path);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to switch to that step.");
+    }
+  }
+
   async function handleGoBack() {
     try {
       setIsNavigating("back");
@@ -328,7 +340,8 @@ export default function OverviewPage() {
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    router.push(
+                                    void handleChangeNavigate(
+                                      "main_task_pending",
                                       `/admin/job-creation/main-task-assignment?projectId=${projectId}`,
                                     )
                                   }
@@ -364,7 +377,8 @@ export default function OverviewPage() {
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      router.push(
+                                      void handleChangeNavigate(
+                                        "materials_pending",
                                         `/admin/job-creation/materials-assignment?projectId=${projectId}`,
                                       )
                                     }
@@ -420,7 +434,8 @@ export default function OverviewPage() {
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      router.push(
+                                      void handleChangeNavigate(
+                                        "sub_task_pending",
                                         `/admin/job-creation/sub-task-assignment?projectId=${projectId}`,
                                       )
                                     }
@@ -453,7 +468,8 @@ export default function OverviewPage() {
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                router.push(
+                                                void handleChangeNavigate(
+                                                  "schedule_pending",
                                                   `/admin/job-creation/project-schedule?projectId=${projectId}`,
                                                 )
                                               }
@@ -498,7 +514,8 @@ export default function OverviewPage() {
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                router.push(
+                                                void handleChangeNavigate(
+                                                  "equipment_pending",
                                                   `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
                                                 )
                                               }
@@ -537,7 +554,8 @@ export default function OverviewPage() {
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                router.push(
+                                                void handleChangeNavigate(
+                                                  "employee_assignment_pending",
                                                   `/admin/job-creation/employee-assignment?projectId=${projectId}`,
                                                 )
                                               }

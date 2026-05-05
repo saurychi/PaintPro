@@ -1,5 +1,8 @@
 import type { EmployeeHint, WeekdayKey } from "@/lib/planning/aiContext"
-import { getRequiredEmployeeCountFromLaborHours } from "@/lib/planning/workforceMath"
+import {
+  MINIMUM_EMPLOYEES_PER_SUBTASK,
+  getRequiredEmployeeCountFromLaborHours,
+} from "@/lib/planning/workforceMath"
 
 export type ProjectTaskLite = {
   name: string
@@ -340,7 +343,10 @@ export function assignStaffPerSubTask(args: {
       typeof subTask.requiredEmployeeCount === "number" &&
       Number.isFinite(subTask.requiredEmployeeCount) &&
       subTask.requiredEmployeeCount > 0
-        ? Math.max(1, Math.ceil(subTask.requiredEmployeeCount))
+        ? Math.max(
+            MINIMUM_EMPLOYEES_PER_SUBTASK,
+            Math.ceil(subTask.requiredEmployeeCount),
+          )
         : getRequiredEmployeeCountFromEstimatedHours(subTask.estimatedHours)
 
     const candidates = suggestEmployeesForTasks({

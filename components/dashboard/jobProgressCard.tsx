@@ -644,6 +644,7 @@ function JobProgressCard({
   const seededForProjectRef = useRef<string | null>(null);
   const openProcessIdsRef = useRef(openProcessIds);
   openProcessIdsRef.current = openProcessIds;
+  const groupRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   const selectedProjectStatus = readProjectStatus(selectedProject);
   const effectiveProjectId = projectId || readProjectId(selectedProject);
@@ -687,13 +688,33 @@ function JobProgressCard({
     if (seededForProjectRef.current === effectiveProjectId) return;
     seededForProjectRef.current = effectiveProjectId;
 
-    for (const group of processItems) {
-      const children = buildStartOfWorkChildren(group);
-      const hasPendingChild = children.some((child) => child.status !== "done");
-      if (hasPendingChild && !openProcessIdsRef.current.has(group.id)) {
-        toggleProcessRow(group.id);
-      }
+    // Open only the currently in-progress group; fall back to the first group
+    // that still has pending work (next-up). Done and not-yet-started groups
+    // stay collapsed by default.
+    const focusGroup =
+      processItems.find((group) => {
+        const children = buildStartOfWorkChildren(group);
+        return children.some((child) => child.status === "active");
+      }) ??
+      processItems.find((group) => {
+        const children = buildStartOfWorkChildren(group);
+        return children.some((child) => child.status !== "done");
+      });
+
+    if (!focusGroup) return;
+
+    if (!openProcessIdsRef.current.has(focusGroup.id)) {
+      toggleProcessRow(focusGroup.id);
     }
+
+    // Scroll the focus group into view after the expand has rendered.
+    const handle = window.requestAnimationFrame(() => {
+      groupRefs.current
+        .get(focusGroup.id)
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(handle);
   }, [processItems, effectiveProjectId, toggleProcessRow]);
 
   async function handleStartProjectWork() {
@@ -1106,6 +1127,10 @@ function JobProgressCard({
                   return (
                     <div
                       key={group.id}
+                      ref={(el) => {
+                        if (el) groupRefs.current.set(group.id, el);
+                        else groupRefs.current.delete(group.id);
+                      }}
                       className={[
                         "py-2",
                         !isLastGroup
@@ -1134,9 +1159,9 @@ function JobProgressCard({
                               } as React.CSSProperties)
                             : undefined
                         }>
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-center">
-                          <div className="md:col-span-1">
-                            <div className="relative h-6">
+                        <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
+                          <div className="shrink-0 md:col-span-1">
+                            <div className="relative h-6 w-[22px]">
                               <div className="absolute left-0 top-0">
                                 <GroupProgressRing
                                   status={effectiveGroupStatus}
@@ -1147,7 +1172,7 @@ function JobProgressCard({
                             </div>
                           </div>
 
-                          <div className="min-w-0 md:col-span-5">
+                          <div className="min-w-0 flex-1 md:col-span-5">
                             <div className="flex items-start gap-2">
                               {hasChildren ? (
                                 <ChevronDown
@@ -1178,17 +1203,33 @@ function JobProgressCard({
                                     status={effectiveGroupStatus}
                                   />
                                 </div>
+
+                                {/* Mobile-only date subtext */}
+                                <div className="mt-1.5 space-y-0.5 text-[11px] text-gray-500 dark:text-slate-400 md:hidden">
+                                  <div>
+                                    Scheduled:{" "}
+                                    <span className="text-gray-700 dark:text-slate-300">
+                                      {group.startLabel || "-"}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    Finished:{" "}
+                                    <span className="text-gray-700 dark:text-slate-300">
+                                      {group.endLabel || "-"}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
 
-                          <div className="md:col-span-3">
+                          <div className="hidden md:col-span-3 md:block">
                             <div className="text-xs text-gray-900 dark:text-slate-100">
                               {group.startLabel || "-"}
                             </div>
                           </div>
 
-                          <div className="md:col-span-3">
+                          <div className="hidden md:col-span-3 md:block">
                             <div className="text-xs text-gray-900 dark:text-slate-100">
                               {group.endLabel || "-"}
                             </div>
@@ -1238,9 +1279,19 @@ function JobProgressCard({
                                       : child.status;
 
                               const dim = effectiveChildStatus === "done";
+                              const previousSibling =
+                                childIndex > 0
+                                  ? groupChildren[childIndex - 1]
+                                  : null;
+                              const previousHasEndDatetime = Boolean(
+                                previousSibling?.detail?.completedAt ||
+                                  previousSibling?.detail
+                                    ?.scheduledEndDatetime,
+                              );
                               const isPreviousTaskDone =
                                 childIndex === 0 ||
-                                siblingStatuses[childIndex - 1] === "done";
+                                (siblingStatuses[childIndex - 1] === "done" &&
+                                  previousHasEndDatetime);
                               const childOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
                               const childRoute = isJobCreationGroup
@@ -1252,10 +1303,10 @@ function JobProgressCard({
                                   {isJobCreationGroup ? (
                                     /* ── Job-creation child: div wrapper so we can put a real button inside ── */
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
-                                      <div className="grid grid-cols-12 items-center gap-3">
+                                      <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
                                         {/* Status icon */}
-                                        <div className="col-span-1">
-                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                        <div className="shrink-0 md:col-span-1">
+                                          <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
@@ -1265,7 +1316,7 @@ function JobProgressCard({
                                         </div>
 
                                         {/* Title + status label */}
-                                        <div className="col-span-5 min-w-0">
+                                        <div className="min-w-0 flex-1 md:col-span-5">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1283,8 +1334,8 @@ function JobProgressCard({
                                             />
                                           </div>
                                         </div>
-                                        <div className="col-span-3" />
-                                        <div className="col-span-3 flex justify-end">
+                                        <div className="hidden md:col-span-3 md:block" />
+                                        <div className="ml-auto shrink-0 md:col-span-3 md:ml-0 md:flex md:justify-end">
                                           {childRoute ? (
                                             <button
                                               type="button"
@@ -1312,9 +1363,9 @@ function JobProgressCard({
                                     </div>
                                   ) : child.id === "manage-downpayment" ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
-                                      <div className="grid grid-cols-12 items-center gap-3">
-                                        <div className="col-span-1">
-                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                      <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
+                                        <div className="shrink-0 md:col-span-1">
+                                          <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
@@ -1322,7 +1373,7 @@ function JobProgressCard({
                                             </span>
                                           </div>
                                         </div>
-                                        <div className="col-span-5 min-w-0">
+                                        <div className="min-w-0 flex-1 md:col-span-5">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1341,8 +1392,8 @@ function JobProgressCard({
                                             />
                                           </div>
                                         </div>
-                                        <div className="col-span-3" />
-                                        <div className="col-span-3 flex justify-end">
+                                        <div className="hidden md:col-span-3 md:block" />
+                                        <div className="ml-auto shrink-0 md:col-span-3 md:ml-0 md:flex md:justify-end">
                                           <button
                                             type="button"
                                             onClick={() =>
@@ -1368,9 +1419,9 @@ function JobProgressCard({
                                     </div>
                                   ) : child.id === "project-kickoff" ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
-                                      <div className="grid grid-cols-12 items-center gap-3">
-                                        <div className="col-span-1">
-                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                      <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
+                                        <div className="shrink-0 md:col-span-1">
+                                          <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
@@ -1379,7 +1430,7 @@ function JobProgressCard({
                                           </div>
                                         </div>
 
-                                        <div className="col-span-5 min-w-0">
+                                        <div className="min-w-0 flex-1 md:col-span-5">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1397,8 +1448,8 @@ function JobProgressCard({
                                             />
                                           </div>
                                         </div>
-                                        <div className="col-span-3" />
-                                        <div className="col-span-3 flex justify-end">
+                                        <div className="hidden md:col-span-3 md:block" />
+                                        <div className="ml-auto shrink-0 md:col-span-3 md:ml-0 md:flex md:justify-end">
                                           <button
                                             type="button"
                                             onClick={handleStartProjectWork}
@@ -1426,9 +1477,9 @@ function JobProgressCard({
                                     </div>
                                   ) : isEndOfWorkChild ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
-                                      <div className="grid grid-cols-12 items-center gap-3">
-                                        <div className="col-span-1">
-                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                      <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
+                                        <div className="shrink-0 md:col-span-1">
+                                          <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
@@ -1437,7 +1488,7 @@ function JobProgressCard({
                                           </div>
                                         </div>
 
-                                        <div className="col-span-5 min-w-0">
+                                        <div className="min-w-0 flex-1 md:col-span-5">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1455,8 +1506,8 @@ function JobProgressCard({
                                             />
                                           </div>
                                         </div>
-                                        <div className="col-span-3" />
-                                        <div className="col-span-3 flex justify-end">
+                                        <div className="hidden md:col-span-3 md:block" />
+                                        <div className="ml-auto shrink-0 md:col-span-3 md:ml-0 md:flex md:justify-end">
                                           {(() => {
                                             const action = getEndOfWorkAction(
                                               child.id,
@@ -1560,10 +1611,10 @@ function JobProgressCard({
                                         "w-full rounded-lg px-3 py-3 pl-9 pr-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800/70",
                                         hasDetail ? "cursor-pointer" : "",
                                       ].join(" ")}>
-                                      <div className="grid grid-cols-12 items-center gap-3">
+                                      <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
                                         {/* Status icon */}
-                                        <div className="col-span-1">
-                                          <div className="relative flex h-full w-10 items-center justify-center">
+                                        <div className="shrink-0 md:col-span-1">
+                                          <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
                                                 status={effectiveChildStatus}
@@ -1573,7 +1624,7 @@ function JobProgressCard({
                                         </div>
 
                                         {/* Title + status label */}
-                                        <div className="col-span-5 min-w-0">
+                                        <div className="min-w-0 flex-1 md:col-span-5">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1590,10 +1641,42 @@ function JobProgressCard({
                                               dim={dim}
                                             />
                                           </div>
+
+                                          {/* Mobile-only date subtext */}
+                                          <div
+                                            className={[
+                                              "mt-1.5 space-y-0.5 text-[11px] md:hidden",
+                                              dim
+                                                ? "text-gray-300"
+                                                : "text-gray-500 dark:text-slate-400",
+                                            ].join(" ")}>
+                                            <div>
+                                              Scheduled:{" "}
+                                              <span
+                                                className={
+                                                  dim
+                                                    ? "text-gray-300"
+                                                    : "text-gray-700 dark:text-slate-300"
+                                                }>
+                                                {child.startLabel || "-"}
+                                              </span>
+                                            </div>
+                                            <div>
+                                              Finished:{" "}
+                                              <span
+                                                className={
+                                                  dim
+                                                    ? "text-gray-300"
+                                                    : "text-gray-700 dark:text-slate-300"
+                                                }>
+                                                {child.endLabel || "-"}
+                                              </span>
+                                            </div>
+                                          </div>
                                         </div>
 
-                                        {/* Start date */}
-                                        <div className="col-span-3">
+                                        {/* Start date (desktop only) */}
+                                        <div className="hidden md:col-span-3 md:block">
                                           <div
                                             className={[
                                               "text-xs",
@@ -1605,8 +1688,8 @@ function JobProgressCard({
                                           </div>
                                         </div>
 
-                                        {/* End date + detail chevron */}
-                                        <div className="col-span-3">
+                                        {/* End date + detail chevron (desktop only) */}
+                                        <div className="hidden md:col-span-3 md:block">
                                           <div
                                             className={[
                                               "flex items-center justify-end gap-2 text-xs",
@@ -1626,6 +1709,17 @@ function JobProgressCard({
                                             ) : null}
                                           </div>
                                         </div>
+
+                                        {/* Mobile-only chevron */}
+                                        {hasDetail ? (
+                                          <ChevronRight
+                                            className={[
+                                              "mt-1 h-4 w-4 shrink-0 text-gray-300 transition-transform dark:text-slate-600 md:hidden",
+                                              childOpen ? "rotate-90" : "",
+                                            ].join(" ")}
+                                            aria-hidden
+                                          />
+                                        ) : null}
                                       </div>
                                     </div>
                                   )}
@@ -1745,7 +1839,7 @@ function JobProgressCard({
                                                 disabled={!isPreviousTaskDone}
                                                 title={
                                                   !isPreviousTaskDone
-                                                    ? "Complete the previous task first"
+                                                    ? "The previous subtask must be finished (have an end datetime) first"
                                                     : undefined
                                                 }
                                                 onClick={() => {

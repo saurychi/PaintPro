@@ -158,20 +158,20 @@ export default function StaffLeaveRequestsPage() {
   }
 
   return (
-    <main className="flex h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 w-full flex-col bg-gray-50 px-4 py-3">
+    <main className="flex min-h-[calc(100vh-var(--admin-header-offset,0px))] w-full flex-col bg-gray-50 px-3 py-3 sm:px-4 lg:h-[calc(100vh-var(--admin-header-offset,0px))] lg:min-h-0">
       <div className="mb-3 flex shrink-0 items-center gap-2">
         <Link
           href="/staff/schedule"
-          className="text-xl font-semibold text-gray-900 transition hover:text-[#00a054]"
+          className="text-lg font-semibold text-gray-900 transition hover:text-[#00a054] sm:text-xl"
         >
           Schedule
         </Link>
         <ChevronRight className="h-5 w-5 text-gray-300" aria-hidden />
-        <div className="text-xl font-semibold text-gray-900">Requests</div>
+        <div className="text-lg font-semibold text-gray-900 sm:text-xl">Requests</div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="flex flex-1 flex-col lg:min-h-0">
+        <section className="flex flex-1 flex-col rounded-lg border border-gray-200 bg-white shadow-sm lg:min-h-0">
           <div className="shrink-0 border-b border-gray-200 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>

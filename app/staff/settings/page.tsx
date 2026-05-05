@@ -232,10 +232,10 @@ export default function AdminSettings() {
 
   if (loading) {
     return (
-      <div className="min-h-svh flex items-center justify-center bg-white px-6">
+      <div className="min-h-svh flex items-center justify-center bg-white px-6 dark:bg-slate-950">
         <div className="flex flex-col items-center gap-4 text-center">
-          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin" />
-          <p className="text-sm text-gray-600">Loading settings…</p>
+          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-x-slate-700 dark:border-b-slate-700" />
+          <p className="text-sm text-gray-600 dark:text-slate-400">Loading settings…</p>
         </div>
       </div>
     );
@@ -250,11 +250,11 @@ export default function AdminSettings() {
   ].join(" ");
 
   return (
-    <div className="h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden p-4">
-      <h1 className="text-xl font-semibold tracking-tight text-gray-900">Settings</h1>
+    <div className="min-h-[calc(100vh-var(--admin-header-offset,0px))] p-3 sm:p-4 lg:h-[calc(100vh-var(--admin-header-offset,0px))] lg:overflow-hidden">
+      <h1 className="text-lg font-semibold tracking-tight text-gray-900 sm:text-xl">Settings</h1>
 
-      <div className="mt-4 h-[calc(100%-2.75rem)] overflow-hidden">
-        <div className="h-full overflow-y-auto pr-1">
+      <div className="mt-3 sm:mt-4 lg:h-[calc(100%-2.75rem)] lg:overflow-hidden">
+        <div className="pr-0 lg:h-full lg:overflow-y-auto lg:pr-1">
           <Card>
             <div className="grid gap-3">
               {loadErr ? (

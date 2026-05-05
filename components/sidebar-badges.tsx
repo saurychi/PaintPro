@@ -99,19 +99,23 @@ export function useSidebarBadge(
 }
 
 const TONE_CLASS: Record<SidebarBadgeTone, string> = {
-  neutral: "bg-gray-100 text-gray-700 border border-gray-200",
-  info: "bg-blue-100 text-blue-700 border border-blue-200",
-  success: "bg-emerald-100 text-emerald-700 border border-emerald-200",
-  warning: "bg-amber-100 text-amber-800 border border-amber-200",
-  danger: "bg-rose-100 text-rose-700 border border-rose-200",
+  neutral:
+    "bg-gray-100 text-gray-700 border border-gray-200 dark:bg-slate-700/60 dark:text-slate-100 dark:border-slate-500/60",
+  info: "bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-500/20 dark:text-blue-200 dark:border-blue-400/40",
+  success:
+    "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-200 dark:border-emerald-400/40",
+  warning:
+    "bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-400/40",
+  danger:
+    "bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-500/25 dark:text-rose-100 dark:border-rose-400/50",
 };
 
 const TONE_DOT_CLASS: Record<SidebarBadgeTone, string> = {
-  neutral: "bg-gray-400",
-  info: "bg-blue-500",
-  success: "bg-emerald-500",
-  warning: "bg-amber-500",
-  danger: "bg-rose-500",
+  neutral: "bg-gray-400 dark:bg-slate-300",
+  info: "bg-blue-500 dark:bg-blue-300",
+  success: "bg-emerald-500 dark:bg-emerald-300",
+  warning: "bg-amber-500 dark:bg-amber-300",
+  danger: "bg-rose-500 dark:bg-rose-300",
 };
 
 /** Pill-style badge used on expanded sidebar rows. */
@@ -149,7 +153,7 @@ export function SidebarBadgeDot({
     <span
       aria-label={`${badge.label} badge`}
       className={[
-        "block h-2 w-2 rounded-full ring-2 ring-white shadow",
+        "block h-2 w-2 rounded-full ring-2 ring-white shadow dark:ring-slate-900",
         TONE_DOT_CLASS[tone],
         className ?? "",
       ].join(" ")}

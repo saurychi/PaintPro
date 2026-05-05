@@ -8,7 +8,6 @@ export async function GET() {
       .select(`
         equipment_id,
         name,
-        location,
         status
       `)
       .order("name", { ascending: true });
@@ -26,7 +25,7 @@ export async function GET() {
         name: item.name,
         unitCost: 0,
         condition: "",
-        location: item.location ?? "",
+        location: "",
         status: item.status ?? "",
       })),
     });

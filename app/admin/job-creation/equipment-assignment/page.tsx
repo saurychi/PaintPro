@@ -69,9 +69,16 @@ export default function EquipmentAssignmentPage() {
   const [selectedEquipmentKeysForDelete, setSelectedEquipmentKeysForDelete] =
     useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleteScope, setBulkDeleteScope] = useState<{
+    mainTaskId: string;
+    subTaskId: string;
+  } | null>(null);
 
   const allowBrowserBackRef = useRef(false);
   const suppressLeaveGuardRef = useRef(false);
+  // Tracks which subtasks the user actually modified, so Save only sends
+  // those rows instead of UPDATE'ing every subtask in the project.
+  const dirtySubTaskIdsRef = useRef<Set<string>>(new Set());
 
   const [equipmentCatalog, setEquipmentCatalog] = useState<
     EquipmentCatalogItem[]
@@ -308,82 +315,67 @@ export default function EquipmentAssignmentPage() {
     setLeaveButtonLoading(action);
 
     if (shouldSave) {
-      const saveEquipmentResponse = await fetch(
+      const dirtyIds = dirtySubTaskIdsRef.current;
+      const projectSubTasks = services.flatMap((group) =>
+        group.children
+          .filter((step) => dirtyIds.has(step.id))
+          .map((step) => ({
+            project_sub_task_id: step.id,
+            equipments: step.equipments.map((item) => ({
+              id: item.id,
+              equipmentId: item.equipmentId ?? null,
+              name: item.name,
+              quantity: Number(item.quantity ?? 1),
+            })),
+          })),
+      );
+
+      const nextStatus =
+        action === "back" ? "materials_pending" : "schedule_pending";
+
+      // Only dirty subtasks + the status flip are sent. The API runs both in
+      // a single Promise.all server-side, so this is one round-trip.
+      const saveResponse = await fetch(
         "/api/planning/saveProjectSubTaskEquipment",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            projectSubTasks: services.flatMap((group) =>
-              group.children.map((step) => ({
-                project_sub_task_id: step.id,
-                equipments: step.equipments.map((item) => ({
-                  id: item.id,
-                  equipmentId: item.equipmentId ?? null,
-                  name: item.name,
-                  quantity: Number(item.quantity ?? 1),
-                })),
-              })),
-            ),
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, nextStatus, projectSubTasks }),
         },
       );
 
-      const saveEquipmentData = await saveEquipmentResponse.json();
+      const saveData = await saveResponse.json().catch(() => ({}));
 
-      if (!saveEquipmentResponse.ok) {
+      if (!saveResponse.ok) {
         clearLeaveButtonLoading();
-        toast.error(
-          saveEquipmentData?.error || "Failed to save equipment assignment.",
-        );
+        toast.error(saveData?.error || "Failed to save equipment assignment.");
         return;
       }
 
-      const response = await fetch("/api/planning/updateProjectStatus", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          projectId,
-          status: action === "back" ? "materials_pending" : "schedule_pending",
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        clearLeaveButtonLoading();
-        toast.error(data?.error || "Failed to update project status.");
-        return;
-      }
-
+      dirtySubTaskIdsRef.current = new Set();
       setIsDirty(false);
     }
 
+    suppressLeaveGuardRef.current = true;
+    allowBrowserBackRef.current = true;
+
+    // Match main-task-assignment / sub-task-assignment: full-page nav via
+    // window.location.href. Browser shows its native loading state instead of
+    // an in-app spinner that sits while Next.js JIT-compiles the destination
+    // (which is what was making router.push feel like minutes of waiting).
     if (action === "next") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      window.location.href =
-        `/admin/job-creation/project-schedule?projectId=${projectId}`;
+      window.location.href = `/admin/job-creation/project-schedule?projectId=${projectId}`;
       return;
     }
 
     if (action === "back") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      window.location.href =
-        `/admin/job-creation/materials-assignment?projectId=${projectId}`;
+      window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
       return;
     }
 
     clearLeaveButtonLoading();
 
     if (action === "browserBack") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
       window.history.back();
       return;
     }
@@ -453,6 +445,7 @@ export default function EquipmentAssignmentPage() {
       }),
     );
 
+    dirtySubTaskIdsRef.current.add(equipmentModalState.subTaskId);
     setIsDirty(true);
   }
 
@@ -472,7 +465,19 @@ export default function EquipmentAssignmentPage() {
       })),
     );
 
-    setSelectedEquipmentKeysForDelete(new Set());
+    for (const key of keys) {
+      const parts = key.split("::");
+      if (parts.length >= 2) dirtySubTaskIdsRef.current.add(parts[1]);
+    }
+
+    // Drop only the keys we just deleted from the global selection — leave
+    // selections in other sub tasks intact so each sub task keeps its own
+    // bulk-delete scope.
+    setSelectedEquipmentKeysForDelete((prev) => {
+      const next = new Set(prev);
+      for (const key of keys) next.delete(key);
+      return next;
+    });
     setIsDirty(true);
   }
 
@@ -542,6 +547,7 @@ export default function EquipmentAssignmentPage() {
       next.delete(`${mainTaskId}::${subTaskId}::${equipmentId}`);
       return next;
     });
+    dirtySubTaskIdsRef.current.add(subTaskId);
     setIsDirty(true);
   }
 
@@ -570,6 +576,7 @@ export default function EquipmentAssignmentPage() {
       }),
     );
 
+    dirtySubTaskIdsRef.current.add(subTaskId);
     setIsDirty(true);
   }
 
@@ -598,6 +605,29 @@ export default function EquipmentAssignmentPage() {
       0,
     );
   }, [services]);
+
+  // Bulk-delete selections are scoped per sub task — keys look like
+  // "mainTaskId::subTaskId::equipmentId", so we group by the
+  // "mainTaskId::subTaskId" prefix so each sub task's "Remove (N)" button
+  // only counts and removes its own checked equipment rows.
+  const selectedKeysBySubTask = useMemo(() => {
+    const bySubTask = new Map<string, Set<string>>();
+    for (const key of selectedEquipmentKeysForDelete) {
+      const parts = key.split("::");
+      if (parts.length < 3) continue;
+      const subTaskKey = `${parts[0]}::${parts[1]}`;
+      const set = bySubTask.get(subTaskKey) ?? new Set<string>();
+      set.add(key);
+      bySubTask.set(subTaskKey, set);
+    }
+    return bySubTask;
+  }, [selectedEquipmentKeysForDelete]);
+
+  const bulkDeleteKeys = bulkDeleteScope
+    ? (selectedKeysBySubTask.get(
+        `${bulkDeleteScope.mainTaskId}::${bulkDeleteScope.subTaskId}`,
+      ) ?? new Set<string>())
+    : new Set<string>();
 
   return (
     <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
@@ -728,13 +758,25 @@ export default function EquipmentAssignmentPage() {
                                         </div>
 
                                         <div className="flex shrink-0 items-center gap-2">
-                                          {selectedEquipmentKeysForDelete.size > 0 ? (
+                                          {(selectedKeysBySubTask.get(
+                                            `${group.id}::${step.id}`,
+                                          )?.size ?? 0) > 0 ? (
                                             <button
                                               type="button"
-                                              onClick={() => setBulkDeleteOpen(true)}
+                                              onClick={() => {
+                                                setBulkDeleteScope({
+                                                  mainTaskId: group.id,
+                                                  subTaskId: step.id,
+                                                });
+                                                setBulkDeleteOpen(true);
+                                              }}
                                               className="inline-flex h-8 items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/20"
                                             >
-                                              Remove ({selectedEquipmentKeysForDelete.size})
+                                              Remove (
+                                              {selectedKeysBySubTask.get(
+                                                `${group.id}::${step.id}`,
+                                              )?.size ?? 0}
+                                              )
                                             </button>
                                           ) : null}
                                           <button
@@ -993,14 +1035,18 @@ export default function EquipmentAssignmentPage() {
       <ConfirmDeleteModal
         open={bulkDeleteOpen}
         title="Remove selected equipment?"
-        description={`Remove ${selectedEquipmentKeysForDelete.size} selected equipment item${
-          selectedEquipmentKeysForDelete.size === 1 ? "" : "s"
-        } from this project?`}
+        description={`Remove ${bulkDeleteKeys.size} selected equipment item${
+          bulkDeleteKeys.size === 1 ? "" : "s"
+        } from this sub task?`}
         confirmLabel="Remove selected"
-        onCancel={() => setBulkDeleteOpen(false)}
-        onConfirm={() => {
-          removeSelectedEquipment(selectedEquipmentKeysForDelete);
+        onCancel={() => {
           setBulkDeleteOpen(false);
+          setBulkDeleteScope(null);
+        }}
+        onConfirm={() => {
+          removeSelectedEquipment(bulkDeleteKeys);
+          setBulkDeleteOpen(false);
+          setBulkDeleteScope(null);
         }}
       />
 

@@ -72,17 +72,23 @@ function PendingDocumentsCard({
   const pendingProjects = useMemo(() => {
     const source = selectedProject ? [selectedProject] : projects;
 
-    return source.filter((project) => project.status === "quotation_pending");
+    return source.filter(
+      (project) =>
+        project.status === "quotation_pending" ||
+        project.status === "invoice_agreement_pending",
+    );
   }, [projects, selectedProject]);
 
   const isMini = mode === "mini";
   const isCompact = mode === "compact" || mode === "mini";
 
-  function openQuotation(projectId: string) {
-    router.push(
-      // `/admin/job-creation/quotation-generation?projectId=${projectId}`,
-      `/client/documents/pending`,
-    );
+  function getDocumentLabel(status: ProjectStatus) {
+    if (status === "invoice_agreement_pending") return "Invoice signature";
+    return "Quotation signature";
+  }
+
+  function openDocument() {
+    router.push(`/client/documents/pending`);
   }
 
   return (
@@ -103,7 +109,7 @@ function PendingDocumentsCard({
 
             {!isMini ? (
               <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
-                {pendingProjects.length} quotation signature
+                {pendingProjects.length} document signature
                 {pendingProjects.length === 1 ? "" : "s"} pending
               </p>
             ) : null}
@@ -175,7 +181,7 @@ function PendingDocumentsCard({
                               "truncate font-semibold text-slate-900 dark:text-slate-100",
                               isCompact ? "text-[13px]" : "text-sm",
                             ].join(" ")}>
-                            Quotation signature
+                            {getDocumentLabel(project.status)}
                           </div>
                         </div>
                       </div>
@@ -183,7 +189,7 @@ function PendingDocumentsCard({
                       <div className="flex justify-end">
                         <button
                           type="button"
-                          onClick={() => openQuotation(project.project_id)}
+                          onClick={openDocument}
                           className="rounded-full bg-[#00c065] px-4 py-2 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98]">
                           Review
                         </button>

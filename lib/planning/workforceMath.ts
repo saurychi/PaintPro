@@ -1,5 +1,9 @@
 export const MINIMUM_ESTIMATED_HOURS = 0.25;
 export const PRODUCTIVE_HOURS_PER_EMPLOYEE = 6;
+// Every subtask gets at least this many crew members. Smaller crews are
+// rounded up. This shortens the adjusted duration in turn since
+// `getAdjustedDurationHours` divides labor hours by the effective crew size.
+export const MINIMUM_EMPLOYEES_PER_SUBTASK = 4;
 
 export function roundToQuarterHour(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -27,7 +31,7 @@ export function getRequiredEmployeeCountFromLaborHours(
 ): number {
   const normalizedLaborHours = clampMinimumHours(Number(laborHours || 0));
   let employeeCount = Math.max(
-    1,
+    MINIMUM_EMPLOYEES_PER_SUBTASK,
     Math.ceil(normalizedLaborHours / PRODUCTIVE_HOURS_PER_EMPLOYEE),
   );
 
@@ -55,7 +59,12 @@ export function getAdjustedDurationHours(args: {
   teamEfficiencyFactor: number;
 } {
   const normalizedLaborHours = clampMinimumHours(Number(args.laborHours || 0));
-  const normalizedEmployeeCount = Math.max(Number(args.employeeCount || 0), 1);
+  // Floor at the project-wide minimum so a downstream caller passing 1–3
+  // doesn't undo the duration reduction the planner expected.
+  const normalizedEmployeeCount = Math.max(
+    Number(args.employeeCount || 0),
+    MINIMUM_EMPLOYEES_PER_SUBTASK,
+  );
   const teamEfficiencyFactor =
     getTeamEfficiencyFactor(normalizedEmployeeCount);
   const effectiveCrewSize = Math.max(

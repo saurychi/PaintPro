@@ -418,7 +418,7 @@ export default function MaterialsAssignment() {
       equipmentIds: string[];
     }[];
   }) {
-    console.log("Create task payload:", payload);
+    void payload;
     setCreateTaskModalOpen(false);
   }
 
@@ -620,7 +620,7 @@ export default function MaterialsAssignment() {
         body: JSON.stringify({
           items: shortages.map((shortage) => ({
             materialId: shortage.materialId,
-            stockNeeded: shortage.deficit,
+            neededStock: shortage.deficit,
           })),
         }),
       });

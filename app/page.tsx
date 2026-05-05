@@ -60,9 +60,12 @@ export default function Welcome() {
                 Start
               </Link>
 
-              <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+              <Link
+                href="/auth/signin?mode=client"
+                className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-6 py-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:border-[#00c065] hover:text-[#00c065] active:scale-[0.98] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-[#00c065] dark:hover:text-[#00c065]"
+              >
                 Client portal access
-              </div>
+              </Link>
             </div>
           </div>
 

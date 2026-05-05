@@ -12,6 +12,7 @@ import {
 import { supabase } from '@/lib/supabaseClient'
 import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { useClientProject } from "../ClientShellClient"
 
 const ACCENT = "#00c065"
 
@@ -65,6 +66,15 @@ type ConversationPayload = {
 }
 
 export default function AdminMessages() {
+  // The client portal supports two access modes:
+  //   1. Auth mode — supabase.auth has a user.
+  //   2. Project-cookie mode — the client is identified by the
+  //      paintpro_client_project_id cookie (no auth user).
+  // The conversations API resolves both modes via cookies, so we just need to
+  // know that we're in a valid client context to kick off the fetch. We treat
+  // either an auth user OR a bound projectId as "ready to load".
+  const { projectId: clientProjectId } = useClientProject()
+
   // UI State
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -117,11 +127,15 @@ export default function AdminMessages() {
       } catch (error) {
         console.error("Error fetching auth user:", error)
       }
-      // No Supabase session (e.g. guest client with project-code cookie) — stop the spinner
-      setIsLoading(false)
+      // No Supabase session. If we *also* don't have a project cookie there's
+      // nothing to load — drop the spinner. Otherwise leave it running and let
+      // loadConversations clear it once the cookie-mode fetch lands.
+      if (!clientProjectId) {
+        setIsLoading(false)
+      }
     }
     getUser()
-  }, [])
+  }, [clientProjectId])
 
   // 2. Auto-Scroll to bottom function
   const scrollToBottom = () => {
@@ -171,13 +185,16 @@ export default function AdminMessages() {
     }
   }, [])
 
-  // 4. Initial Load — pick up pendingConvId from staff Message button if present
+  // 4. Initial Load — pick up pendingConvId from staff Message button if present.
+  // We fire as long as we know who the client is (via auth OR project cookie).
+  // The conversations API uses the cookies to resolve project-scoped chats for
+  // guest clients that don't have a Supabase auth user.
   useEffect(() => {
-    if (!currentUserId) return
+    if (!currentUserId && !clientProjectId) return
     const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined
     if (pendingConvId) localStorage.removeItem("pendingConvId")
-    loadConversations(currentUserId, pendingConvId)
-  }, [currentUserId, loadConversations])
+    loadConversations(currentUserId ?? "", pendingConvId)
+  }, [currentUserId, clientProjectId, loadConversations])
 
   // 5. When user CLICKS a chat, Mark as Read in DB
   useEffect(() => {

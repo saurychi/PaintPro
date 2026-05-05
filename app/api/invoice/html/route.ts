@@ -285,6 +285,16 @@ export async function GET(request: Request) {
     const clientInvoiceSignatureInfo =
       await getClientInvoiceSignatureInfo(projectId);
 
+    const { data: paymentRow } = await supabaseAdmin
+      .from("projects")
+      .select("downpayment")
+      .eq("project_id", projectId)
+      .maybeSingle<{ downpayment: number | null }>();
+
+    const initialCost = Number(summary?.quotationTotal ?? 0);
+    const downpayment = Math.max(0, Number(paymentRow?.downpayment ?? 0));
+    const totalCost = Math.max(0, initialCost - downpayment);
+
     const html = `
       <!DOCTYPE html>
       <html lang="en">
@@ -533,60 +543,21 @@ export async function GET(request: Request) {
               </ul>
             </div>
 
-            <div class="section card">
-              <div class="heading">Invoice Breakdown</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Main Task</th>
-                    <th class="text-right">Materials</th>
-                    <th class="text-right">Labor</th>
-                    <th class="text-right">Total</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  ${mainTasks
-                    .map(
-                      (task) => `
-                        <tr>
-                          <td>${escapeHtml(task.title)}</td>
-                          <td class="text-right">${escapeHtml(formatCurrency(task.materialTotal))}</td>
-                          <td class="text-right">${escapeHtml(formatCurrency(task.laborTotal))}</td>
-                          <td class="text-right">${escapeHtml(formatCurrency(task.totalCost))}</td>
-                        </tr>
-                      `,
-                    )
-                    .join("")}
-                </tbody>
-              </table>
-            </div>
-
             <div class="section">
               <div class="summary-box">
                 <div class="summary-row">
-                  <span>Materials Total</span>
-                  <span>${escapeHtml(formatCurrency(summary.materialTotal))}</span>
+                  <span>Initial Cost</span>
+                  <span>${escapeHtml(formatCurrency(initialCost))}</span>
                 </div>
 
                 <div class="summary-row">
-                  <span>Labor Total</span>
-                  <span>${escapeHtml(formatCurrency(summary.laborTotal))}</span>
-                </div>
-
-                <div class="summary-row">
-                  <span>Cost Total</span>
-                  <span>${escapeHtml(formatCurrency(summary.totalCost))}</span>
-                </div>
-
-                <div class="summary-row">
-                  <span>Markup / Profit</span>
-                  <span>${escapeHtml(formatCurrency(summary.profitAmount))}</span>
+                  <span>Downpayment</span>
+                  <span>-${escapeHtml(formatCurrency(downpayment))}</span>
                 </div>
 
                 <div class="summary-row total">
-                  <span>Total Invoice</span>
-                  <span>${escapeHtml(formatCurrency(summary.quotationTotal))}</span>
+                  <span>Total Cost</span>
+                  <span>${escapeHtml(formatCurrency(totalCost))}</span>
                 </div>
               </div>
             </div>

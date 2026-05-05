@@ -10,7 +10,7 @@ import {
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus, ArrowLeft } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import StaffPageShell from "@/components/staff/StaffPageShell"
 
@@ -387,8 +387,8 @@ export default function AdminMessages() {
         subtitle="Send and receive messages with your manager and teammates in real time."
         bodyClassName="overflow-hidden"
       >
-        <div className="flex h-full gap-6 overflow-hidden">
-          <aside className="flex min-w-[260px] w-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm lg:w-1/4 xl:w-1/5 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex h-full flex-col gap-3 overflow-hidden md:flex-row md:gap-6">
+          <aside className="flex w-full flex-1 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm md:flex-none md:w-[260px] md:min-w-[260px] lg:w-1/4 xl:w-1/5 dark:border-slate-700 dark:bg-slate-900">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
               <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
             </div>
@@ -396,7 +396,7 @@ export default function AdminMessages() {
               <Loader2 className="h-5 w-5 animate-spin text-gray-300 dark:text-slate-500" />
             </div>
           </aside>
-          <div className="flex min-w-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="hidden min-w-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm md:flex">
             <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           </div>
         </div>
@@ -410,10 +410,15 @@ export default function AdminMessages() {
       subtitle="Send and receive messages with your manager and teammates in real time."
       bodyClassName="overflow-hidden"
     >
-      <div className="flex h-full gap-6 overflow-hidden">
+      <div className="flex h-full flex-col gap-3 overflow-hidden md:flex-row md:gap-6">
 
           {/* Conversation Sidebar */}
-          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+          <aside
+            className={[
+              "w-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900",
+              "md:flex md:flex-none md:w-[260px] md:min-w-[260px] lg:w-1/4 xl:w-1/5",
+              activeChatId ? "hidden md:flex" : "flex flex-1",
+            ].join(" ")}>
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
@@ -480,10 +485,18 @@ export default function AdminMessages() {
 
           {/* Chat Area */}
           {activeChat ? (
-            <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
+            <section className="flex flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
               {/* Header */}
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveChatId(null)}
+                    aria-label="Back to conversations"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 md:hidden"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
                   <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
                     <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-gray-800" style={{ backgroundColor: ACCENT }} />
                     <span className="text-xs font-semibold text-gray-700">
@@ -608,7 +621,7 @@ export default function AdminMessages() {
               </div>
             </section>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
+            <div className="hidden flex-1 flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0 md:flex">
               <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
               <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
               <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
