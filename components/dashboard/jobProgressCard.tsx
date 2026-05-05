@@ -1032,8 +1032,8 @@ function JobProgressCard({
       </div>
 
       <div className="hidden shrink-0 grid-cols-12 gap-3 border-b border-gray-200 px-4 py-4 text-[11px] font-medium uppercase tracking-[0.12em] text-gray-400 dark:text-slate-500 md:grid dark:border-slate-700">
-        <div className="col-span-1">Status</div>
-        <div className="col-span-5">Service</div>
+        <div className="col-span-2">Status</div>
+        <div className="col-span-4">Service</div>
         <div className="col-span-3">Scheduled Date &amp; Time</div>
         <div className="col-span-3">Finished Date &amp; Time</div>
       </div>
@@ -1160,7 +1160,7 @@ function JobProgressCard({
                             : undefined
                         }>
                         <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
-                          <div className="shrink-0 md:col-span-1">
+                          <div className="shrink-0 md:col-span-2">
                             <div className="relative h-6 w-[22px]">
                               <div className="absolute left-0 top-0">
                                 <GroupProgressRing
@@ -1172,7 +1172,7 @@ function JobProgressCard({
                             </div>
                           </div>
 
-                          <div className="min-w-0 flex-1 md:col-span-5">
+                          <div className="min-w-0 flex-1 md:col-span-4">
                             <div className="flex items-start gap-2">
                               {hasChildren ? (
                                 <ChevronDown
@@ -1305,7 +1305,7 @@ function JobProgressCard({
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
                                         {/* Status icon */}
-                                        <div className="shrink-0 md:col-span-1">
+                                        <div className="shrink-0 md:col-span-2">
                                           <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
@@ -1316,7 +1316,7 @@ function JobProgressCard({
                                         </div>
 
                                         {/* Title + status label */}
-                                        <div className="min-w-0 flex-1 md:col-span-5">
+                                        <div className="min-w-0 flex-1 md:col-span-4">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1364,7 +1364,7 @@ function JobProgressCard({
                                   ) : child.id === "manage-downpayment" ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
-                                        <div className="shrink-0 md:col-span-1">
+                                        <div className="shrink-0 md:col-span-2">
                                           <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
@@ -1373,7 +1373,7 @@ function JobProgressCard({
                                             </span>
                                           </div>
                                         </div>
-                                        <div className="min-w-0 flex-1 md:col-span-5">
+                                        <div className="min-w-0 flex-1 md:col-span-4">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1420,7 +1420,7 @@ function JobProgressCard({
                                   ) : child.id === "project-kickoff" ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
-                                        <div className="shrink-0 md:col-span-1">
+                                        <div className="shrink-0 md:col-span-2">
                                           <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
@@ -1430,7 +1430,7 @@ function JobProgressCard({
                                           </div>
                                         </div>
 
-                                        <div className="min-w-0 flex-1 md:col-span-5">
+                                        <div className="min-w-0 flex-1 md:col-span-4">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1478,7 +1478,7 @@ function JobProgressCard({
                                   ) : isEndOfWorkChild ? (
                                     <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
                                       <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
-                                        <div className="shrink-0 md:col-span-1">
+                                        <div className="shrink-0 md:col-span-2">
                                           <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
@@ -1488,7 +1488,7 @@ function JobProgressCard({
                                           </div>
                                         </div>
 
-                                        <div className="min-w-0 flex-1 md:col-span-5">
+                                        <div className="min-w-0 flex-1 md:col-span-4">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[
@@ -1613,7 +1613,7 @@ function JobProgressCard({
                                       ].join(" ")}>
                                       <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
                                         {/* Status icon */}
-                                        <div className="shrink-0 md:col-span-1">
+                                        <div className="shrink-0 md:col-span-2">
                                           <div className="relative flex w-10 items-center justify-center">
                                             <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
                                               <StepIcon
@@ -1624,7 +1624,7 @@ function JobProgressCard({
                                         </div>
 
                                         {/* Title + status label */}
-                                        <div className="min-w-0 flex-1 md:col-span-5">
+                                        <div className="min-w-0 flex-1 md:col-span-4">
                                           <div className="flex min-w-0 items-center gap-2">
                                             <div
                                               className={[

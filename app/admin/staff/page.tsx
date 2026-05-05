@@ -109,6 +109,32 @@ function ratingStyle(r: string | null) {
   return RATING_STYLE[r.toLowerCase()] ?? { text: "text-gray-600", bar: "bg-gray-300", bg: "bg-gray-50", border: "border-gray-200" }
 }
 
+// ─── Avatar helpers ───────────────────────────────────────────────────────────
+
+const AVATAR_COLORS = [
+  "bg-rose-100 text-rose-700",
+  "bg-orange-100 text-orange-700",
+  "bg-amber-100 text-amber-700",
+  "bg-lime-100 text-lime-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-teal-100 text-teal-700",
+  "bg-sky-100 text-sky-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-violet-100 text-violet-700",
+  "bg-pink-100 text-pink-700",
+]
+
+function avatarColorClass(seed: string) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length]
+}
+
+function nameInitial(name: string) {
+  const v = (name ?? "").trim()
+  return v ? v[0]!.toUpperCase() : "?"
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Staff() {
@@ -193,7 +219,7 @@ export default function Staff() {
   )
 
   const activeFilterCount =
-    (specialtyFilter ? 1 : 0) + (statusFilter ? 1 : 0) + (showArchived ? 1 : 0)
+    (specialtyFilter ? 1 : 0) + (statusFilter ? 1 : 0)
 
   // ── Filtered list ─────────────────────────────────────────────────────────
 
@@ -366,7 +392,7 @@ export default function Staff() {
           </Link>
         </div>
 
-        {/* Search + Filter icon — same row */}
+        {/* Search + Filter icon + Show Archived — same row */}
         <div className="relative mb-4 flex items-center gap-2">
           {/* Search */}
           <div className="relative flex-1">
@@ -433,7 +459,7 @@ export default function Staff() {
                     )}
 
                     {/* Status */}
-                    <div className="mb-3">
+                    <div>
                       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
                         Status
                       </p>
@@ -455,33 +481,21 @@ export default function Staff() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Show Archived toggle — bottom strip */}
-                  <div className="border-t border-gray-100 bg-gray-50 px-3 py-2.5">
-                    <button
-                      onClick={() => setShowArchived((p) => !p)}
-                      className="flex w-full items-center justify-between text-sm text-gray-700"
-                    >
-                      <span className="font-medium">Archived</span>
-                      <div
-                        className={[
-                          "relative h-5 w-9 rounded-full transition-colors duration-200",
-                          showArchived ? "bg-[#00c065]" : "bg-gray-300",
-                        ].join(" ")}
-                      >
-                        <div
-                          className={[
-                            "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200",
-                            showArchived ? "translate-x-4" : "translate-x-0.5",
-                          ].join(" ")}
-                        />
-                      </div>
-                    </button>
-                  </div>
                 </div>
               </>
             )}
           </div>
+
+          {/* Show Archived — outside filter, in same row */}
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="rounded border-gray-300 text-[#00c065] focus:ring-[#00c065] w-4 h-4"
+            />
+            Show Archived
+          </label>
         </div>
 
         {/* Global overlays */}
@@ -525,11 +539,14 @@ export default function Staff() {
                       onClick={() => toggleEmployee(emp.id)}
                       className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
-                      <img
-                        src={emp.photoUrl || "/paint_pro_logo.png"}
-                        alt={emp.name}
-                        className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 object-cover"
-                      />
+                      <div
+                        className={[
+                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-sm font-bold",
+                          avatarColorClass(emp.id || emp.name),
+                        ].join(" ")}
+                      >
+                        {nameInitial(emp.name)}
+                      </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-semibold text-gray-900">{emp.name}</span>
@@ -623,8 +640,14 @@ export default function Staff() {
                         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Profile</div>
                         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                           <div className="grid grid-cols-1 gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
-                            <img src={emp.photoUrl || "/paint_pro_logo.png"} alt={emp.name}
-                              className="h-16 w-16 rounded-lg border border-gray-200 object-cover" />
+                            <div
+                              className={[
+                                "flex h-16 w-16 items-center justify-center rounded-lg border border-gray-200 text-xl font-bold",
+                                avatarColorClass(emp.id || emp.name),
+                              ].join(" ")}
+                            >
+                              {nameInitial(emp.name)}
+                            </div>
                             <div className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-2 sm:gap-x-10">
                               <div className="flex items-center justify-between gap-3 sm:justify-start">
                                 <span className="text-gray-500">ID#:</span>
@@ -940,23 +963,16 @@ const StaffModal = memo(function StaffModal({
   const [name, setName] = useState(initialData?.name ?? "")
   const [email, setEmail] = useState(initialData?.email ?? "")
   const [phone, setPhone] = useState(initialData?.phone ?? "")
-  const [photoUrl, setPhotoUrl] = useState(initialData?.photoUrl ?? "/paint_pro_logo.png")
   const [error, setError] = useState("")
   const [isSaving, setIsSaving] = useState(false)
 
   const canSubmit = name.trim().length > 0 && email.trim().length > 0
 
-  const onPickPhoto: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setPhotoUrl(URL.createObjectURL(file))
-  }
-
   const submit = async () => {
     setError("")
     if (!canSubmit) { setError("Name and email are required."); return }
     setIsSaving(true)
-    await onSave({ name: name.trim(), email: email.trim(), phone: phone.trim(), photoUrl })
+    await onSave({ name: name.trim(), email: email.trim(), phone: phone.trim(), photoUrl: "" })
     setIsSaving(false)
   }
 
@@ -979,13 +995,15 @@ const StaffModal = memo(function StaffModal({
 
         <div className="space-y-4">
           <div className="flex items-center gap-4">
-            <img src={photoUrl} alt="Preview" className="h-14 w-14 rounded-lg border border-gray-200 object-cover" />
-            <div className="flex-1">
-              <label className="mb-1 block text-sm font-medium text-gray-700">Picture</label>
-              <input type="file" accept="image/*" onChange={onPickPhoto}
-                className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border file:border-gray-200 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-gray-900 hover:file:bg-gray-50" />
-              <p className="mt-1 text-xs text-gray-500">Preview only — photo upload not yet supported.</p>
+            <div
+              className={[
+                "flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-xl font-bold",
+                avatarColorClass((initialData?.name ?? "") || "user"),
+              ].join(" ")}
+            >
+              {nameInitial(name || initialData?.name || "?")}
             </div>
+            <p className="text-sm text-gray-500">Avatar uses the first initial of the staff member&apos;s name.</p>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>

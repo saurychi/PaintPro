@@ -3,8 +3,50 @@
 import React from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
-import { SidebarBadgesProvider } from "@/components/sidebar-badges"
+import { SidebarBadgesProvider, useSidebarBadge } from "@/components/sidebar-badges"
+import { supabase } from "@/lib/supabaseClient"
 import { cn } from "@/lib/utils"
+
+function InventoryBadgeFetcher() {
+  const [count, setCount] = React.useState<number>(0)
+
+  const fetchCount = React.useCallback(async () => {
+    const { data } = await supabase
+      .from("materials")
+      .select("current_in_stock, reorder_point, needed_stock, status")
+    if (!data) return
+    const c = data.reduce((acc: number, item: { status?: string; current_in_stock?: number | null; reorder_point?: number | null; needed_stock?: number | null }) => {
+      if (item.status === "Archived") return acc
+      const stock = Number(item.current_in_stock ?? 0)
+      const reorderPoint = Number(item.reorder_point ?? 0)
+      const needed = Number(item.needed_stock ?? 0)
+      return (reorderPoint > 0 && stock < reorderPoint) || needed > 0 ? acc + 1 : acc
+    }, 0)
+    setCount(c)
+  }, [])
+
+  React.useEffect(() => { fetchCount() }, [fetchCount])
+
+  // Respond to in-app writes immediately (same-tab changes)
+  React.useEffect(() => {
+    const handler = () => fetchCount()
+    window.addEventListener("materials:changed", handler)
+    return () => window.removeEventListener("materials:changed", handler)
+  }, [fetchCount])
+
+  // Fallback: catch changes from other tabs/devices via Supabase Realtime
+  // (requires Realtime enabled on the materials table in the Supabase dashboard)
+  React.useEffect(() => {
+    const channel = supabase
+      .channel("inventory-badge-watcher")
+      .on("postgres_changes", { event: "*", schema: "public", table: "materials" }, fetchCount)
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchCount])
+
+  useSidebarBadge("inventory", count, "danger")
+  return null
+}
 
 function AdminShell({
   children,
@@ -19,6 +61,7 @@ function AdminShell({
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
+      <InventoryBadgeFetcher />
       <AppSidebar role={role} user={user} />
 
       <main

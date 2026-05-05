@@ -832,19 +832,19 @@ export default function AdminSchedule() {
         }
       `}</style>
 
-      <div className="h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 overflow-hidden bg-gray-50 p-4 text-gray-900 dark:bg-[#0b1120] dark:text-slate-100">
+      <div className="min-h-screen overflow-y-auto bg-gray-50 p-4 text-gray-900 dark:bg-[#0b1120] dark:text-slate-100 lg:h-[calc(100vh-var(--admin-header-offset,0px))] lg:min-h-0 lg:overflow-hidden">
         <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Schedule</h1>
 
-        <div className="mt-3 h-[calc(100%-2.75rem)] min-h-0">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/30">
+        <div className="mt-3 lg:h-[calc(100%-2.75rem)] lg:min-h-0">
+          <div className="flex flex-col rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/30 lg:h-full lg:min-h-0 lg:overflow-hidden">
             <div
               className="h-1 w-full shrink-0"
               style={{ backgroundColor: ACCENT }}
             />
 
-            <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2">
+            <div className="px-2.5 py-2 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
               {loading ? (
-                <div className="flex h-full items-center justify-center">
+                <div className="flex h-64 items-center justify-center lg:h-full">
                   <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
                     <Loader2 className="h-5 w-5 animate-spin text-gray-700 dark:text-slate-200" />
                     <span className="text-sm font-medium text-gray-700 dark:text-slate-300">
@@ -853,8 +853,8 @@ export default function AdminSchedule() {
                   </div>
                 </div>
               ) : (
-                <div className="grid h-full min-h-0 grid-cols-12 gap-3">
-                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-9">
+                <div className="grid grid-cols-12 gap-3 lg:h-full lg:min-h-0">
+                  <div className="col-span-12 flex flex-col rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
                     <div className="mb-2 flex items-center justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
@@ -922,7 +922,7 @@ export default function AdminSchedule() {
                     </div>
 
                     <div
-                      className={`min-h-0 flex-1 overflow-hidden rounded-2xl border ${BORDER} bg-gray-50 p-2 dark:border-slate-700 dark:bg-slate-950`}
+                      className={`h-[60vh] rounded-2xl border ${BORDER} bg-gray-50 p-2 dark:border-slate-700 dark:bg-slate-950 sm:h-[70vh] lg:h-auto lg:min-h-0 lg:flex-1 lg:overflow-hidden`}
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
@@ -951,8 +951,8 @@ export default function AdminSchedule() {
                     </div>
                   </div>
 
-                  <div className="col-span-12 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-3">
-                    <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
+                  <div className="col-span-12 flex flex-col rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                    <div className="flex flex-col px-3 py-3 lg:min-h-0 lg:flex-1">
                       <section className="shrink-0 pb-3">
                         <div className="mb-2 flex items-center gap-2">
                           <span
@@ -1051,7 +1051,7 @@ export default function AdminSchedule() {
                         </div>
                       </section>
 
-                      <section className="flex min-h-0 flex-1 flex-col border-t border-gray-200 pt-3 dark:border-slate-800">
+                      <section className="flex flex-col border-t border-gray-200 pt-3 dark:border-slate-800 lg:min-h-0 lg:flex-1">
                         <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span
@@ -1068,7 +1068,7 @@ export default function AdminSchedule() {
                           </span>
                         </div>
 
-                        <div className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-1 dark:divide-slate-800">
+                        <div className="max-h-[260px] divide-y divide-gray-200 overflow-y-auto pr-1 dark:divide-slate-800 lg:max-h-none lg:min-h-0 lg:flex-1">
                           {projects.length ? (
                             projects.map((project) => (
                               <button
