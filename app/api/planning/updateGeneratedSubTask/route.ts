@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { normalizeEquipmentUsageForStorage } from "@/lib/planning/equipmentUsage";
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays";
+import {
+  addHoursToIso,
+  buildUnavailableDateSet,
+  snapStartPastUnavailableSpan,
+} from "@/lib/schedule/snapPastUnavailable";
 
 type MaterialInput = {
   materialId?: string;
@@ -51,12 +57,31 @@ export async function POST(request: Request) {
         ? Math.max(0, body.estimatedHours)
         : null;
 
+    // Snap the start past any holiday / manual block so an edit can't
+    // persist a subtask whose span touches a red day.
+    const unavailableDays = await listScheduleUnavailableDays(
+      request.headers.get("cookie"),
+    );
+    const unavailableSet = buildUnavailableDateSet(
+      unavailableDays.map((day) => day.blockedDate),
+    );
+    const snapped = snapStartPastUnavailableSpan(
+      body.scheduledStartDatetime || null,
+      estimatedHours,
+      unavailableSet,
+    );
+    const scheduledStartDatetime = snapped.iso;
+    const scheduledEndDatetime =
+      snapped.skippedDays > 0 || !body.scheduledEndDatetime
+        ? addHoursToIso(scheduledStartDatetime, estimatedHours)
+        : body.scheduledEndDatetime;
+
     const { error: subTaskError } = await supabaseAdmin
       .from("project_sub_task")
       .update({
         estimated_hours: estimatedHours,
-        scheduled_start_datetime: body.scheduledStartDatetime || null,
-        scheduled_end_datetime: body.scheduledEndDatetime || null,
+        scheduled_start_datetime: scheduledStartDatetime,
+        scheduled_end_datetime: scheduledEndDatetime,
         equipments_used: normalizeEquipmentUsageForStorage(body.equipment ?? []),
         updated_at: timestamp,
       })

@@ -660,6 +660,22 @@ export async function POST(req: Request) {
     unavailableDates: unavailableDays.map((day) => day.blockedDate),
   });
 
+  // Server-authoritative per-subtask schedule, keyed by (taskName, subTaskTitle).
+  // Used at the project_sub_task insert site below so we don't trust whatever
+  // the client put in `subTask.scheduledStartDatetime` — the client schedule
+  // can drift past unavailable days if a holiday gets added between the
+  // schedule preview call and the create call.
+  const serverScheduleByKey = new Map<
+    string,
+    { scheduledStartDatetime: string | null; scheduledEndDatetime: string | null }
+  >();
+  for (const item of fallbackProjectSchedule.scheduledItems) {
+    serverScheduleByKey.set(`${item.taskName}__${item.subTaskTitle}`, {
+      scheduledStartDatetime: item.scheduledStartDatetime,
+      scheduledEndDatetime: item.scheduledEndDatetime,
+    });
+  }
+
   const resolvedScheduledEndDatetime =
     scheduledEndDatetime || fallbackProjectSchedule.projectScheduledEndDatetime || null;
 
@@ -899,6 +915,22 @@ export async function POST(req: Request) {
         subTask.equipment,
       );
 
+      // Prefer the server-side schedule (already snapped past holidays +
+      // manual unavailable days) over the client payload. Falls back to the
+      // client value only if the lib didn't produce a slot for this subtask
+      // — which can happen when the project has no scheduled_start_datetime.
+      const serverScheduleForSubTask = serverScheduleByKey.get(
+        `${task.name}__${subTask.title}`,
+      );
+      const subTaskScheduledStart =
+        serverScheduleForSubTask?.scheduledStartDatetime ??
+        subTask.scheduledStartDatetime ??
+        null;
+      const subTaskScheduledEnd =
+        serverScheduleForSubTask?.scheduledEndDatetime ??
+        subTask.scheduledEndDatetime ??
+        null;
+
       const { data: insertedProjectSubTask, error: projectSubTaskInsertError } =
         await supabaseAdmin
           .from("project_sub_task")
@@ -907,8 +939,8 @@ export async function POST(req: Request) {
             sub_task_id: matchedSubTask.sub_task_id,
             estimated_hours: estimatedHours,
             equipments_used: equipmentPayload,
-            scheduled_start_datetime: subTask.scheduledStartDatetime ?? null,
-            scheduled_end_datetime: subTask.scheduledEndDatetime ?? null,
+            scheduled_start_datetime: subTaskScheduledStart,
+            scheduled_end_datetime: subTaskScheduledEnd,
             status: "pending",
             sort_order: Number(matchedSubTask.sort_order ?? 0),
             notes: null,
