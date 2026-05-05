@@ -11,6 +11,7 @@ import {
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
 import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
+import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useClientProject } from "../ClientShellClient"
 
@@ -222,9 +223,12 @@ export default function AdminMessages() {
     if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
-  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates).
+  // Subscribes for both auth users and cookie-mode guest clients — guest
+  // clients still benefit from live updates on the conversation they have
+  // open. We need *either* a logged-in user or a project cookie to bother.
   useEffect(() => {
-    if (!currentUserId) return
+    if (!currentUserId && !clientProjectId) return
 
     const channel = supabase
       .channel(`global-chat-listener`)
@@ -235,10 +239,20 @@ export default function AdminMessages() {
           const newMessage = payload.new as Message
 
           if (newMessage.conversation_id === activeChatId) {
-            // It's the chat we are currently looking at
+            // It's the chat we are currently looking at. In cookie mode
+            // currentUserId is null, so the sender comparison still works
+            // (guest's own outgoing messages have sender_id === null too,
+            // but they're rendered optimistically by handleSendMessage and
+            // not duplicated here because the realtime row won't match the
+            // already-appended one's id).
             if (newMessage.sender_id !== currentUserId) {
-              setChatHistory((prev) => [...prev, newMessage])
-              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
+              setChatHistory((prev) => {
+                if (prev.some((m) => m.id === newMessage.id)) return prev
+                return [...prev, newMessage]
+              })
+              if (currentUserId) {
+                markConversationAsRead(activeChatId, currentUserId)
+              }
             }
           }
 
@@ -262,14 +276,18 @@ export default function AdminMessages() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeChatId, currentUserId])
+  }, [activeChatId, currentUserId, clientProjectId])
 
   // 8. Handle Sending a Message
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !activeChatId || !currentUserId) return
+    // Cookie-mode clients have no auth user, so we only require an active
+    // chat plus a non-empty input. The /api/messages/send route resolves the
+    // sender (auth user or guest client) from cookies on the server.
+    if (!inputMessage.trim() || !activeChatId) return
+    if (!currentUserId && !clientProjectId) return
     setIsSending(true)
     try {
-      const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
+      const sentMsg = await postMessage(activeChatId, currentUserId ?? "", inputMessage)
       setChatHistory((prev) => [...prev, sentMsg])
 
       // <-- NEW: Update sidebar instantly for ourselves and bump to top
@@ -285,6 +303,7 @@ export default function AdminMessages() {
       setInputMessage("")
     } catch (error) {
       console.error("Error sending message:", error)
+      toast.error(error instanceof Error ? error.message : "Failed to send message.")
     } finally {
       setIsSending(false)
       // Focus after isSending clears so the input is no longer disabled
@@ -360,26 +379,68 @@ export default function AdminMessages() {
   }
 
   const handleStartConversation = async (recipient: AvailableUser) => {
-    if (!currentUserId) return
+    if (!currentUserId && !clientProjectId) {
+      toast.error("Can't start a conversation — not signed in and no project link active.")
+      return
+    }
     setIsCreatingChat(true)
     try {
+      const payload =
+        recipient.kind === "client"
+          ? { targetClientId: recipient.clientId, projectId: recipient.projectId }
+          : { targetUserId: recipient.id }
       const res = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          recipient.kind === "client"
-            ? { targetClientId: recipient.clientId, projectId: recipient.projectId }
-            : { targetUserId: recipient.id }
-        ),
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Failed to start conversation.")
-      await loadConversations(currentUserId, data.conversationId)
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        const message =
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+          `Failed to start conversation (status ${res.status}).`
+        throw new Error(message)
+      }
+      if (!data?.conversationId) {
+        throw new Error("Server didn't return a conversation id.")
+      }
+
+      // Optimistically inject (or update) the row in the sidebar so the user
+      // sees the new thread immediately. The refetch below then reconciles
+      // whatever the server returns. If the server's list endpoint somehow
+      // omits the new conversation (RLS / projection bug), the optimistic
+      // entry still keeps it visible.
+      const optimisticEntry: ConversationSummary = {
+        id: data.conversationId,
+        name: recipient.username || "New Conversation",
+        role: roleLabel(roleKey(recipient.role)),
+        profile_image_url: recipient.profile_image_url ?? null,
+        lastMessage: "Say hello!",
+        unread: false,
+        lastActivity: Date.now(),
+      }
+      setConversations((prev) => {
+        const withoutDup = prev.filter((c) => c.id !== optimisticEntry.id)
+        return [optimisticEntry, ...withoutDup].sort(
+          (a, b) => b.lastActivity - a.lastActivity,
+        )
+      })
+      setActiveChatId(data.conversationId)
       setIsNewChatOpen(false)
       setUserSearchQuery("")
       setSelectedRoleFilter("all")
+      // Intentionally NOT calling loadConversations here. The optimistic
+      // entry above is correct (we know the server returned a real
+      // conversation id), and a refetch could clobber it if the server's
+      // list endpoint races with the just-created participant row. The
+      // realtime listener bumps lastActivity / lastMessage for incoming
+      // messages, and any future page reload reconciles authoritatively.
     } catch (error) {
-      console.error("Error starting conversation:", error)
+      console.error("[start-conversation] error", error)
+      toast.error(
+        error instanceof Error ? error.message : "Failed to start conversation.",
+      )
     } finally {
       setIsCreatingChat(false)
     }
