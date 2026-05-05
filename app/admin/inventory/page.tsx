@@ -1,13 +1,12 @@
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect } from "react"
 import { supabase } from '@/lib/supabaseClient'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Search, Plus, Filter } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import InventoryTable from '@/components/inventorytable'
 import InventoryModal from '@/components/inventory-modal'
-import { useSidebarBadge } from '@/components/sidebar-badges'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 
@@ -56,13 +55,22 @@ export default function AdminInventory() {
     ])
 
     if (matRes.data) {
-      // Sort materials: Deficits on top, then alphabetical by name
       const sortedMats = matRes.data.sort((a, b) => {
-        const aDeficit = a.needed_stock || 0;
-        const bDeficit = b.needed_stock || 0;
-        if (bDeficit !== aDeficit) return bDeficit - aDeficit;
-        return a.name.localeCompare(b.name);
-      });
+        const needsReorder = (item: typeof a) => {
+          const stock = Number(item.current_in_stock ?? 0)
+          const reorderPoint = Number(item.reorder_point ?? 0)
+          const needed = Number(item.needed_stock ?? 0)
+          return (reorderPoint > 0 && stock < reorderPoint) || needed > 0
+        }
+        const aNeedsReorder = needsReorder(a)
+        const bNeedsReorder = needsReorder(b)
+        if (aNeedsReorder !== bNeedsReorder) return aNeedsReorder ? -1 : 1
+        // Among items that need reorder, sort by deficit magnitude descending
+        const aDeficit = Number(a.needed_stock ?? 0)
+        const bDeficit = Number(b.needed_stock ?? 0)
+        if (bDeficit !== aDeficit) return bDeficit - aDeficit
+        return a.name.localeCompare(b.name)
+      })
       setMaterials(sortedMats)
     }
     if (eqRes.data) {
@@ -74,23 +82,6 @@ export default function AdminInventory() {
   }
 
   useEffect(() => { fetchInventory() }, [])
-
-  // Surface a badge on the sidebar's "Inventory" item whenever any non-archived
-  // material is below its reorder point or has needed_stock requested. The
-  // count reflects the number of materials, not the magnitude of the deficit.
-  const inventoryAttentionCount = useMemo(() => {
-    return materials.reduce((count, item) => {
-      if (item?.status === "Archived") return count
-      const stock = Number(item?.current_in_stock ?? 0)
-      const reorderPoint = Number(item?.reorder_point ?? 0)
-      const needed = Number(item?.needed_stock ?? 0)
-      const belowReorder = reorderPoint > 0 && stock < reorderPoint
-      const hasNeeded = needed > 0
-      return belowReorder || hasNeeded ? count + 1 : count
-    }, 0)
-  }, [materials])
-
-  useSidebarBadge("inventory", inventoryAttentionCount, "danger")
 
   const handleSaveItem = async (data: any, mode: 'add' | 'edit', type: 'materials' | 'equipment') => {
     const table = type === 'materials' ? 'materials' : 'equipment'
@@ -116,6 +107,7 @@ export default function AdminInventory() {
       }
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
+      window.dispatchEvent(new CustomEvent("materials:changed"))
     } catch (error) {
       console.error(`Error saving to ${table}:`, error)
       alert(`Failed to save item. Check console for details.`)
@@ -139,6 +131,7 @@ export default function AdminInventory() {
 
       setQuickAddModal({ isOpen: false, item: null, amount: 0 });
       fetchInventory();
+      window.dispatchEvent(new CustomEvent("materials:changed"))
     } catch (error) {
       console.error("Error resolving deficit:", error)
       alert("Failed to update stock.");
@@ -158,6 +151,7 @@ export default function AdminInventory() {
 
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
+      window.dispatchEvent(new CustomEvent("materials:changed"))
     } catch (error) {
       console.error(`Error updating status in ${table}:`, error)
       alert(`Failed to ${isArchiving ? 'archive' : 'restore'} item.`)

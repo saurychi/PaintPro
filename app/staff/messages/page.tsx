@@ -82,6 +82,9 @@ export default function AdminMessages() {
   const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false)
   const [recipientLoadError, setRecipientLoadError] = useState<string | null>(null)
 
+  // Mobile view toggle (list vs chat)
+  const [mobileView, setMobileView] = useState<"list" | "chat">("list")
+
   // Message actions state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)

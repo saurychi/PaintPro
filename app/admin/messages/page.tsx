@@ -10,7 +10,7 @@ import {
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus, ArrowLeft } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const ACCENT = "#00c065"
@@ -81,6 +81,9 @@ export default function AdminMessages() {
   const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false)
   const [recipientLoadError, setRecipientLoadError] = useState<string | null>(null)
 
+  // Mobile view toggle (list vs chat)
+  const [mobileView, setMobileView] = useState<"list" | "chat">("list")
+
   // Message actions state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -146,6 +149,7 @@ export default function AdminMessages() {
 
     if (selectChatId) {
       setActiveChatId(selectChatId)
+      setMobileView("chat")
     } else if (mappedConvos.length > 0) {
       setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
     }
@@ -385,11 +389,11 @@ export default function AdminMessages() {
 
   if (isLoading) {
     return (
-      <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+      <div className="p-4 sm:p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
         <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
-        <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-          <div className="flex gap-6 h-full overflow-hidden">
-            <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+        <div className="mt-4 sm:mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+          <div className="flex gap-4 sm:gap-6 h-full overflow-hidden">
+            <aside className="w-full lg:w-72 xl:w-80 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col dark:border-slate-700 dark:bg-slate-900">
               <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
                 <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
               </div>
@@ -397,7 +401,7 @@ export default function AdminMessages() {
                 <Loader2 className="h-5 w-5 text-gray-300 animate-spin dark:text-slate-500" />
               </div>
             </aside>
-            <div className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm flex items-center justify-center min-w-0">
+            <div className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm flex items-center justify-center min-w-0 hidden lg:flex">
               <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
             </div>
           </div>
@@ -407,14 +411,18 @@ export default function AdminMessages() {
   }
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
+    <div className="p-4 sm:p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
       <h1 className="text-2xl font-semibold text-gray-900">Messages</h1>
 
-      <div className="mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
-        <div className="flex gap-6 h-full overflow-hidden">
+      <div className="mt-4 sm:mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
+        <div className="flex gap-4 sm:gap-6 h-full overflow-hidden">
 
           {/* Conversation Sidebar */}
-          <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
+          <aside className={[
+            "rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col dark:border-slate-700 dark:bg-slate-900",
+            "w-full lg:w-72 xl:w-80 lg:flex",
+            mobileView === "list" ? "flex" : "hidden lg:flex",
+          ].join(" ")}>
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
@@ -437,7 +445,7 @@ export default function AdminMessages() {
                 return (
                   <button
                     key={chat.id}
-                    onClick={() => setActiveChatId(chat.id)}
+                    onClick={() => { setActiveChatId(chat.id); setMobileView("chat") }}
                     className={[
                       "group relative w-full text-left border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 dark:border-slate-800",
                       isActive
@@ -481,10 +489,20 @@ export default function AdminMessages() {
 
           {/* Chat Area */}
           {activeChat ? (
-            <section className="flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0">
+            <section className={[
+              "flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0",
+              mobileView === "chat" ? "flex" : "hidden lg:flex",
+            ].join(" ")}>
               {/* Header */}
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
+                  <button
+                    onClick={() => setMobileView("list")}
+                    className="lg:hidden mr-1 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+                    aria-label="Back to conversations"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
                   <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
                     <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
                     <span className="text-xs font-semibold text-gray-700">
@@ -612,7 +630,7 @@ export default function AdminMessages() {
               </div>
             </section>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
+            <div className="hidden lg:flex flex-1 flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
               <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
               <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
               <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
