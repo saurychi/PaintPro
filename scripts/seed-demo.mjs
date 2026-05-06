@@ -11,10 +11,18 @@ const SPECIALTIES = [
   "Interior Painting",
   "Exterior Painting",
   "Ceiling Painting",
+  "Feature Wall Painting",
+  "Trim, Doors & Frames Painting",
+  "Stain Blocking / Primer Work",
   "Wall Preparation",
+  "High-Pressure Cleaning",
+  "Decking Staining & Coating",
+  "Fence & Gate Painting",
   "Decorative Painting",
   "Industrial Coating",
   "Surface Restoration",
+  "Roof Painting",
+  "Waterproofing & Sealant Application",
 ]
 
 const RATINGS = ["great", "good", "good", "bad"]
@@ -39,16 +47,23 @@ async function run() {
   if (staffErr) { console.error("fetch staff:", staffErr.message); process.exit(1) }
   console.log(`Found ${staff.length} staff/managers`)
 
-  // ── 2. Set specialties (only if currently null) ───────────────────────────
+  // ── 2. Set specialties — always overwrite with 2-3 comma-separated values ──
   let specialtyCount = 0
   for (const u of staff) {
-    if (u.specialty) continue  // already has one
-    const specialty = pick(SPECIALTIES, rng(u.id))
+    const h = rng(u.id)
+    const count = 2 + (h % 2)  // 2 or 3 specialties
+    // Pick distinct specialties using different offsets of the same hash
+    const picked = []
+    for (let i = 0; i < SPECIALTIES.length && picked.length < count; i++) {
+      const candidate = SPECIALTIES[(h + i * 7) % SPECIALTIES.length]
+      if (!picked.includes(candidate)) picked.push(candidate)
+    }
+    const specialty = picked.join(", ")
     const { error } = await supabase.from("users").update({ specialty }).eq("id", u.id)
     if (error) console.warn(`  specialty ${u.username}: ${error.message}`)
     else specialtyCount++
   }
-  console.log(`Set specialties for ${specialtyCount} users (${staff.length - specialtyCount} already had one)`)
+  console.log(`Updated specialties for ${specialtyCount} users`)
 
   // ── 3. Fetch projects ──────────────────────────────────────────────────────
   const { data: projects, error: projErr } = await supabase
