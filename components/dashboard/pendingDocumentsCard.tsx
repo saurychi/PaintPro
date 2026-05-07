@@ -75,6 +75,7 @@ function PendingDocumentsCard({
     return source.filter(
       (project) =>
         project.status === "quotation_pending" ||
+        project.status === "grant_access_quotation" ||
         project.status === "invoice_agreement_pending",
     );
   }, [projects, selectedProject]);

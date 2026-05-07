@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .select("project_id, project_code, title, status")
+    .select("project_id, project_code, title, status, client_id")
     .eq("project_id", projectId)
     .maybeSingle();
 
@@ -65,7 +65,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (project.status !== "quotation_pending") {
+  if (
+    project.status !== "quotation_pending" &&
+    project.status !== "grant_access_quotation"
+  ) {
     return NextResponse.json(
       { error: "This quotation is no longer pending client review." },
       { status: 400 },
@@ -144,6 +147,44 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 },
       );
+    }
+  }
+
+  // Also add the project's client as a participant if they have a matching
+  // auth user (clients linked by email). Without this, an auth-user client
+  // can't see the conversation via conversation_participants and would miss
+  // the notification entirely. Project-cookie clients are reached separately
+  // through the project_id-based fallback in /api/messages/conversations.
+  if (project.client_id) {
+    const { data: clientRow } = await supabaseAdmin
+      .from("clients")
+      .select("email")
+      .eq("client_id", project.client_id)
+      .maybeSingle();
+
+    const clientEmail = clientRow?.email?.trim();
+    if (clientEmail) {
+      const { data: clientAuthUser } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("email", clientEmail)
+        .maybeSingle();
+
+      const clientUserId = clientAuthUser?.id;
+      if (clientUserId && clientUserId !== userId) {
+        const { data: clientParticipant } = await supabaseAdmin
+          .from("conversation_participants")
+          .select("conversation_id")
+          .eq("conversation_id", conversationId)
+          .eq("user_id", clientUserId)
+          .maybeSingle();
+
+        if (!clientParticipant) {
+          await supabaseAdmin
+            .from("conversation_participants")
+            .insert([{ conversation_id: conversationId, user_id: clientUserId }]);
+        }
+      }
     }
   }
 

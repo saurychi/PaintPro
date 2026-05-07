@@ -212,8 +212,8 @@ export default function AdminMessages() {
     if (!activeChatId) return
 
     async function loadMessages() {
-      const msgs = await fetchMessages(activeChatId!)
-      setChatHistory(msgs)
+      const result = await fetchMessages(activeChatId!)
+      setChatHistory(result.messages)
     }
     loadMessages()
   }, [activeChatId])

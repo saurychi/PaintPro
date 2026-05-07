@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
     ],
   },
   devIndicators: false,
+  allowedDevOrigins: [
+    "http://10.0.2.2:3000",
+    "http://10.0.2.2",
+  ],
 };
 
 export default nextConfig;

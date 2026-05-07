@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ChevronRight,
   Loader2,
@@ -8,8 +8,19 @@ import {
   X,
   GripVertical,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import {
+  getCachedSubTasks,
+  setCachedSubTasks,
+  setCachedStep,
+  getCachedProjectMeta,
+  getCachedMainTasks,
+  ensureWizardCacheHydrated,
+  markWizardDirty,
+  type CachedSubTask,
+} from "@/lib/wizardCache";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import SubTaskPickerModal from "@/components/project-creation/SubTaskPickerModal";
 import CreateSubTaskModal from "@/components/project-creation/CreateSubTaskModal";
@@ -30,6 +41,7 @@ type ServiceStep = {
 
 export type ServiceGroup = {
   id: string;
+  projectTaskId: string;
   title: string;
   scheduledAt?: string;
   finishedAt?: string;
@@ -69,8 +81,14 @@ function isoToPretty(iso?: string) {
 }
 
 export default function SubTaskAssignment() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
+
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/main-task-assignment");
+    router.prefetch("/admin/job-creation/materials-assignment");
+  }, [router]);
 
   const [services, setServices] = useState<ServiceGroup[]>([]);
   const [loadingSubTasks, setLoadingSubTasks] = useState(true);
@@ -80,12 +98,7 @@ export default function SubTaskAssignment() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [servicesHistory, setServicesHistory] = useState<ServiceGroup[][]>([]);
-  const [pendingAction, setPendingAction] = useState<
-    "next" | "back" | "browserBack" | null
-  >(null);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const allowBrowserBackRef = useRef(false);
 
   const [subTaskCatalog, setSubTaskCatalog] = useState<
     Record<
@@ -156,7 +169,7 @@ export default function SubTaskAssignment() {
           return { ...group, children: next };
         }),
       );
-      setIsDirty(true);
+      setIsDirty(true); markWizardDirty(projectId);
     }
 
     setDragState(null);
@@ -177,6 +190,69 @@ export default function SubTaskAssignment() {
         return;
       }
 
+      await ensureWizardCacheHydrated(projectId);
+
+      // ── Cache-first: check wizard cache for subtasks ──
+      const cachedSubTasks = getCachedSubTasks(projectId);
+      const meta = getCachedProjectMeta(projectId);
+      const cachedMainTasks = getCachedMainTasks(projectId);
+
+      if (cachedSubTasks && cachedSubTasks.length > 0) {
+        setProjectCode(meta?.projectCode ?? "");
+        setProjectTitle(meta?.projectTitle ?? "");
+
+        // Build ServiceGroup[] from cached subtasks
+        const groupedMap = new Map<string, ServiceGroup>();
+
+        for (const cached of cachedSubTasks) {
+          const groupId = cached.mainTaskId;
+
+          if (!groupedMap.has(groupId)) {
+            // Find the main task title from cachedMainTasks
+            const mainTaskName =
+              cachedMainTasks?.find((t) => t.id === groupId)?.name ?? "";
+            groupedMap.set(groupId, {
+              id: groupId,
+              projectTaskId: cached.projectTaskId,
+              title: mainTaskName,
+              scheduledAt: undefined,
+              finishedAt: undefined,
+              status: "pending",
+              children: [],
+            });
+          }
+
+          groupedMap.get(groupId)!.children.push({
+            id: cached.id,
+            subTaskId: cached.subTaskId,
+            title: cached.title,
+            sortOrder: cached.sortOrder,
+            scheduledAt: cached.scheduledStartDatetime
+              ? isoToPretty(cached.scheduledStartDatetime.slice(0, 16))
+              : undefined,
+            finishedAt: cached.scheduledEndDatetime
+              ? isoToPretty(cached.scheduledEndDatetime.slice(0, 16))
+              : undefined,
+            status: "pending",
+            assignedTo: "",
+          });
+        }
+
+        const groupedServices = Array.from(groupedMap.values()).map((group) => ({
+          ...group,
+          children: [...group.children].sort((a, b) => {
+            const sortDiff = a.sortOrder - b.sortOrder;
+            return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
+          }),
+        }));
+
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+        setLoadingSubTasks(false);
+        return;
+      }
+
+      // ── Cache miss — fetch from API ──
       try {
         setLoadingSubTasks(true);
 
@@ -210,6 +286,7 @@ export default function SubTaskAssignment() {
           if (!groupedMap.has(groupId)) {
             groupedMap.set(groupId, {
               id: groupId,
+              projectTaskId: row.project_task_id,
               title: mainTask.name,
               scheduledAt: undefined,
               finishedAt: undefined,
@@ -247,6 +324,24 @@ export default function SubTaskAssignment() {
 
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));
+
+        // Populate cache for future visits
+        const subTasksForCache: CachedSubTask[] = groupedServices.flatMap((group) =>
+          group.children.map((child) => ({
+            id: child.id,
+            subTaskId: child.subTaskId,
+            mainTaskId: group.id,
+            projectTaskId: group.projectTaskId,
+            title: child.title,
+            sortOrder: child.sortOrder,
+            estimatedHours: null,
+            scheduledStartDatetime: null,
+            scheduledEndDatetime: null,
+            assignedEmployeeIds: [],
+            equipments: [],
+          })),
+        );
+        setCachedSubTasks(projectId, subTasksForCache);
       } catch (error: any) {
         toast.error(error?.message || "Failed to load project subtasks.");
       } finally {
@@ -329,25 +424,6 @@ export default function SubTaskAssignment() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [services]);
 
-  // ── browser back guard ─────────────────────────────────────────────────────
-  useEffect(() => {
-    window.history.pushState(null, "", window.location.href);
-
-    function handlePopState() {
-      if (allowBrowserBackRef.current) return;
-      if (!isDirty) {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-      window.history.pushState(null, "", window.location.href);
-      requestLeave("browserBack");
-    }
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [isDirty]);
-
   // ── helpers ────────────────────────────────────────────────────────────────
   function pushServicesHistory() {
     setServicesHistory((prev) => [...prev, structuredClone(services)]);
@@ -360,7 +436,7 @@ export default function SubTaskAssignment() {
       const previousServices = nextHistory.pop();
       if (previousServices) {
         setServices(previousServices);
-        setIsDirty(true);
+        setIsDirty(true); markWizardDirty(projectId);
       }
       return nextHistory;
     });
@@ -388,7 +464,7 @@ export default function SubTaskAssignment() {
       next.delete(`${mainTaskId}::${subTaskId}`);
       return next;
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function handleRemoveSelectedSubTasks(keys: Set<string>) {
@@ -403,7 +479,7 @@ export default function SubTaskAssignment() {
       })),
     );
     setSelectedSubTaskKeysForDelete(new Set());
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function toggleSubTaskDeleteSelection(mainTaskId: string, subTaskId: string) {
@@ -479,7 +555,7 @@ export default function SubTaskAssignment() {
       }),
     );
 
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
     handleCloseSubTaskPicker();
   }
 
@@ -537,92 +613,48 @@ export default function SubTaskAssignment() {
   }
 
   // ── navigation ─────────────────────────────────────────────────────────────
-  function requestLeave(action: "next" | "back" | "browserBack") {
-    if (!isDirty) {
-      if (action === "next") {
-        setIsNavigatingNext(true);
-        void handleConfirmSave(true, "next");
-        return;
-      }
-      if (action === "back") {
-        void handleConfirmSave(true, "back");
-        return;
-      }
-      if (action === "browserBack") {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-      return;
-    }
-
-    if (action !== "next") setIsNavigatingNext(false);
-
-    setPendingAction(action);
-    setShowSaveConfirm(true);
-  }
 
   function handleNext() {
     setIsNavigatingNext(true);
-    requestLeave("next");
+    setCachedSubTasks(projectId, buildSubTasksForCache());
+    setIsDirty(false);
+    setCachedStep(projectId, "materials_pending");
+    setOptimisticProjectStatus(projectId, "materials_pending");
+    router.push(`/admin/job-creation/materials-assignment?projectId=${projectId}`);
   }
 
   function handleGoBack() {
-    if (!isDirty) setIsNavigatingBack(true);
-    requestLeave("back");
+    setIsNavigatingBack(true);
+    setCachedSubTasks(projectId, buildSubTasksForCache());
+    setIsDirty(false);
+    setCachedStep(projectId, "main_task_pending");
+    setOptimisticProjectStatus(projectId, "main_task_pending");
+    router.push(`/admin/job-creation/main-task-assignment?projectId=${projectId}`);
   }
 
-  async function handleConfirmSave(
-    shouldSave: boolean,
-    overrideAction?: "next" | "back" | "browserBack",
-  ) {
-    const action = overrideAction ?? pendingAction;
-    if (!overrideAction) {
-      setShowSaveConfirm(false);
-      setPendingAction(null);
-    }
+  /** Build CachedSubTask[] from current services state, preserving fields managed by other pages */
+  function buildSubTasksForCache(): CachedSubTask[] {
+    const existing = getCachedSubTasks(projectId);
+    const existingMap = new Map(existing?.map((st) => [st.id, st]) ?? []);
 
-    if (!action) return;
-
-    if (shouldSave) {
-      const response = await fetch("/api/planning/updateProjectStatus", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          status: action === "back" ? "main_task_pending" : "materials_pending",
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setIsNavigatingNext(false);
-        setIsNavigatingBack(false);
-        toast.error(data?.error || "Failed to update project status.");
-        return;
-      }
-
-      setIsDirty(false);
-    }
-
-    if (action === "next") {
-      window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
-      return;
-    }
-
-    setIsNavigatingNext(false);
-
-    if (action === "back") {
-      window.location.href = `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
-      return;
-    }
-
-    if (action === "browserBack") {
-      allowBrowserBackRef.current = true;
-      window.history.back();
-      return;
-    }
+    return services.flatMap((group) =>
+      group.children.map((child, index) => {
+        const prev = existingMap.get(child.id);
+        return {
+          id: child.id,
+          subTaskId: child.subTaskId,
+          mainTaskId: group.id,
+          projectTaskId: group.projectTaskId,
+          title: child.title,
+          sortOrder: index,
+          estimatedHours: prev?.estimatedHours ?? null,
+          scheduledStartDatetime: prev?.scheduledStartDatetime ?? null,
+          scheduledEndDatetime: prev?.scheduledEndDatetime ?? null,
+          assignedEmployeeIds: prev?.assignedEmployeeIds ?? [],
+          equipments: prev?.equipments ?? [],
+        };
+      }),
+    );
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -902,48 +934,6 @@ export default function SubTaskAssignment() {
           </button>
         </div>
       </div>
-
-      {/* save confirm modal */}
-      {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Save changes?</h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Do you want to save your sub task changes before leaving this page?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSaveConfirm(false);
-                  setPendingAction(null);
-                  setIsNavigatingNext(false);
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
-                Don&apos;t Save
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(true)}
-                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-[12px] font-semibold text-white hover:brightness-95"
-                style={{ backgroundColor: ACCENT }}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <SubTaskPickerModal
         open={!!pickerOpenForMainTaskId}

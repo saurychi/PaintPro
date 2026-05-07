@@ -1,9 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronDown, ChevronRight, Clock3, List, Loader2 } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Clock3, List, Loader2, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import { getCachedSubTasks, getCachedMainTasks, setCachedSubTasks, setCachedStep, ensureWizardCacheHydrated, markWizardDirty } from "@/lib/wizardCache";
+import { useProjectNow } from "@/lib/time/useProjectNow";
+import type { CachedSubTask } from "@/lib/wizardCache";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -305,8 +309,16 @@ export default function ProjectSchedulePage() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/equipment-assignment");
+    router.prefetch("/admin/job-creation/employee-assignment");
+  }, [router]);
+
+  const { now: projectNow } = useProjectNow();
+
   const [services, setServices] = useState<ServiceGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [jobNo, setJobNo] = useState("Project Schedule");
   const [siteName, setSiteName] = useState("Review the generated schedule");
@@ -330,33 +342,78 @@ export default function ProjectSchedulePage() {
   const normalizeDoneRef = useRef(false);
 
   const [isDirty, setIsDirty] = useState(false);
-  const [pendingAction, setPendingAction] = useState<
-    "next" | "back" | "browserBack" | null
-  >(null);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
-  const [isSavingFromModal, setIsSavingFromModal] = useState(false);
 
-  const allowBrowserBackRef = useRef(false);
   // Undo stack of past `services` snapshots. Each drag/resize pushes the
   // pre-mutation state; Ctrl/Cmd+Z pops and restores. Capped so a long
   // editing session can't balloon memory.
   const historyRef = useRef<ServiceGroup[][]>([]);
   const HISTORY_LIMIT = 50;
-  const suppressLeaveGuardRef = useRef(false);
 
-  useEffect(() => {
-    async function loadSchedule() {
-      if (!projectId) {
-        toast.error("Missing project ID.");
-        setLoading(false);
-        return;
+  // Helper: convert cached subtasks into ServiceGroup[] for display
+  function cachedSubTasksToServiceGroups(cached: CachedSubTask[]): ServiceGroup[] {
+    // Attempt to get main task names from cache for better display
+    const mainTasks = getCachedMainTasks(projectId);
+    const mainTaskNameMap = new Map<string, string>();
+    if (mainTasks) {
+      for (const mt of mainTasks) {
+        mainTaskNameMap.set(mt.id, mt.name);
+      }
+    }
+
+    const groupedMap = new Map<string, ServiceGroup>();
+    for (const st of cached) {
+      if (!groupedMap.has(st.mainTaskId)) {
+        groupedMap.set(st.mainTaskId, {
+          id: st.mainTaskId,
+          title: mainTaskNameMap.get(st.mainTaskId) ?? "Main Task",
+          status: "pending",
+          children: [],
+        });
+      }
+      const group = groupedMap.get(st.mainTaskId)!;
+      group.children.push({
+        id: st.id,
+        subTaskId: st.subTaskId,
+        title: st.title,
+        status: "pending",
+        estimatedHours: st.estimatedHours,
+        scheduledStartDatetime: st.scheduledStartDatetime,
+        scheduledEndDatetime: st.scheduledEndDatetime,
+      });
+    }
+    return Array.from(groupedMap.values());
+  }
+
+  async function loadSchedule(forceRefresh = false) {
+    if (!projectId) {
+      toast.error("Missing project ID.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      if (forceRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
       }
 
-      try {
-        setLoading(true);
+      await ensureWizardCacheHydrated(projectId);
 
+      if (!forceRefresh) {
+        const cached = getCachedSubTasks(projectId);
+        if (cached && cached.length > 0) {
+          const nextServices = cachedSubTasksToServiceGroups(cached);
+          setServices(nextServices);
+          historyRef.current = [];
+          setLoading(false);
+          return;
+        }
+      }
+
+        // ─── Cache miss: fetch from API ────────────────────────────────────
         let loaded = false;
 
         try {
@@ -407,6 +464,8 @@ export default function ProjectSchedulePage() {
             });
 
             const groupedMap = new Map<string, ServiceGroup>();
+            // Also build CachedSubTask[] to store in cache
+            const cachedSubTasks: CachedSubTask[] = [];
 
             for (const row of sortedRows) {
               const mainTaskId =
@@ -420,6 +479,11 @@ export default function ProjectSchedulePage() {
                 row?.main_task_name ??
                 "Main Task";
 
+              const projectTaskId =
+                row?.project_task_id ??
+                row?.project_task?.project_task_id ??
+                "";
+
               if (!groupedMap.has(mainTaskId)) {
                 groupedMap.set(mainTaskId, {
                   id: mainTaskId,
@@ -432,36 +496,64 @@ export default function ProjectSchedulePage() {
               const group = groupedMap.get(mainTaskId);
               if (!group) continue;
 
+              const stepId =
+                row?.project_sub_task_id ??
+                row?.id ??
+                `${mainTaskId}-${row?.sub_task?.sub_task_id ?? crypto.randomUUID()}`;
+
+              const subTaskId =
+                row?.sub_task?.sub_task_id ??
+                row?.sub_task_id ??
+                row?.project_sub_task_id ??
+                "";
+
+              const title =
+                row?.sub_task?.description ??
+                row?.sub_task_description ??
+                row?.title ??
+                "Sub Task";
+
+              const estimatedHours = normalizeNumber(
+                row?.estimated_hours ?? row?.estimatedHours,
+              );
+
+              const scheduledStartDatetime =
+                row?.scheduled_start_datetime ??
+                row?.scheduledStartDatetime ??
+                null;
+
+              const scheduledEndDatetime =
+                row?.scheduled_end_datetime ??
+                row?.scheduledEndDatetime ??
+                null;
+
               const step: ServiceStep = {
-                id:
-                  row?.project_sub_task_id ??
-                  row?.id ??
-                  `${mainTaskId}-${row?.sub_task?.sub_task_id ?? crypto.randomUUID()}`,
-                subTaskId:
-                  row?.sub_task?.sub_task_id ??
-                  row?.sub_task_id ??
-                  row?.project_sub_task_id ??
-                  "",
-                title:
-                  row?.sub_task?.description ??
-                  row?.sub_task_description ??
-                  row?.title ??
-                  "Sub Task",
+                id: stepId,
+                subTaskId,
+                title,
                 status: "pending",
-                estimatedHours: normalizeNumber(
-                  row?.estimated_hours ?? row?.estimatedHours,
-                ),
-                scheduledStartDatetime:
-                  row?.scheduled_start_datetime ??
-                  row?.scheduledStartDatetime ??
-                  null,
-                scheduledEndDatetime:
-                  row?.scheduled_end_datetime ??
-                  row?.scheduledEndDatetime ??
-                  null,
+                estimatedHours,
+                scheduledStartDatetime,
+                scheduledEndDatetime,
               };
 
               group.children.push(step);
+
+              // Build the cached entry
+              cachedSubTasks.push({
+                id: stepId,
+                subTaskId,
+                mainTaskId,
+                projectTaskId,
+                title,
+                sortOrder: cachedSubTasks.length,
+                estimatedHours,
+                scheduledStartDatetime,
+                scheduledEndDatetime,
+                assignedEmployeeIds:
+                  row?.assignedEmployeeIds ?? row?.assigned_employee_ids ?? [],
+                equipments: row?.equipments ?? [],
+              });
             }
 
             const nextServices = Array.from(groupedMap.values());
@@ -476,6 +568,9 @@ export default function ProjectSchedulePage() {
                   data?.project?.site_address ??
                   "Review the generated schedule",
               );
+
+              // Cache the fetched subtasks
+              setCachedSubTasks(projectId, cachedSubTasks);
 
               loaded = true;
             }
@@ -547,9 +642,11 @@ export default function ProjectSchedulePage() {
         toast.error(error?.message || "Failed to load project schedule.");
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
-    }
+  }
 
+  useEffect(() => {
     loadSchedule();
   }, [projectId]);
 
@@ -584,115 +681,59 @@ export default function ProjectSchedulePage() {
     normalizeDoneRef.current = false;
   }, [projectId]);
 
-  // Auto-fix on load: compact subtasks sequentially (each starts at or after
-  // the previous one's end so DB rows from before the chunking fix don't
-  // render as overlapping events) AND snap each span past unavailable days.
-  // Runs exactly once per project load (after both the schedule and the
-  // unavailable-days set have finished loading).
+  // Auto-fix on load: snap any subtask whose time span overlaps an
+  // unavailable day forward to the next clear window. Does NOT force
+  // sequential ordering — subtasks under different main tasks can run in
+  // parallel. Runs exactly once per project load (after both the schedule
+  // and the unavailable-days set have finished loading).
   useEffect(() => {
     if (normalizeDoneRef.current) return;
     if (loading) return;
     if (!unavailableDatesLoaded) return;
     if (services.length === 0) return;
 
-    const { services: next, movedCount } = compactScheduleFromIndex(
-      services,
-      0,
-      unavailableDates,
-    );
-
     normalizeDoneRef.current = true;
+
+    // Nothing to snap when there are no blocked days at all.
+    if (unavailableDates.size === 0) return;
+
+    const next = services.map((group) => ({
+      ...group,
+      children: group.children.map((child) => ({ ...child })),
+    }));
+
+    let movedCount = 0;
+
+    for (const group of next) {
+      for (const step of group.children) {
+        if (!step.scheduledStartDatetime) continue;
+
+        const snapped = snapToAvailableSpan(
+          step.scheduledStartDatetime,
+          step.estimatedHours,
+          unavailableDates,
+        );
+
+        if (snapped.skippedDays > 0 && snapped.iso) {
+          const newEnd = addHoursToIso(snapped.iso, step.estimatedHours);
+          step.scheduledStartDatetime = snapped.iso;
+          step.scheduledEndDatetime = newEnd;
+          movedCount += 1;
+        }
+      }
+    }
 
     if (movedCount > 0) {
       setServices(next);
-      // Persist immediately so reloads (or restarts) don't keep showing
-      // events on now-blocked days. This runs without `nextStatus`, so it
-      // only writes the corrected schedule rows — project status is not
-      // touched.
-      const payload = next.flatMap((group) =>
-        group.children.map((child) => ({
-          projectSubTaskId: child.id,
-          estimatedHours: child.estimatedHours,
-          scheduledStartDatetime: child.scheduledStartDatetime,
-          scheduledEndDatetime: child.scheduledEndDatetime,
-        })),
+      updateCacheFromServices(next);
+      toast.message(
+        `Moved ${movedCount} subtask${
+          movedCount === 1 ? "" : "s"
+        } off unavailable days.`,
       );
-
-      void (async () => {
-        try {
-          const response = await fetch("/api/planning/saveProjectSchedule", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ projectId, schedules: payload }),
-          });
-          if (!response.ok) {
-            // Surface the server's error body so the dev console shows the
-            // real cause instead of just "500".
-            const bodyText = await response.text().catch(() => "");
-            console.error(
-              "[auto-normalize] saveProjectSchedule failed:",
-              response.status,
-              bodyText,
-            );
-            // If persistence fails, leave the page dirty so the user can
-            // hit Save manually instead of silently losing the fix.
-            setIsDirty(true);
-            toast.error(
-              `Adjusted ${movedCount} subtask${
-                movedCount === 1 ? "" : "s"
-              } (sequential + past unavailable days), but failed to persist. Save to retry.`,
-            );
-            return;
-          }
-          toast.message(
-            `Auto-aligned ${movedCount} subtask${
-              movedCount === 1 ? "" : "s"
-            } (sequential + past unavailable days).`,
-          );
-        } catch {
-          setIsDirty(true);
-          toast.error(
-            `Adjusted ${movedCount} subtask${
-              movedCount === 1 ? "" : "s"
-            } off unavailable days, but failed to persist. Save to retry.`,
-          );
-        }
-      })();
     }
   }, [loading, unavailableDatesLoaded, services, unavailableDates, projectId]);
 
-  useEffect(() => {
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (suppressLeaveGuardRef.current) return;
-      if (!isDirty) return;
-
-      event.preventDefault();
-      event.returnValue = "";
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
-
-  useEffect(() => {
-    window.history.pushState(null, "", window.location.href);
-
-    function handlePopState() {
-      if (allowBrowserBackRef.current) return;
-
-      if (!isDirty) {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-
-      window.history.pushState(null, "", window.location.href);
-      requestLeave("browserBack");
-    }
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [isDirty]);
 
   // Ctrl+Z / Cmd+Z → undo the last drag or resize. Skipped while the user
   // is typing in an input/textarea so we don't fight the browser's native
@@ -723,168 +764,57 @@ export default function ProjectSchedulePage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  async function updateProjectStatus(status: string) {
-    const response = await fetch("/api/planning/updateProjectStatus", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, status }),
+  // Write the current services state back into the wizard cache so
+  // downstream pages see the latest schedule fields on each subtask.
+  function updateCacheFromServices(currentServices: ServiceGroup[]) {
+    const existing = getCachedSubTasks(projectId);
+    if (!existing) return;
+
+    // Build a lookup of schedule fields from the UI state keyed by subtask id
+    const scheduleMap = new Map<
+      string,
+      { estimatedHours: number | null; start: string | null; end: string | null }
+    >();
+    for (const group of currentServices) {
+      for (const child of group.children) {
+        scheduleMap.set(child.id, {
+          estimatedHours: child.estimatedHours,
+          start: child.scheduledStartDatetime,
+          end: child.scheduledEndDatetime,
+        });
+      }
+    }
+
+    const updated = existing.map((st) => {
+      const patch = scheduleMap.get(st.id);
+      if (!patch) return st;
+      return {
+        ...st,
+        estimatedHours: patch.estimatedHours,
+        scheduledStartDatetime: patch.start,
+        scheduledEndDatetime: patch.end,
+      };
     });
-    const data = await response.json();
-    if (!response.ok) {
-      toast.error(data?.error || "Failed to update project status.");
-      return false;
-    }
-    return true;
-  }
 
-  function getStatusForAction(action: "next" | "back" | "browserBack") {
-    return action === "next"
-      ? "employee_assignment_pending"
-      : "equipment_pending";
-  }
-
-  function navigateForAction(action: "next" | "back" | "browserBack") {
-    if (action === "next") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
-      return;
-    }
-
-    if (action === "back") {
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      router.push(
-        `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
-      );
-      return;
-    }
-
-    suppressLeaveGuardRef.current = true;
-    allowBrowserBackRef.current = true;
-    window.history.back();
-  }
-
-  function requestLeave(action: "next" | "back" | "browserBack") {
-    if (!isDirty) {
-      if (action === "next") {
-        setIsNavigatingNext(true);
-        void (async () => {
-          const ok = await updateProjectStatus(getStatusForAction("next"));
-          if (!ok) {
-            setIsNavigatingNext(false);
-            return;
-          }
-          navigateForAction("next");
-        })();
-        return;
-      }
-
-      if (action === "back") {
-        setIsNavigatingBack(true);
-        void (async () => {
-          const ok = await updateProjectStatus(getStatusForAction("back"));
-          if (!ok) {
-            setIsNavigatingBack(false);
-            return;
-          }
-          navigateForAction("back");
-        })();
-        return;
-      }
-
-      if (action === "browserBack") {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-
-      return;
-    }
-
-    if (action !== "next") {
-      setIsNavigatingNext(false);
-    }
-
-    setPendingAction(action);
-    setShowSaveConfirm(true);
+    setCachedSubTasks(projectId, updated);
   }
 
   function handleNext() {
     setIsNavigatingNext(true);
-    requestLeave("next");
+    updateCacheFromServices(services);
+    setIsDirty(false);
+    setCachedStep(projectId, "employee_assignment_pending");
+    setOptimisticProjectStatus(projectId, "employee_assignment_pending");
+    router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
   }
 
   function handleGoBack() {
-    if (!isDirty) {
-      setIsNavigatingBack(true);
-    }
-    requestLeave("back");
-  }
-
-  async function handleConfirmSave(shouldSave: boolean, overrideAction?: "next" | "back" | "browserBack") {
-    const action = overrideAction ?? pendingAction;
-    if (!overrideAction) {
-      setShowSaveConfirm(false);
-      setPendingAction(null);
-    }
-
-    if (!action) return;
-
-    if (shouldSave) {
-      try {
-        setIsSavingFromModal(true);
-
-        const payload = services.flatMap((group) =>
-          group.children.map((child) => ({
-            projectSubTaskId: child.id,
-            estimatedHours: child.estimatedHours,
-            scheduledStartDatetime: child.scheduledStartDatetime,
-            scheduledEndDatetime: child.scheduledEndDatetime,
-          })),
-        );
-
-        const saveResponse = await fetch("/api/planning/saveProjectSchedule", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            projectId,
-            schedules: payload,
-            nextStatus: getStatusForAction(action),
-          }),
-        });
-
-        const saveData = await saveResponse.json();
-
-        if (!saveResponse.ok) {
-          throw new Error(
-            saveData?.error || "Failed to save project schedule.",
-          );
-        }
-
-        setIsDirty(false);
-        toast.success("Project schedule saved.");
-      } catch (error: any) {
-        setIsSavingFromModal(false);
-        setIsNavigatingNext(false);
-        toast.error(error?.message || "Failed to save project schedule.");
-        return;
-      } finally {
-        setIsSavingFromModal(false);
-      }
-    } else if (action === "next" || action === "back" || action === "browserBack") {
-      const ok = await updateProjectStatus(getStatusForAction(action));
-
-      if (!ok) {
-        setIsNavigatingNext(false);
-        setIsNavigatingBack(false);
-        return;
-      }
-    }
-
-    navigateForAction(action);
+    setIsNavigatingBack(true);
+    updateCacheFromServices(services);
+    setIsDirty(false);
+    setCachedStep(projectId, "equipment_pending");
+    setOptimisticProjectStatus(projectId, "equipment_pending");
+    router.push(`/admin/job-creation/equipment-assignment?projectId=${projectId}`);
   }
 
   const totalSubTasks = useMemo(() => {
@@ -934,10 +864,10 @@ export default function ProjectSchedulePage() {
     const allStarts = services
       .flatMap((g) => g.children.map((s) => s.scheduledStartDatetime))
       .filter((value): value is string => Boolean(value));
-    if (allStarts.length === 0) return undefined;
+    if (allStarts.length === 0) return projectNow;
     const minMs = Math.min(...allStarts.map((iso) => new Date(iso).getTime()));
     return new Date(minMs);
-  }, [services]);
+  }, [services, projectNow]);
 
   function patchStep(
     stepId: string,
@@ -967,7 +897,7 @@ export default function ProjectSchedulePage() {
     const previous = historyRef.current.pop();
     if (!previous) return;
     setServices(previous);
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function handleEventDrop(arg: EventDropArg) {
@@ -1012,7 +942,7 @@ export default function ProjectSchedulePage() {
       );
     }
 
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function handleEventResize(arg: EventResizeDoneArg) {
@@ -1091,7 +1021,7 @@ export default function ProjectSchedulePage() {
       );
     }
 
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function handleEventClick(_arg: EventClickArg) {
@@ -1136,7 +1066,7 @@ export default function ProjectSchedulePage() {
     );
 
     setServices(next);
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
 
     if (skippedDays > 0) {
       toast.message(
@@ -1221,6 +1151,16 @@ export default function ProjectSchedulePage() {
                   </p>
                 </div>
 
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => loadSchedule(true)}
+                    disabled={refreshing}
+                    title="Refresh from database"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  </button>
                 <div
                   role="tablist"
                   aria-label="Schedule view mode"
@@ -1251,6 +1191,7 @@ export default function ProjectSchedulePage() {
                     <List className="h-3.5 w-3.5" />
                     List
                   </button>
+                </div>
                 </div>
               </div>
             </div>
@@ -1478,6 +1419,7 @@ export default function ProjectSchedulePage() {
                   plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
                   initialView="timeGridWeek"
                   initialDate={initialCalendarDate}
+                  now={projectNow}
                   firstDay={1}
                   allDaySlot={false}
                   nowIndicator
@@ -1608,57 +1550,6 @@ export default function ProjectSchedulePage() {
         </div>
       </div>
 
-      {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
-            <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Save changes?
-              </h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Do you want to save your schedule changes before leaving this
-                page?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSaveConfirm(false);
-                  setPendingAction(null);
-                  setIsNavigatingNext(false);
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
-                Don't Save
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(true)}
-                disabled={isSavingFromModal}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-white transform transition-all duration-150 hover:opacity-85 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
-                style={{ backgroundColor: ACCENT }}>
-                {isSavingFromModal ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Save"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <style jsx global>{`
         .green-scrollbar::-webkit-scrollbar {

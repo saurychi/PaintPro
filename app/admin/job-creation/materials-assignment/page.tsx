@@ -16,6 +16,22 @@ import {
   X,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import {
+  getCachedMaterials,
+  getCachedMainTasks,
+  getCachedProjectMeta,
+  setCachedMaterials,
+  setCachedStep,
+  setCachedRefData,
+  getCachedRefData,
+  ensureWizardCacheHydrated,
+  markWizardDirty,
+} from "@/lib/wizardCache";
+import type {
+  CachedMainTask,
+  CachedMaterial,
+} from "@/lib/wizardCache";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
@@ -52,8 +68,6 @@ type MaterialOption = {
 };
 
 const ACCENT = "#00c065";
-const ACCENT_SOFT = "#e6f9ef";
-const ACCENT_BORDER = "#b7efcf";
 
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
@@ -66,13 +80,160 @@ function formatCurrency(value: number | null | undefined) {
   }).format(safeValue);
 }
 
+type MaterialStockInfo = {
+  stock: number;
+  reorder: number;
+};
+
+type ProjectTaskMaterialApiRow = {
+  project_task_material_id?: string;
+  project_task_id?: string;
+  main_task_id?: string | null;
+  main_task_name?: string | null;
+  material_id?: string | null;
+  material_name?: string | null;
+  material_unit_cost?: number | string | null;
+  material_current_stock?: number | string | null;
+  material_reorder_point?: number | string | null;
+  quantity?: number | string | null;
+  estimated_cost?: number | string | null;
+};
+
+type ProjectTaskApiRow = {
+  project_task_id?: string;
+  main_task_id?: string | null;
+  main_task_name?: string | null;
+};
+
+type ProjectTaskMaterialsResponse = {
+  error?: string;
+  project?: {
+    project_code?: string | null;
+    title?: string | null;
+  } | null;
+  projectTasks?: ProjectTaskApiRow[];
+  materials?: ProjectTaskMaterialApiRow[];
+};
+
+type MaterialCatalogApiRow = {
+  id?: string;
+  name?: string;
+  unit?: string | null;
+  unit_cost?: number | string | null;
+  current_in_stock?: number | string | null;
+  reorder_point?: number | string | null;
+};
+
+type ResourceOptionsResponse = {
+  error?: string;
+  materials?: MaterialCatalogApiRow[];
+};
+
+function buildCachedServiceGroups(
+  cachedMaterials: CachedMaterial[],
+  cachedMainTasks: CachedMainTask[] | null,
+) {
+  const groupedMap = new Map<string, ServiceGroup>();
+  const projectTaskIdToGroupId = new Map<string, string>();
+
+  for (const task of cachedMainTasks ?? []) {
+    const projectTaskId = String(task.project_task_id || "").trim();
+    const groupId = String(task.id || projectTaskId).trim();
+    if (!groupId) continue;
+
+    groupedMap.set(groupId, {
+      id: groupId,
+      title: task.name || "Main Task",
+      status: "pending",
+      projectTaskId: projectTaskId || groupId,
+      children: [],
+    });
+
+    if (projectTaskId) {
+      projectTaskIdToGroupId.set(projectTaskId, groupId);
+    }
+  }
+
+  for (const material of cachedMaterials) {
+    const projectTaskId = String(material.projectTaskId || "").trim();
+    const groupId = projectTaskIdToGroupId.get(projectTaskId) || projectTaskId;
+    if (!groupId) continue;
+
+    const group =
+      groupedMap.get(groupId) ??
+      {
+        id: groupId,
+        title: "Main Task",
+        status: "pending" as const,
+        projectTaskId,
+        children: [],
+      };
+
+    group.children.push({
+      id: material.id,
+      materialId: material.materialId,
+      name: material.name,
+      quantity: material.quantity,
+      unitCost: material.unitCost,
+      estimatedCost: material.estimatedCost,
+      currentStock: 0,
+      reorderPoint: 0,
+    });
+
+    groupedMap.set(groupId, group);
+  }
+
+  return Array.from(groupedMap.values());
+}
+
+function buildCatalogStockMap(rows: MaterialCatalogApiRow[]) {
+  const stockMap = new Map<string, MaterialStockInfo>();
+
+  for (const row of rows) {
+    if (!row.id) continue;
+
+    stockMap.set(row.id, {
+      stock: Number(row.current_in_stock ?? 0),
+      reorder: Number(row.reorder_point ?? 0),
+    });
+  }
+
+  return stockMap;
+}
+
+function applyMaterialStocks(
+  groups: ServiceGroup[],
+  stockMap: Map<string, MaterialStockInfo>,
+) {
+  return groups.map((group) => ({
+    ...group,
+    children: group.children.map((child) => {
+      const stockInfo = stockMap.get(child.materialId);
+      if (!stockInfo) return child;
+
+      return {
+        ...child,
+        currentStock: stockInfo.stock,
+        reorderPoint: stockInfo.reorder,
+      };
+    }),
+  }));
+}
+
 export default function MaterialsAssignment() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/sub-task-assignment");
+    router.prefetch("/admin/job-creation/equipment-assignment");
+  }, [router]);
+
   const [services, setServices] = useState<ServiceGroup[]>([]);
   const [loadingMaterials, setLoadingMaterials] = useState(true);
+  const [loadingMaterialStocks, setLoadingMaterialStocks] = useState(false);
+  const [stockLoadError, setStockLoadError] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
@@ -82,10 +243,6 @@ export default function MaterialsAssignment() {
   const [jobNo, setJobNo] = useState("N/A");
   const [siteName, setSiteName] = useState("Project details unavailable");
   const [isDirty, setIsDirty] = useState(false);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"next" | "back" | null>(
-    null,
-  );
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
   const [materialPendingDelete, setMaterialPendingDelete] = useState<{
@@ -177,6 +334,9 @@ export default function MaterialsAssignment() {
     (shortage) => shortage.currentStock <= 0,
   );
   const canDisregard = hasShortage && !hasZeroStockShortage;
+  const canEvaluateMaterialStock =
+    !loadingMaterials && !loadingMaterialStocks && !stockLoadError;
+  const showShortageWarning = canEvaluateMaterialStock && hasShortage;
 
   const [requestingRestock, setRequestingRestock] = useState(false);
   const [restockRequestedAt, setRestockRequestedAt] = useState<number | null>(
@@ -226,7 +386,7 @@ export default function MaterialsAssignment() {
     });
   }
 
-  function handleUndoServices() {
+  const handleUndoServices = useCallback(() => {
     if (undoStackRef.current.length === 0) return;
 
     setServices((current) => {
@@ -238,7 +398,7 @@ export default function MaterialsAssignment() {
       redoStackRef.current.push(currentSnapshot);
       return previousSnapshot;
     });
-  }
+  }, []);
 
   const loadProjectTaskMaterials = useCallback(async () => {
     if (!projectId) {
@@ -248,12 +408,89 @@ export default function MaterialsAssignment() {
 
     try {
       setLoadingMaterials(true);
+      setLoadingMaterialStocks(false);
+      setStockLoadError(false);
 
+      await ensureWizardCacheHydrated(projectId);
+
+      // ── Cache-first: check wizard cache for materials ──
+      const cachedMaterials = getCachedMaterials(projectId);
+      const cachedMainTasks = getCachedMainTasks(projectId);
+      const cachedProjectMeta = getCachedProjectMeta(projectId);
+
+      if (cachedProjectMeta) {
+        setJobNo(cachedProjectMeta.projectCode || "N/A");
+        setSiteName(
+          cachedProjectMeta.projectTitle || "Project details unavailable",
+        );
+      }
+
+      if (cachedMaterials && cachedMaterials.length > 0) {
+        // Show cached materials immediately, then refresh only the live stock
+        // fields so the user can see progress while inventory data loads.
+        const groupedServices = buildCachedServiceGroups(
+          cachedMaterials,
+          cachedMainTasks,
+        );
+
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+        setIsDirty(false);
+        setSelectedMaterialKeysForDelete(new Set());
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+
+        setLoadingMaterials(false);
+        setLoadingMaterialStocks(true);
+
+        try {
+          const response = await fetch(
+            "/api/planning/getSubTaskResourceOptions",
+            { cache: "no-store" },
+          );
+          const data = (await response.json()) as ResourceOptionsResponse;
+
+          if (!response.ok) {
+            throw new Error(data?.error || "Failed to load material stock.");
+          }
+
+          const materialRows = Array.isArray(data?.materials)
+            ? data.materials
+            : [];
+          const stockMap = buildCatalogStockMap(materialRows);
+
+          setServices((prev) => applyMaterialStocks(prev, stockMap));
+          setCachedRefData(projectId, {
+            materialCatalog: materialRows.map((item) => ({
+              material_id: item.id ?? "",
+              name: item.name ?? "Material",
+              unit: item.unit ?? null,
+              unit_cost: Number(item.unit_cost ?? 0),
+              current_stock: Number(item.current_in_stock ?? 0),
+              current_in_stock: Number(item.current_in_stock ?? 0),
+              reorder_point: Number(item.reorder_point ?? 0),
+            })),
+          });
+          setStockLoadError(false);
+        } catch (error: unknown) {
+          setStockLoadError(true);
+          toast.error(
+            (error instanceof Error ? error.message : "") ||
+              "Materials loaded from cache, but stock levels could not be refreshed.",
+          );
+        } finally {
+          setLoadingMaterialStocks(false);
+        }
+
+        return;
+      }
+
+      // ── Cache miss: fetch everything from API ──
       const response = await fetch(
         `/api/planning/getProjectTaskMaterials?projectId=${projectId}`,
         { cache: "no-store" },
       );
-      const data = await response.json();
+      const data = (await response.json()) as ProjectTaskMaterialsResponse;
 
       if (!response.ok) {
         throw new Error(data?.error || "Failed to load project materials.");
@@ -270,26 +507,34 @@ export default function MaterialsAssignment() {
       const groupedMap = new Map<string, ServiceGroup>();
 
       for (const row of projectTasks) {
-        const groupId = row.main_task_id || row.project_task_id;
+        const projectTaskId = row.project_task_id ?? "";
+        const groupId = row.main_task_id || projectTaskId;
+        if (!groupId || !projectTaskId) continue;
 
         groupedMap.set(groupId, {
           id: groupId,
           title: row.main_task_name || "Main Task",
           status: "pending",
-          projectTaskId: row.project_task_id,
+          projectTaskId,
           children: [],
         });
       }
 
       for (const row of rows) {
-        const groupId = row.main_task_id || row.project_task_id;
+        const projectTaskId = row.project_task_id ?? "";
+        const groupId = row.main_task_id || projectTaskId;
+        if (!groupId || !projectTaskId) continue;
+
+        const materialRowId =
+          row.project_task_material_id ||
+          `material_${projectTaskId}_${row.material_id ?? "unknown"}`;
         const existingGroup = groupedMap.get(groupId);
 
         if (existingGroup) {
           existingGroup.children.push({
-            id: row.project_task_material_id,
+            id: materialRowId,
             materialId: row.material_id ?? "",
-            name: row.material_name,
+            name: row.material_name || "Material",
             quantity: Number(row.quantity ?? 0),
             unitCost: Number(row.material_unit_cost ?? 0),
             estimatedCost: Number(row.estimated_cost ?? 0),
@@ -303,12 +548,12 @@ export default function MaterialsAssignment() {
           id: groupId,
           title: row.main_task_name || "Main Task",
           status: "pending",
-          projectTaskId: row.project_task_id,
+          projectTaskId,
           children: [
             {
-              id: row.project_task_material_id,
+              id: materialRowId,
               materialId: row.material_id ?? "",
-              name: row.material_name,
+              name: row.material_name || "Material",
               quantity: Number(row.quantity ?? 0),
               unitCost: Number(row.material_unit_cost ?? 0),
               estimatedCost: Number(row.estimated_cost ?? 0),
@@ -321,6 +566,24 @@ export default function MaterialsAssignment() {
 
       const groupedServices = Array.from(groupedMap.values());
 
+      // Cache the materials for future visits
+      const materialsToCache: CachedMaterial[] = [];
+      for (const group of groupedServices) {
+        for (const child of group.children) {
+          materialsToCache.push({
+            id: child.id,
+            projectTaskId: group.projectTaskId,
+            materialId: child.materialId,
+            name: child.name,
+            unit: null,
+            quantity: child.quantity,
+            unitCost: child.unitCost,
+            estimatedCost: child.estimatedCost,
+          });
+        }
+      }
+      setCachedMaterials(projectId, materialsToCache);
+
       setServices(groupedServices);
       setExpanded(new Set(groupedServices.map((group) => group.id)));
       // Reload is a fresh source-of-truth: drop any pending dirty edits, undo
@@ -329,11 +592,16 @@ export default function MaterialsAssignment() {
       setSelectedMaterialKeysForDelete(new Set());
       undoStackRef.current = [];
       redoStackRef.current = [];
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to load project materials.");
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to load project materials.",
+      );
       throw error;
     } finally {
       setLoadingMaterials(false);
+      setLoadingMaterialStocks(false);
     }
   }, [projectId]);
 
@@ -389,7 +657,7 @@ export default function MaterialsAssignment() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [handleUndoServices]);
 
   function toggleGroup(groupId: string) {
     setExpanded((prev) => {
@@ -429,26 +697,64 @@ export default function MaterialsAssignment() {
     try {
       setLoadingMaterialOptions(true);
 
+      // ── Cache-first: check wizard cache for material catalog ──
+      const cachedRef = getCachedRefData(projectId);
+      if (cachedRef?.materialCatalog && cachedRef.materialCatalog.length > 0) {
+        const options: MaterialOption[] = cachedRef.materialCatalog.map(
+          (item) => ({
+            id: item.material_id,
+            name: item.name,
+            unitCost: Number(item.unit_cost ?? 0),
+            currentStock: Number(
+              item.current_stock ?? item.current_in_stock ?? 0,
+            ),
+            reorderPoint: Number(item.reorder_point ?? 0),
+          }),
+        );
+        setMaterialOptions(options);
+        setLoadingMaterialOptions(false);
+        return;
+      }
+
+      // ── Cache miss: fetch from API and cache ──
       const response = await fetch("/api/planning/getSubTaskResourceOptions");
-      const data = await response.json();
+      const data = (await response.json()) as ResourceOptionsResponse;
 
       if (!response.ok) {
         throw new Error(data?.error || "Failed to load material options.");
       }
 
-      const options = Array.isArray(data?.materials)
-        ? data.materials.map((item: any) => ({
-            id: item.id,
-            name: item.name,
-            unitCost: Number(item.unit_cost ?? 0),
-            currentStock: Number(item.current_in_stock ?? 0),
-            reorderPoint: Number(item.reorder_point ?? 0),
-          }))
+      const rawMaterials = Array.isArray(data?.materials)
+        ? data.materials
         : [];
 
+      const options: MaterialOption[] = rawMaterials.map((item) => ({
+        id: item.id ?? "",
+        name: item.name ?? "Material",
+        unitCost: Number(item.unit_cost ?? 0),
+        currentStock: Number(item.current_in_stock ?? 0),
+        reorderPoint: Number(item.reorder_point ?? 0),
+      }));
+
+      // Cache the material catalog for future use
+      setCachedRefData(projectId, {
+        materialCatalog: rawMaterials.map((item) => ({
+          material_id: item.id ?? "",
+          name: item.name ?? "Material",
+          unit: item.unit ?? null,
+          unit_cost: Number(item.unit_cost ?? 0),
+          current_stock: Number(item.current_in_stock ?? 0),
+          reorder_point: Number(item.reorder_point ?? 0),
+        })),
+      });
+
       setMaterialOptions(options);
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to load material options.");
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to load material options.",
+      );
     } finally {
       setLoadingMaterialOptions(false);
     }
@@ -517,7 +823,7 @@ export default function MaterialsAssignment() {
     );
 
     setExpanded((prev) => new Set(prev).add(activeMainTaskId));
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function handleUpdateMaterialQuantity(
@@ -549,7 +855,7 @@ export default function MaterialsAssignment() {
       }),
     );
 
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function handleRemoveMaterialFromGroup(groupId: string, materialRowId: string) {
@@ -569,7 +875,7 @@ export default function MaterialsAssignment() {
       next.delete(`${groupId}::${materialRowId}`);
       return next;
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
     toast.success("Material removed.");
   }
 
@@ -593,7 +899,7 @@ export default function MaterialsAssignment() {
       for (const key of keys) next.delete(key);
       return next;
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
     toast.success("Selected materials removed.");
   }
 
@@ -697,147 +1003,44 @@ export default function MaterialsAssignment() {
       })),
     );
 
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
     toast.success("Quantities redistributed to fit available stock.");
   }
 
-  async function updateProjectStatus(status: string) {
-    if (!projectId) {
-      toast.error("Missing project ID.");
-      return false;
-    }
-
-    try {
-      const response = await fetch("/api/planning/updateProjectStatus", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          projectId,
-          status,
-        }),
-      });
-
-      let data: any = null;
-
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-
-      if (!response.ok) {
-        const message =
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-          `Failed to update project status. (${response.status})`;
-
-        toast.error(message);
-        return false;
-      }
-
-      return true;
-    } catch (error: any) {
-      toast.error(
-        error?.message || "Something went wrong while updating project status.",
-      );
-      return false;
-    }
-  }
-
-  function requestLeave(action: "next" | "back") {
-    if (!isDirty) {
-      if (action === "next") setIsNavigatingNext(true);
-      void handleConfirmSave(false, action);
-      return;
-    }
-
-    if (action !== "next") {
-      setIsNavigatingNext(false);
-    }
-
-    setPendingAction(action);
-    setShowSaveConfirm(true);
-  }
-
-  async function handleConfirmSave(
-    shouldSave: boolean,
-    forcedAction?: "next" | "back",
-  ) {
-    const action = forcedAction ?? pendingAction;
-
-    setShowSaveConfirm(false);
-
-    if (!action) return;
-
-    if (shouldSave) {
-      const groups = services.map((group) => ({
-        projectTaskId: group.projectTaskId,
-        materials: group.children.map((item) => ({
+  function saveMaterialsToCache() {
+    const materialsToCache: CachedMaterial[] = [];
+    for (const group of services) {
+      for (const item of group.children) {
+        materialsToCache.push({
+          id: item.id,
+          projectTaskId: group.projectTaskId,
           materialId: item.materialId,
+          name: item.name,
+          unit: null,
           quantity: item.quantity,
+          unitCost: item.unitCost,
           estimatedCost: item.estimatedCost,
-        })),
-      }));
-
-      const saveResponse = await fetch(
-        "/api/planning/saveProjectTaskMaterials",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, groups }),
-        },
-      );
-
-      const saveData = await saveResponse.json();
-
-      if (!saveResponse.ok) {
-        setIsNavigatingNext(false);
-        setIsNavigatingBack(false);
-        toast.error(saveData?.error || "Failed to save materials.");
-        return;
+        });
       }
-
-      setIsDirty(false);
-      toast.success("Materials saved.");
     }
-
-    const nextStatus =
-      action === "next" ? "equipment_pending" : "sub_task_pending";
-
-    const updated = await updateProjectStatus(nextStatus);
-    if (!updated) {
-      setIsNavigatingNext(false);
-      setIsNavigatingBack(false);
-      return;
-    }
-
-    setPendingAction(null);
-
-    if (action === "next") {
-      router.push(
-        `/admin/job-creation/equipment-assignment?projectId=${projectId}`,
-      );
-      return;
-    }
-
-    setIsNavigatingNext(false);
-    setIsNavigatingBack(false);
-    router.push(
-      `/admin/job-creation/sub-task-assignment?projectId=${projectId}`,
-    );
+    setCachedMaterials(projectId, materialsToCache);
+    setIsDirty(false);
   }
 
   function handleNext() {
     setIsNavigatingNext(true);
-    requestLeave("next");
+    saveMaterialsToCache();
+    setCachedStep(projectId, "equipment_pending");
+    setOptimisticProjectStatus(projectId, "equipment_pending");
+    router.push(`/admin/job-creation/equipment-assignment?projectId=${projectId}`);
   }
 
   function handleGoBack() {
-    if (!isDirty) {
-      setIsNavigatingBack(true);
-    }
-    requestLeave("back");
+    setIsNavigatingBack(true);
+    saveMaterialsToCache();
+    setCachedStep(projectId, "sub_task_pending");
+    setOptimisticProjectStatus(projectId, "sub_task_pending");
+    router.push(`/admin/job-creation/sub-task-assignment?projectId=${projectId}`);
   }
 
   return (
@@ -881,7 +1084,7 @@ export default function MaterialsAssignment() {
                   <button
                     type="button"
                     onClick={() => void handleRefresh()}
-                    disabled={refreshing || loadingMaterials}
+                    disabled={refreshing || loadingMaterials || loadingMaterialStocks}
                     title={
                       isDirty
                         ? "Refresh will discard unsaved changes."
@@ -904,7 +1107,35 @@ export default function MaterialsAssignment() {
 
             <div className="min-h-0 flex-1 overflow-hidden px-3 py-2.5">
               <div className="h-full overflow-y-auto pr-2 green-scrollbar">
-                {hasShortage ? (
+                {loadingMaterialStocks ? (
+                  <div className="mb-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[13px] text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                      <span className="font-semibold">
+                        Materials loaded from cache. Checking current stock...
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {stockLoadError ? (
+                  <div className="mb-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div>
+                        <div className="font-semibold">
+                          Stock levels could not be refreshed
+                        </div>
+                        <div className="mt-1 text-[12px] leading-5">
+                          Refresh this step before continuing so shortages are
+                          checked against live inventory.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {showShortageWarning ? (
                   <div className="mb-2.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[13px] text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1107,6 +1338,23 @@ export default function MaterialsAssignment() {
                                                 {item.name}
                                               </span>
                                               {(() => {
+                                                if (loadingMaterialStocks) {
+                                                  return (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                                      Checking stock
+                                                    </span>
+                                                  );
+                                                }
+
+                                                if (stockLoadError) {
+                                                  return (
+                                                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                                                      Stock unavailable
+                                                    </span>
+                                                  );
+                                                }
+
                                                 const shortage =
                                                   item.materialId
                                                     ? shortageByMaterialId.get(
@@ -1267,9 +1515,22 @@ export default function MaterialsAssignment() {
           <button
             type="button"
             onClick={handleNext}
-            disabled={isNavigatingNext || hasShortage}
-            title={
+            disabled={
+              isNavigatingNext ||
+              refreshing ||
+              loadingMaterials ||
+              loadingMaterialStocks ||
+              stockLoadError ||
               hasShortage
+            }
+            title={
+              loadingMaterials || refreshing
+                ? "Loading project materials."
+                : loadingMaterialStocks
+                  ? "Checking material stock before continuing."
+                  : stockLoadError
+                    ? "Refresh stock levels before continuing."
+                    : hasShortage
                 ? "Resolve the material shortage above before continuing."
                 : undefined
             }
@@ -1288,51 +1549,6 @@ export default function MaterialsAssignment() {
         </div>
       </div>
 
-      {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
-            <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Save changes?
-              </h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Do you want to save your materials changes before leaving?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSaveConfirm(false);
-                  setPendingAction(null);
-                  setIsNavigatingNext(false);
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Don't Save
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(true)}
-                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-[12px] font-semibold text-white hover:brightness-95"
-                style={{ backgroundColor: ACCENT }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <CreateTaskModal
         open={createTaskModalOpen}

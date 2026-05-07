@@ -3,6 +3,14 @@
 import React, { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, PencilLine } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import {
+  getWizardCache,
+  setCachedStep,
+  clearWizardCache,
+  ensureWizardCacheHydrated,
+} from "@/lib/wizardCache";
+import { calculateProjectCostEstimation } from "@/lib/planning/costEstimation";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 
@@ -117,6 +125,11 @@ export default function OverviewPage() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/cost-estimation");
+    router.prefetch("/admin/job-creation/quotation-generation");
+  }, [router]);
+
   const [loading, setLoading] = useState(true);
   const [isNavigating, setIsNavigating] = useState<"back" | "quote" | null>(
     null,
@@ -137,6 +150,128 @@ export default function OverviewPage() {
         return;
       }
 
+      await ensureWizardCacheHydrated(projectId);
+
+      // Try building overview from wizard cache
+      const cache = getWizardCache(projectId);
+      if (cache && cache.mainTasks.length > 0 && cache.subTasks.length > 0) {
+        const staffMap = new Map(
+          (cache.refData.staffUsers ?? []).map((s) => [s.id, s]),
+        );
+
+        const estimation = calculateProjectCostEstimation({
+          project: {
+            projectId: cache.projectId,
+            projectCode: cache.projectCode,
+            title: cache.projectTitle,
+            description: cache.description,
+            siteAddress: cache.siteAddress,
+            status: "overview_pending",
+          },
+          markupRate: cache.markupRate,
+          mainTasks: cache.mainTasks.map((mt, i) => {
+            const taskSubTasks = cache.subTasks.filter((st) => st.mainTaskId === mt.id);
+            const taskMaterials = cache.materials.filter(
+              (m) => m.projectTaskId === (mt.project_task_id ?? mt.id),
+            );
+            return {
+              projectTaskId: mt.project_task_id ?? mt.id,
+              mainTaskId: mt.id,
+              title: mt.name,
+              sortOrder: i,
+              materials: taskMaterials.map((m) => ({
+                projectTaskMaterialId: m.id,
+                materialId: m.materialId,
+                name: m.name,
+                unit: m.unit,
+                estimatedQuantity: m.quantity,
+                unitCost: m.unitCost,
+                estimatedCost: m.estimatedCost,
+              })),
+              subtasks: taskSubTasks.map((st) => ({
+                projectSubTaskId: st.id,
+                subTaskId: st.subTaskId,
+                title: st.title,
+                estimatedHours: st.estimatedHours ?? 0,
+                assignedStaff: st.assignedEmployeeIds.map((uid) => {
+                  const user = staffMap.get(uid);
+                  return { id: uid, name: user?.username ?? "", hourlyWage: user?.hourly_wage ?? 0 };
+                }),
+                equipment: st.equipments.map((eq) => ({
+                  id: eq.id,
+                  equipmentId: eq.equipmentId,
+                  name: eq.name,
+                  quantity: eq.quantity,
+                  unitCost: eq.unitCost,
+                })),
+                scheduledStartDatetime: st.scheduledStartDatetime,
+                scheduledEndDatetime: st.scheduledEndDatetime,
+              })),
+            };
+          }),
+        });
+
+        const overviewProject: ProjectOverviewResponse["project"] = {
+          project_id: cache.projectId,
+          project_code: cache.projectCode,
+          title: cache.projectTitle,
+          description: cache.description,
+          site_address: cache.siteAddress,
+          status: "overview_pending",
+          estimated_budget: estimation.summary.quotationTotal,
+          estimated_cost: estimation.summary.totalCost,
+          estimated_profit: estimation.summary.profitAmount,
+        };
+
+        const overviewMainTasks: MainTaskItem[] = cache.mainTasks.map((mt, i) => {
+          const ptId = mt.project_task_id ?? mt.id;
+          const taskSubTasks = cache.subTasks.filter((st) => st.mainTaskId === mt.id);
+          const taskMaterials = cache.materials.filter((m) => m.projectTaskId === ptId);
+
+          return {
+            project_task_id: ptId,
+            main_task_id: mt.id,
+            title: mt.name,
+            sort_order: i,
+            materials: taskMaterials.map((m) => ({
+              project_task_material_id: m.id,
+              material_id: m.materialId,
+              name: m.name,
+              unit: m.unit,
+              unit_cost: m.unitCost,
+              estimated_quantity: m.quantity,
+              estimated_cost: m.estimatedCost,
+            })),
+            subtasks: taskSubTasks.map((st) => ({
+              project_sub_task_id: st.id,
+              sub_task_id: st.subTaskId,
+              description: st.title,
+              estimated_hours: st.estimatedHours,
+              scheduled_start_datetime: st.scheduledStartDatetime,
+              scheduled_end_datetime: st.scheduledEndDatetime,
+              status: null,
+              sort_order: st.sortOrder,
+              equipments_used: st.equipments.map((eq) => ({ name: eq.name, notes: eq.notes ?? null })),
+              assigned_staff: st.assignedEmployeeIds.map((uid) => {
+                const user = staffMap.get(uid);
+                return {
+                  project_sub_task_staff_id: uid,
+                  user_id: uid,
+                  user: user ? { id: uid, username: user.username, email: user.email, specialty: null } : null,
+                };
+              }),
+            })),
+          };
+        });
+
+        setProject(overviewProject);
+        setMainTasks(overviewMainTasks);
+        setExpandedMainTasks(new Set(overviewMainTasks.map((t) => t.project_task_id)));
+        setLoading(false);
+        return;
+      }
+
+      // Cache miss — fallback to API
       try {
         setLoading(true);
 
@@ -184,60 +319,80 @@ export default function OverviewPage() {
     });
   }
 
-  async function updateProjectStatus(status: string) {
-    const response = await fetch("/api/planning/updateProjectStatus", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        projectId,
-        status,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        [data?.error, data?.details].filter(Boolean).join(": ") ||
-          "Failed to update project status.",
-      );
-    }
+  // The "Change" buttons next to each section navigate back to that step.
+  function handleChangeNavigate(status: string, path: string) {
+    setCachedStep(projectId, status as any);
+    setOptimisticProjectStatus(projectId, status);
+    router.push(path);
   }
 
-  // The "Change" buttons next to each section need to flip the project's
-  // status back to the matching `*_pending` step so the corresponding
-  // assignment page accepts edits, then navigate there.
-  async function handleChangeNavigate(status: string, path: string) {
-    try {
-      await updateProjectStatus(status);
-      router.push(path);
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to switch to that step.");
-    }
-  }
-
-  async function handleGoBack() {
-    try {
-      setIsNavigating("back");
-      await updateProjectStatus("cost_estimation_pending");
-      router.push(`/admin/job-creation/cost-estimation?projectId=${projectId}`);
-    } catch (error: any) {
-      setIsNavigating(null);
-      toast.error(error?.message || "Failed to go back.");
-    }
+  function handleGoBack() {
+    setIsNavigating("back");
+    setCachedStep(projectId, "cost_estimation_pending");
+    setOptimisticProjectStatus(projectId, "cost_estimation_pending");
+    router.push(`/admin/job-creation/cost-estimation?projectId=${projectId}`);
   }
 
   async function handleGenerateQuotation() {
-    try {
-      setIsNavigating("quote");
-      await updateProjectStatus("quotation_pending");
-      router.push(`/admin/job-creation/quotation-generation?projectId=${projectId}`);
-    } catch (error: any) {
-      setIsNavigating(null);
-      toast.error(error?.message || "Failed to continue to quotation.");
+    setIsNavigating("quote");
+
+    // Batch-save all cached wizard data to the database
+    const cache = getWizardCache(projectId);
+    if (cache) {
+      try {
+        const response = await fetch("/api/planning/batchSaveProject", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            mainTasks: cache.mainTasks,
+            subTasks: cache.subTasks,
+            materials: cache.materials,
+            markupRate: cache.markupRate,
+            status: "quotation_pending",
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          toast.error(data?.error || "Failed to save project.");
+          setIsNavigating(null);
+          return;
+        }
+
+        clearWizardCache(projectId);
+      } catch (error: any) {
+        toast.error(error?.message || "Failed to save project.");
+        setIsNavigating(null);
+        return;
+      }
     }
+
+    // Generate the quotation PDF and stash it in the bucket so the quotation
+    // page can stream it straight from storage instead of regenerating the
+    // HTML preview every time. We block navigation on this so the next page
+    // opens with the file already in place.
+    try {
+      const generateResponse = await fetch("/api/quotation/save-generated", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+
+      if (!generateResponse.ok) {
+        const data = await generateResponse.json().catch(() => null);
+        toast.error(data?.error || "Failed to generate quotation PDF.");
+        setIsNavigating(null);
+        return;
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to generate quotation PDF.");
+      setIsNavigating(null);
+      return;
+    }
+
+    setOptimisticProjectStatus(projectId, "quotation_pending");
+    router.push(`/admin/job-creation/quotation-generation?projectId=${projectId}`);
   }
 
   return (
