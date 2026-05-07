@@ -252,60 +252,100 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ conversationId })
     }
 
-    // Find existing shared conversation
-    const { data: myConvos } = await supabaseAdmin
-      .from("conversation_participants")
-      .select("conversation_id")
-      .eq("user_id", user.id);
+    // Admin messaging a staff member in the context of a specific project.
+    // Reuses the project's existing conversation that already has this staffer
+    // as a participant; otherwise creates one. Either way, the admin is added
+    // too. Routes the basic-details staff message modal away from creating
+    // direct DMs that duplicate project conversations.
+    if (projectId) {
+      const { data: project, error: projectError } = await supabaseAdmin
+        .from("projects")
+        .select("project_id")
+        .eq("project_id", projectId)
+        .maybeSingle();
 
-    const myConvoIds = (myConvos ?? []).map((conversation) => conversation.conversation_id);
-
-    if (myConvoIds.length > 0) {
-      const { data: sharedConvos } = await supabaseAdmin
-        .from("conversation_participants")
-        .select("conversation_id")
-        .eq("user_id", targetUserId)
-        .in("conversation_id", myConvoIds);
-
-      if (sharedConvos && sharedConvos.length > 0) {
-        return NextResponse.json({
-          conversationId: sharedConvos[0].conversation_id,
-        });
+      if (projectError || !project) {
+        return NextResponse.json(
+          {
+            error: "Project not found.",
+            details: projectError?.message ?? "Project not found.",
+          },
+          { status: 404 },
+        );
       }
+
+      let projectConversationId: string;
+      try {
+        projectConversationId = await findOrCreateProjectConversationWithUser(
+          projectId,
+          targetUserId,
+        );
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error: "Failed to start conversation.",
+            details: error instanceof Error ? error.message : "Unknown error.",
+          },
+          { status: 500 },
+        );
+      }
+
+      const { data: existingAdminParticipant, error: existingAdminError } =
+        await supabaseAdmin
+          .from("conversation_participants")
+          .select("conversation_id")
+          .eq("conversation_id", projectConversationId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+      if (existingAdminError) {
+        return NextResponse.json(
+          {
+            error: "Failed to verify conversation participant.",
+            details: existingAdminError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      if (!existingAdminParticipant) {
+        const { error: adminInsertError } = await supabaseAdmin
+          .from("conversation_participants")
+          .insert([{ conversation_id: projectConversationId, user_id: user.id }]);
+
+        if (adminInsertError) {
+          return NextResponse.json(
+            {
+              error: "Failed to add admin to conversation.",
+              details: adminInsertError.message,
+            },
+            { status: 500 },
+          );
+        }
+      }
+
+      return NextResponse.json({ conversationId: projectConversationId });
     }
 
-    // Create new conversation using admin client to bypass RLS
-    const { data: convData, error: convError } = await supabaseAdmin
-      .from("conversations")
-      .insert([{ updated_at: new Date().toISOString() }])
-      .select()
-      .single();
+    // Atomic find-or-create. The RPC enforces one direct conversation per
+    // (user_a, user_b) pair via a unique index on conversations.direct_pair_key
+    // and an advisory lock that serializes concurrent creators.
+    const { data: rpcConversationId, error: rpcError } = await supabaseAdmin.rpc(
+      "find_or_create_direct_conversation",
+      { p_user_a: user.id, p_user_b: targetUserId },
+    );
 
-    if (convError) {
-      return NextResponse.json(
-        { error: "Failed to create conversation.", details: convError.message },
-        { status: 500 },
-      );
-    }
-
-    const { error: partError } = await supabaseAdmin
-      .from("conversation_participants")
-      .insert([
-        { conversation_id: convData.id, user_id: user.id },
-        { conversation_id: convData.id, user_id: targetUserId },
-      ]);
-
-    if (partError) {
+    if (rpcError || !rpcConversationId) {
       return NextResponse.json(
         {
-          error: "Failed to add conversation participants.",
-          details: partError.message,
+          error: "Failed to start conversation.",
+          details: rpcError?.message ?? "Unknown error.",
         },
         { status: 500 },
       );
     }
 
-    return NextResponse.json({ conversationId: convData.id });
+    return NextResponse.json({ conversationId: rpcConversationId });
   } catch (error: unknown) {
     return NextResponse.json(
       { error: "Unexpected error.", details: error instanceof Error ? error.message : "Unknown error." },

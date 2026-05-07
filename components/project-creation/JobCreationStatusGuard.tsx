@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
+import { getOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import { getCachedStep } from "@/lib/wizardCache";
 
 const STATUS_ROUTES: Record<string, string> = {
   main_task_pending: "/admin/job-creation/main-task-assignment",
@@ -14,6 +16,10 @@ const STATUS_ROUTES: Record<string, string> = {
   overview_pending: "/admin/job-creation/overview",
   quotation_pending: "/admin/job-creation/quotation-generation",
 };
+
+const PATH_TO_STATUS: Record<string, string> = Object.fromEntries(
+  Object.entries(STATUS_ROUTES).map(([status, path]) => [path, status]),
+);
 
 const POST_CREATION_STATUSES = new Set([
   "ready_to_start",
@@ -49,35 +55,59 @@ export default function JobCreationStatusGuard({
     }
 
     async function checkAndRedirect() {
-      const status = await loadProjectStatus();
+      const pathStatus = PATH_TO_STATUS[pathname];
+      if (!pathStatus) return; // not a guarded page
 
-      if (!status || cancelled) return;
+      // 1. Fast path: check optimistic in-memory cache (set by Previous/Next buttons)
+      const optimistic = getOptimisticProjectStatus(projectId!);
+      if (optimistic && pathStatus === optimistic) return;
 
-      if (POST_CREATION_STATUSES.has(status)) {
+      // 2. Check sessionStorage wizard cache (survives refreshes)
+      const cachedStep = getCachedStep(projectId!);
+      if (cachedStep) {
+        if (pathStatus === cachedStep) return; // user is on the correct page
+        // Cached step doesn't match — redirect to correct page
+        const correctPath = STATUS_ROUTES[cachedStep];
+        if (correctPath && pathname !== correctPath) {
+          window.location.replace(`${correctPath}?projectId=${projectId}`);
+        }
+        return;
+      }
+
+      // 3. No cache at all — fall back to API (project not in active wizard session)
+      const apiStatus = await loadProjectStatus();
+      if (!apiStatus || cancelled) return;
+
+      if (POST_CREATION_STATUSES.has(apiStatus)) {
         window.location.replace("/admin");
         return;
       }
 
-      const expectedPath = STATUS_ROUTES[status];
-      if (!expectedPath || pathname === expectedPath) return;
+      if (pathStatus === apiStatus) return;
 
-      // A quick re-check prevents brief stale status reads from bouncing
-      // the user back to the previous step right after clicking Next.
-      await new Promise((resolve) => window.setTimeout(resolve, 250));
-
+      // Path mismatch — wait briefly for potential race, then recheck
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
       if (cancelled) return;
 
-      const confirmedStatus = await loadProjectStatus();
-      if (!confirmedStatus || cancelled) return;
+      const freshOptimistic = getOptimisticProjectStatus(projectId!);
+      if (freshOptimistic && pathStatus === freshOptimistic) return;
 
-      if (POST_CREATION_STATUSES.has(confirmedStatus)) {
+      const freshCachedStep = getCachedStep(projectId!);
+      if (freshCachedStep && pathStatus === freshCachedStep) return;
+
+      const confirmedApiStatus = await loadProjectStatus();
+      if (!confirmedApiStatus || cancelled) return;
+
+      if (POST_CREATION_STATUSES.has(confirmedApiStatus)) {
         window.location.replace("/admin");
         return;
       }
 
-      const confirmedPath = STATUS_ROUTES[confirmedStatus];
-      if (confirmedPath && pathname !== confirmedPath) {
-        window.location.replace(`${confirmedPath}?projectId=${projectId}`);
+      if (pathStatus === confirmedApiStatus) return;
+
+      const correctPath = STATUS_ROUTES[confirmedApiStatus];
+      if (correctPath && pathname !== correctPath) {
+        window.location.replace(`${correctPath}?projectId=${projectId}`);
       }
     }
 

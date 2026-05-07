@@ -10,8 +10,17 @@ import {
   GripVertical,
   Search,
 } from "lucide-react";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import {
+  getCachedMainTasks,
+  setCachedMainTasks,
+  setCachedStep,
+  getCachedProjectMeta,
+  ensureWizardCacheHydrated,
+  markWizardDirty,
+} from "@/lib/wizardCache";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
 import ConfirmDeleteModal from "@/components/project-creation/ConfirmDeleteModal";
@@ -161,7 +170,7 @@ function AddTaskModal({
           <button
             type="button"
             onClick={onCreateNew}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 dark:text-slate-300 transition hover:bg-gray-50"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-[12px] font-medium text-gray-600 transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
           >
             <Plus className="h-3.5 w-3.5" />
             Create New Task
@@ -175,9 +184,13 @@ function AddTaskModal({
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function MainTaskAssignment() {
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
+
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/basic-details");
+    router.prefetch("/admin/job-creation/sub-task-assignment");
+  }, [router]);
 
   const [jobNo, setJobNo] = useState("");
   const [siteName, setSiteName] = useState("");
@@ -190,21 +203,12 @@ export default function MainTaskAssignment() {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
-  const skipPopstateGuardRef = useRef(false);
   const [selectedHistory, setSelectedHistory] = useState<Task[][]>([]);
 
-  const [pendingAction, setPendingAction] = useState<
-    "next" | "back" | "browserBack" | null
-  >(null);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
-
-  const allowBrowserBackRef = useRef(false);
-  const suppressLeaveGuardRef = useRef(false);
   const [isDirty, setIsDirty] = useState(false);
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
   const [addTaskModalOpen, setAddTaskModalOpen] = useState(false);
   const [isProcessingNext, setIsProcessingNext] = useState(false);
-  const [isSavingFromModal, setIsSavingFromModal] = useState(false);
   const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null);
   const [selectedTaskIdsForDelete, setSelectedTaskIdsForDelete] = useState<
     Set<string>
@@ -234,7 +238,7 @@ export default function MainTaskAssignment() {
         next.splice(targetIndex, 0, moved);
         return next;
       });
-      setIsDirty(true);
+      setIsDirty(true); markWizardDirty(projectId);
     }
     setDragIndex(null);
     setDragOverIndex(null);
@@ -258,7 +262,7 @@ export default function MainTaskAssignment() {
       if (prev.some((item) => item.id === task.id)) return prev;
       return [...prev, task];
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function removeSelected(taskId: string) {
@@ -270,7 +274,7 @@ export default function MainTaskAssignment() {
       next.delete(taskId);
       return next;
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function removeSelectedTasks(taskIds: Set<string>) {
@@ -279,7 +283,7 @@ export default function MainTaskAssignment() {
     pushSelectedHistory();
     setSelected((prev) => prev.filter((item) => !taskIds.has(item.id)));
     setSelectedTaskIdsForDelete(new Set());
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function toggleTaskDeleteSelection(taskId: string) {
@@ -357,7 +361,7 @@ export default function MainTaskAssignment() {
       if (prev.some((item) => item.id === newTask.id)) return prev;
       return [...prev, newTask];
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
     toast.success(`Task "${newTask.name}" created.`);
     loadAllMainTasks({ silent: true });
   }
@@ -376,122 +380,27 @@ export default function MainTaskAssignment() {
   }
 
   function handleNext() {
-    requestLeave("next");
-  }
-
-  function requestLeave(action: "next" | "back" | "browserBack") {
-    if (!isDirty) {
-      void handleConfirmSave(action === "next", action);
-      return;
-    }
-
-    if (action !== "next") setIsProcessingNext(false);
-
-    setPendingAction(action);
-    setShowSaveConfirm(true);
-  }
-
-  async function saveMainTaskChanges() {
-    if (!projectId) {
-      toast.error("Missing project ID.");
-      return false;
-    }
-
-    try {
-      const response = await fetch("/api/planning/saveProjectMainTasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, mainTasks: selected }),
-      });
-
-      let data: any = null;
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-
-      if (!response.ok) {
-        const message =
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-          `Failed to save main tasks. (${response.status})`;
-        toast.error(message);
-        return false;
-      }
-
-      setIsDirty(false);
-      return true;
-    } catch (error: any) {
-      toast.error(
-        error?.message || "Something went wrong while saving main tasks.",
-      );
-      return false;
-    }
-  }
-
-  async function handleConfirmSave(
-    shouldSave: boolean,
-    forcedAction?: "next" | "back" | "browserBack",
-  ) {
-    const action = forcedAction ?? pendingAction;
-    if (!action) return;
-
-    setShowSaveConfirm(false);
-    setPendingAction(null);
-
-    if (action === "browserBack") {
-      if (shouldSave) {
-        setIsSavingFromModal(true);
-        const saved = await saveMainTaskChanges();
-        setIsSavingFromModal(false);
-        if (!saved) {
-          setIsProcessingNext(false);
-          return;
-        }
-      }
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      setIsDirty(false);
-      window.history.back();
-      return;
-    }
-
-    const target =
-      action === "next"
-        ? `/admin/job-creation/sub-task-assignment?projectId=${projectId}`
-        : `/admin/job-creation/basic-details?projectId=${projectId}`;
-
-    if (!shouldSave) {
-      if (action === "next") setIsProcessingNext(true);
-      else setIsProcessingNext(false);
-      suppressLeaveGuardRef.current = true;
-      allowBrowserBackRef.current = true;
-      window.location.href = target;
-      return;
-    }
-
-    if (action === "next") setIsProcessingNext(true);
-
-    setIsSavingFromModal(true);
-    const saved = await saveMainTaskChanges();
-    setIsSavingFromModal(false);
-
-    if (!saved) {
-      setIsProcessingNext(false);
-      return;
-    }
-
-    suppressLeaveGuardRef.current = true;
+    setIsProcessingNext(true);
+    setCachedMainTasks(
+      projectId,
+      selected.map((t) => ({ id: t.id, name: t.name, project_task_id: t.project_task_id })),
+    );
     setIsDirty(false);
-    allowBrowserBackRef.current = true;
-    window.location.href = target;
+    setCachedStep(projectId, "sub_task_pending");
+    setOptimisticProjectStatus(projectId, "sub_task_pending");
+    router.push(`/admin/job-creation/sub-task-assignment?projectId=${projectId}`);
   }
 
-  useEffect(() => {
-    skipPopstateGuardRef.current = false;
-    setIsProcessingNext(false);
-    setIsSavingFromModal(false);
-  }, [pathname]);
+  function handleGoBack() {
+    setCachedMainTasks(
+      projectId,
+      selected.map((t) => ({ id: t.id, name: t.name, project_task_id: t.project_task_id })),
+    );
+    setIsDirty(false);
+    setCachedStep(projectId, "main_task_pending");
+    setOptimisticProjectStatus(projectId, "main_task_pending");
+    router.push(`/admin/job-creation/basic-details?projectId=${projectId}`);
+  }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -555,6 +464,20 @@ export default function MainTaskAssignment() {
         return;
       }
 
+      const hydrated = await ensureWizardCacheHydrated(projectId);
+
+      // Try loading from wizard cache first (instant)
+      const cached = getCachedMainTasks(projectId);
+      const meta = getCachedProjectMeta(projectId);
+      if (cached && cached.length > 0 && cached[0].id) {
+        setJobNo(meta?.projectCode || "");
+        setSiteName(meta?.projectTitle || "");
+        setSelected(cached.map((t) => ({ id: t.id, name: t.name, project_task_id: t.project_task_id })));
+        setLoadingProject(false);
+        return;
+      }
+
+      // Cache miss — fetch from API and populate cache
       try {
         setLoadingProject(true);
         const response = await fetch(
@@ -591,6 +514,12 @@ export default function MainTaskAssignment() {
           .filter((item: Task) => item.name);
 
         setSelected(loadedTasks);
+
+        // Populate cache for future visits
+        setCachedMainTasks(
+          projectId,
+          loadedTasks.map((t) => ({ id: t.id, name: t.name, project_task_id: t.project_task_id })),
+        );
       } catch (error: any) {
         toast.error(error?.message || "Failed to load project main tasks.");
       } finally {
@@ -600,39 +529,6 @@ export default function MainTaskAssignment() {
 
     loadProjectMainTasks();
   }, [projectId]);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      if (skipPopstateGuardRef.current) return;
-      if (allowBrowserBackRef.current) {
-        allowBrowserBackRef.current = false;
-        return;
-      }
-      if (!isDirty) {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-      window.history.pushState(null, "", window.location.href);
-      setPendingAction("browserBack");
-      setShowSaveConfirm(true);
-    };
-
-    window.history.pushState(null, "", window.location.href);
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [isDirty]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (suppressLeaveGuardRef.current) return;
-      if (!isDirty) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
 
   useLayoutEffect(() => {
     if (!listRef.current) return;
@@ -900,8 +796,7 @@ export default function MainTaskAssignment() {
             type="button"
             onClick={handleNext}
             disabled={isProcessingNext}
-            className="inline-flex h-9 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-slate-950 transform transition-all duration-150 hover:opacity-90 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
-            style={{ backgroundColor: ACCENT }}
+            className="inline-flex h-9 w-28 items-center justify-center gap-2 rounded-md px-4 text-[13px] font-semibold text-white bg-[#4ade80] dark:bg-green-400 transform transition-all duration-150 hover:opacity-90 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
           >
             {isProcessingNext ? (
               <>
@@ -914,61 +809,6 @@ export default function MainTaskAssignment() {
           </button>
         </div>
       </div>
-
-      {/* Save confirm modal */}
-      {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
-            <div className="border-b border-gray-200 px-5 py-4 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">
-                Save changes?
-              </h3>
-              <p className="mt-0.5 text-[13px] text-gray-600 dark:text-slate-400">
-                Do you want to save your main task changes before leaving?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSaveConfirm(false);
-                  setPendingAction(null);
-                  setIsProcessingNext(false);
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Don&apos;t Save
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(true)}
-                disabled={isSavingFromModal}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-slate-950 hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-70"
-                style={{ backgroundColor: ACCENT }}
-              >
-                {isSavingFromModal ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Save"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {/* Add Task Modal */}
       {addTaskModalOpen && (

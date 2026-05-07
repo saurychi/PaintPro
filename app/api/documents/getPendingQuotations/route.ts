@@ -27,7 +27,7 @@ export async function GET() {
         )
       `,
       )
-      .eq("status", "quotation_pending")
+      .in("status", ["quotation_pending", "grant_access_quotation"])
       .order("updated_at", { ascending: false });
 
     if (error) {

@@ -68,6 +68,40 @@ export default function SigninClient() {
           return
         }
 
+        // Helper: re-establish the httpOnly server cookie that /client's
+        // layout checks. localStorage outlives the cookie (the cookie is at
+        // most 7 days, sometimes a session cookie), so we have to refresh it
+        // here or /client will redirect us right back, causing an infinite
+        // /auth/signin ↔ /client loop. If the project no longer exists or
+        // the API rejects the code, we wipe the stale storage so the loop
+        // can't restart on the next visit.
+        const tryAutoLoginAsClient = async (
+          projectCode: string,
+        ): Promise<boolean> => {
+          try {
+            const res = await fetch("/api/auth/client-access", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectCode, remember: true }),
+            })
+            if (res.ok) return true
+          } catch (refreshErr) {
+            console.error(
+              "Failed to refresh client access cookie:",
+              refreshErr,
+            )
+          }
+          // Cookie couldn't be re-established — wipe the stored hint so we
+          // don't keep trying and looping.
+          try {
+            localStorage.removeItem("paintpro_client_access")
+            sessionStorage.removeItem("paintpro_client_access")
+            document.cookie =
+              "paintpro_client_access=; Max-Age=0; Path=/; SameSite=Strict"
+          } catch {}
+          return false
+        }
+
         try {
           const saved =
             localStorage.getItem("paintpro_client_access") ||
@@ -76,8 +110,11 @@ export default function SigninClient() {
           if (saved) {
             const parsed = JSON.parse(saved)
             if (parsed?.project_id && parsed?.project_code) {
-              router.replace("/client")
-              return
+              const ok = await tryAutoLoginAsClient(parsed.project_code)
+              if (ok) {
+                router.replace("/client")
+                return
+              }
             }
           }
         } catch (storageErr) {
@@ -95,11 +132,17 @@ export default function SigninClient() {
             const raw = cookieMatch.split("=").slice(1).join("=")
             const parsed = JSON.parse(decodeURIComponent(raw))
             if (parsed?.project_id && parsed?.project_code) {
-              try {
-                localStorage.setItem("paintpro_client_access", JSON.stringify(parsed))
-              } catch {}
-              router.replace("/client")
-              return
+              const ok = await tryAutoLoginAsClient(parsed.project_code)
+              if (ok) {
+                try {
+                  localStorage.setItem(
+                    "paintpro_client_access",
+                    JSON.stringify(parsed),
+                  )
+                } catch {}
+                router.replace("/client")
+                return
+              }
             }
           }
         } catch (cookieErr) {

@@ -35,6 +35,7 @@ export function useClientProject() {
 // miss it.
 const PENDING_DOCUMENT_STATUSES = new Set([
   "quotation_pending",
+  "grant_access_quotation",
   "invoice_agreement_pending",
 ])
 

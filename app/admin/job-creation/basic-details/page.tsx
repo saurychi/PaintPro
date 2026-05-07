@@ -11,6 +11,8 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import { initWizardCache, setCachedStep } from "@/lib/wizardCache";
 import { supabase } from "@/lib/supabaseClient";
 import CreateClientModal from "@/components/project-creation/CreateClientModal";
 import MeasurementModal, {
@@ -404,6 +406,10 @@ export default function BasicDetails() {
   const projectIdFromUrl = searchParams.get("projectId") || "";
   const { settings: holidaySettings } = useHolidaySettings();
   const { now: projectNow } = useProjectNow();
+
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/main-task-assignment");
+  }, [router]);
 
   const [projectCode, setProjectCode] = useState(() => generateProjectCode());
   const [projectName, setProjectName] = useState("");
@@ -1706,6 +1712,28 @@ export default function BasicDetails() {
       );
 
       localStorage.removeItem(SESSION_DRAFT_KEY);
+
+      // Seed the wizard cache so subsequent pages can read from it instantly.
+      initWizardCache(projectRow.project_id, {
+        projectId: projectRow.project_id,
+        projectCode: projectRow.project_code,
+        projectTitle: title,
+        siteAddress,
+        description: description.trim() || null,
+        clientId: savedClientId,
+        currentStep: "main_task_pending",
+        mainTasks: nextTasks.map((task) => ({
+          id: "", // populated when main-task-assignment first loads from API
+          name: task.name,
+        })),
+        subTasks: [], // populated on first visit to each page
+        materials: [],
+        markupRate: 30,
+        refData: {},
+      });
+
+      setCachedStep(projectRow.project_id, "main_task_pending");
+      setOptimisticProjectStatus(projectRow.project_id, "main_task_pending");
       router.push(
         `/admin/job-creation/main-task-assignment?projectId=${projectRow.project_id}`,
       );
@@ -1995,7 +2023,11 @@ export default function BasicDetails() {
     if (showLoading) setSurfaceMsgConversationsLoading(true);
     setSurfaceMsgConversationError(null);
     try {
-      const res = await fetch("/api/messages/staff-conversations");
+      const res = await fetch(
+        createdProjectId
+          ? `/api/messages/staff-conversations?projectId=${encodeURIComponent(createdProjectId)}`
+          : "/api/messages/staff-conversations",
+      );
       if (!res.ok) throw new Error("Failed to load conversations.");
       const json = await res.json();
       setSurfaceMsgConversations(json.conversations ?? []);
@@ -2023,7 +2055,10 @@ export default function BasicDetails() {
       const convRes = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: surfaceMsgEmployeeId }),
+        body: JSON.stringify({
+          targetUserId: surfaceMsgEmployeeId,
+          ...(createdProjectId ? { projectId: createdProjectId } : {}),
+        }),
       });
       if (!convRes.ok) throw new Error("Failed to create conversation.");
       const convData = await convRes.json();

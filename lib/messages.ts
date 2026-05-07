@@ -54,22 +54,44 @@ export async function fetchConversations(userId: string): Promise<ConversationPa
   return Array.isArray(data) ? (data as ConversationPayload[]) : []
 }
 
-export async function fetchMessages(conversationId: string) {
+export type FetchMessagesResult = {
+  messages: Message[]
+  hasMore: boolean
+}
+
+export async function fetchMessages(
+  conversationId: string,
+  options: { limit?: number; before?: string | null } = {},
+): Promise<FetchMessagesResult> {
   // Goes through a server endpoint so RLS-blocked callers (project-cookie
   // clients without a Supabase auth user) can still read messages they're
   // entitled to. The endpoint authorizes via auth user OR project cookie.
-  const response = await fetch(
-    `/api/messages/list?conversationId=${encodeURIComponent(conversationId)}`,
-    { cache: "no-store" },
-  )
+  const params = new URLSearchParams({ conversationId })
+  if (options.limit) params.set("limit", String(options.limit))
+  if (options.before) params.set("before", options.before)
+
+  const response = await fetch(`/api/messages/list?${params.toString()}`, {
+    cache: "no-store",
+  })
 
   if (!response.ok) {
     console.error("Error fetching messages:", response.statusText)
-    return []
+    return { messages: [], hasMore: false }
   }
 
   const data = await response.json().catch(() => null)
-  return Array.isArray(data) ? (data as Message[]) : []
+  if (!data || typeof data !== "object") return { messages: [], hasMore: false }
+
+  // Tolerate the older array shape during rollout — pre-pagination responses
+  // were a bare array. Drop this branch once everything's caught up.
+  if (Array.isArray(data)) {
+    return { messages: data as Message[], hasMore: false }
+  }
+
+  return {
+    messages: Array.isArray(data.messages) ? (data.messages as Message[]) : [],
+    hasMore: Boolean(data.hasMore),
+  }
 }
 
 export async function postMessage(conversationId: string, _senderId: string, content: string) {

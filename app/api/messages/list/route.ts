@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const CLIENT_COOKIE = "paintpro_client_project_id";
 
-// GET /api/messages/list?conversationId=xxx
+// GET /api/messages/list?conversationId=xxx&limit=7&before=ISO
 //
 // Returns the message history for a conversation. Two access modes:
 //   1. Auth user (admin / staff / client) — caller must be a participant in
@@ -13,8 +13,12 @@ const CLIENT_COOKIE = "paintpro_client_project_id";
 //   2. Project-cookie client — caller has paintpro_client_project_id, and the
 //      conversation's project_id must match.
 //
-// Both modes use supabaseAdmin to fetch (so RLS isn't in the way for the
-// cookie-mode client, which has no Supabase auth user).
+// Pagination: pass `limit` (default 7) to cap how many messages come back.
+// Pass `before` (ISO timestamp) to fetch the next page of older messages —
+// the response is always ordered ascending by created_at, but internally we
+// query DESC + limit so we always return the *newest* N (or the N just older
+// than `before`). The response also includes a `hasMore` flag so the client
+// knows whether to stop trying.
 
 async function getAuthUserId() {
   const cookieStore = await cookies();
@@ -115,11 +119,47 @@ export async function GET(request: Request) {
       }
     }
 
-    const { data: messages, error: messagesError } = await supabaseAdmin
+    const limitParamRaw = url.searchParams.get("limit");
+    const limitParam = limitParamRaw !== null ? parseInt(limitParamRaw, 10) : NaN;
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, 500)
+      : null;
+    const before = url.searchParams.get("before")?.trim() || null;
+
+    // When `limit` is supplied, query newest-first so we can grab the most
+    // recent N (optionally older than `before`), then reverse for the
+    // response. When `limit` is omitted, return everything in chronological
+    // order — preserves the legacy "load all" behaviour for callers that
+    // haven't switched to pagination yet.
+    if (limit === null) {
+      const { data: messages, error: messagesError } = await supabaseAdmin
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+
+      if (messagesError) {
+        return NextResponse.json(
+          { error: messagesError.message },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({ messages: messages ?? [], hasMore: false });
+    }
+
+    let query = supabaseAdmin
       .from("messages")
       .select("*")
       .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(limit + 1); // +1 to detect hasMore without a second query
+
+    if (before) {
+      query = query.lt("created_at", before);
+    }
+
+    const { data: messagesDesc, error: messagesError } = await query;
 
     if (messagesError) {
       return NextResponse.json(
@@ -128,7 +168,12 @@ export async function GET(request: Request) {
       );
     }
 
-    return NextResponse.json(messages ?? []);
+    const rows = messagesDesc ?? [];
+    const hasMore = rows.length > limit;
+    const trimmed = hasMore ? rows.slice(0, limit) : rows;
+    const messages = trimmed.slice().reverse();
+
+    return NextResponse.json({ messages, hasMore });
   } catch (error: unknown) {
     return NextResponse.json(
       {
