@@ -1,6 +1,9 @@
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { evaluateFormula } from "@/lib/planning/formulaEngine";
+import { Parser } from "expr-eval";
+import { getPlanningCatalog } from "@/lib/planning/catalogCache";
+import { buildAreaVariableMapFromSummary } from "@/lib/planning/areaVariables";
 import type { ScalePresetKey } from "@/lib/planning/surfacePresets";
+
+const parser = new Parser();
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -150,19 +153,18 @@ function getUnitForMaterial(
   return found?.unit ?? "";
 }
 
-// ─── DB-driven material estimator ────────────────────────────────────────────
-
-type MaterialRuleRow = {
-  material_name: string;
-  formula_template_id: string;
-  minimum_quantity: number | null;
-};
+// ─── Cache-driven material estimator ─────────────────────────────────────────
 
 /**
- * Fetches all active material_estimation_rules for the given mainTaskId +
- * subTaskId, evaluates each rule's formula_template against the project's
- * AreaSummary via expr-eval, applies the minimum_quantity floor, and returns
- * the resulting list of MaterialQty items.
+ * Resolves all material_estimation_rules for the given mainTaskId from the
+ * in-memory planning catalog and evaluates each formula_template locally
+ * against the project's AreaSummary. Equivalent to the previous DB-only
+ * version but with zero round-trips on warm cache (rules + templates +
+ * variables are all loaded once at catalog warm-up).
+ *
+ * material_estimation_rules are defined at the main-task level (sub_task_id
+ * is NULL on every row), so the subTaskId arg is accepted for call-site
+ * symmetry but ignored.
  *
  * Returns an empty array when no rules exist (no error thrown).
  */
@@ -174,42 +176,63 @@ export async function estimateMaterialsForSubTask(args: {
 }): Promise<MaterialQty[]> {
   const { mainTaskId, areas, materialCatalog } = args;
 
-  // Material rules are defined at the main-task level (sub_task_id is NULL in
-  // material_estimation_rules). Filter by main_task_id only.
-  const { data: rules, error } = await supabaseAdmin
-    .from("material_estimation_rules")
-    .select("material_name, formula_template_id, minimum_quantity")
-    .eq("main_task_id", mainTaskId)
-    .eq("is_active", true);
-
-  if (error) {
-    throw new Error(
-      `materialEstimator: failed to fetch rules for mainTaskId=${mainTaskId}: ${error.message}`,
-    );
-  }
-
+  const catalog = await getPlanningCatalog();
+  const rules = catalog.materialEstimationRulesByMainTaskId.get(mainTaskId);
   if (!rules || rules.length === 0) return [];
+
+  const areaMap = buildAreaVariableMapFromSummary(
+    areas as Record<string, number | null | undefined>,
+  );
 
   const out: MaterialQty[] = [];
 
-  for (const rule of rules as MaterialRuleRow[]) {
-    const { value } = await evaluateFormula({
-      formulaTemplateId: rule.formula_template_id,
-      areas,
-    });
+  for (const rule of rules) {
+    const template = catalog.formulaTemplatesById.get(rule.formulaTemplateId);
+    if (!template) continue;
 
-    const minimumQty = Number.isFinite(Number(rule.minimum_quantity))
-      ? Math.max(Number(rule.minimum_quantity), 0)
-      : 0;
+    // Build the eval scope once per rule: variable rows first (with
+    // default_value fallback when the matching area is zero / missing),
+    // then layer every area variable so formulas referencing area keys
+    // directly still resolve.
+    const scope: Record<string, number> = {};
+    for (const v of catalog.formulaVariablesByTemplateId.get(template.id) ?? []) {
+      const fromArea = areaMap[v.variableKey];
+      if (fromArea !== undefined && fromArea !== 0) {
+        scope[v.variableKey] = fromArea;
+      } else {
+        const fallback = Number(v.defaultValue ?? 0);
+        scope[v.variableKey] = Number.isFinite(fallback) ? fallback : 0;
+      }
+    }
+    for (const [key, value] of Object.entries(areaMap)) {
+      if (!(key in scope)) scope[key] = value;
+    }
+
+    let value = 0;
+    try {
+      const parsed = parser.parse(template.expression);
+      const raw = parsed.evaluate(scope);
+      value = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+    } catch {
+      // Bad formula in the catalog — skip this rule rather than fail the
+      // whole project save. The original DB version threw here; the
+      // tradeoff is "don't bring down a 70-step save for one bad row".
+      continue;
+    }
+
+    const minimumQty =
+      rule.minimumQuantity != null && Number.isFinite(rule.minimumQuantity)
+        ? Math.max(rule.minimumQuantity, 0)
+        : 0;
 
     const rawQty = Math.max(value, minimumQty);
     if (rawQty <= 0) continue;
 
-    const unit = getUnitForMaterial(rule.material_name, materialCatalog);
+    const unit = getUnitForMaterial(rule.materialName, materialCatalog);
     const qty = roundUpQty(rawQty, unit);
 
     if (qty > 0) {
-      out.push({ name: rule.material_name, qty, unit });
+      out.push({ name: rule.materialName, qty, unit });
     }
   }
 

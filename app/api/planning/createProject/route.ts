@@ -12,6 +12,8 @@ import {
   calculateProjectCostEstimation,
   type CostEstimationMainTask,
 } from "@/lib/planning/costEstimation";
+import { getPlanningCatalog } from "@/lib/planning/catalogCache";
+import { placeWorkSpan } from "@/lib/schedule/workHours";
 
 type UserRole = "staff" | "manager" | "admin" | "client";
 type UserStatus = "active" | "inactive" | "pending";
@@ -738,88 +740,75 @@ export async function POST(req: Request) {
       }
     }
 
-  const materialNameSet = uniqueStrings(
-    generatedTasks.flatMap((task) =>
-      task.sub_tasks.flatMap((subTask) =>
-        subTask.materials.map((material) => material.name).filter(Boolean)
-      )
-    )
+  // ── Catalog from cache (replaces 3 SELECT *)
+  // The whole catalog is already loaded into memory at module scope by
+  // catalogCache.ts (5-min TTL). What used to be three full-table
+  // SELECTs is now a Map lookup; on a cold cache one Promise.all
+  // refresh fires inside getPlanningCatalog().
+  let planningCatalog;
+  try {
+    planningCatalog = await getPlanningCatalog();
+  } catch (e: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to load planning catalog.",
+        code: "CATALOG_LOOKUP_FAILED",
+        details: e?.message ?? String(e),
+      },
+      { status: 500 }
+    );
+  }
+
+  // Adapt cache → existing row shapes so the cost-estimation block at
+  // the bottom of the route (which reads catalogMainTasks / catalogSubTasks /
+  // catalogMaterials) keeps working without any further changes.
+  const catalogMainTasks: MainTaskRow[] = planningCatalog.mainTasksOrdered.map(
+    (t) => ({
+      main_task_id: t.id,
+      name: t.name,
+      sort_order: t.sortOrder,
+    }),
   );
-
-  const { data: catalogMainTasks, error: catalogMainTaskError } = await supabaseAdmin
-    .from("main_task")
-    .select("main_task_id, name, sort_order:default_sort_order");
-
-  if (catalogMainTaskError) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Failed to load main task catalog.",
-        code: "MAIN_TASK_LOOKUP_FAILED",
-        details: catalogMainTaskError.message,
-      },
-      { status: 500 }
-    );
-  }
-
-  const { data: catalogSubTasks, error: catalogSubTaskError } = await supabaseAdmin
-    .from("sub_task")
-    .select("sub_task_id, main_task_id, description, sort_order:default_sort_order");
-
-  if (catalogSubTaskError) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Failed to load sub task catalog.",
-        code: "SUB_TASK_LOOKUP_FAILED",
-        details: catalogSubTaskError.message,
-      },
-      { status: 500 }
-    );
-  }
-
-  let catalogMaterials: MaterialRow[] = [];
-  if (materialNameSet.length) {
-    const { data, error } = await supabaseAdmin
-      .from("materials")
-      .select("material_id, name, unit, unit_cost");
-
-    if (error) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Failed to load material catalog.",
-          code: "MATERIAL_LOOKUP_FAILED",
-          details: error.message,
-        },
-        { status: 500 }
-      );
+  const catalogSubTasks: SubTaskRow[] = [];
+  for (const list of planningCatalog.subTasksByMainTaskId.values()) {
+    for (const sub of list) {
+      catalogSubTasks.push({
+        sub_task_id: sub.id,
+        main_task_id: sub.mainTaskId,
+        description: sub.description,
+        sort_order: sub.sortOrder,
+      });
     }
-
-    catalogMaterials = (data ?? []) as MaterialRow[];
   }
+  const catalogMaterials: MaterialRow[] = Array.from(
+    planningCatalog.materialsById.values(),
+  ).map((m) => ({
+    material_id: m.id,
+    name: m.name,
+    unit: m.unit,
+    unit_cost: m.unitCost,
+  }));
 
   const mainTaskMap = new Map<string, MainTaskRow>(
-    ((catalogMainTasks ?? []) as MainTaskRow[])
+    catalogMainTasks
       .filter((row) => row.main_task_id && row.name)
-      .map((row) => [norm(String(row.name)), row])
+      .map((row) => [norm(String(row.name)), row]),
   );
 
   const subTaskMap = new Map<string, SubTaskRow>(
-    ((catalogSubTasks ?? []) as SubTaskRow[])
+    catalogSubTasks
       .filter((row) => row.sub_task_id && row.main_task_id && row.description)
       .map((row) => [
         `${row.main_task_id}::${norm(String(row.description))}`,
         row,
-      ])
+      ]),
   );
 
   // The materials catalog can hold multiple rows that share a name but are
   // priced differently (e.g. same paint from two suppliers). When the
   // estimator looks up a material by name, prefer the *cheapest* unit_cost
   // so the project's estimated cost matches the lowest available source.
-  // Rows missing unit_cost still count (treated as 0) so they can be picked
-  // when no priced variant exists.
   const materialMap = new Map<string, MaterialRow>();
   for (const row of catalogMaterials) {
     if (!row.material_id || !row.name) continue;
@@ -836,18 +825,34 @@ export async function POST(req: Request) {
     }
   }
 
-  const insertedProjectTasksForCost: Array<{
-    project_task_id: string;
-    main_task_id: string;
-  }> = [];
+  // ── PHASE A: validate every (main_task, sub_task) up front so a bad
+  // catalog entry returns a 400 before we write a single row. Building
+  // the project_task / project_sub_task plans here also lets the bulk
+  // inserts below run without per-row re-derivation.
+  type SubTaskPlan = {
+    matchedSubTask: SubTaskRow;
+    subTaskTitle: string;
+    estimatedHours: number | null;
+    equipmentPayload: ReturnType<typeof normalizeEquipmentUsageForStorage>;
+    subTaskScheduledStart: string | null;
+    subTaskScheduledEnd: string | null;
+    assignedEmployees: ReturnType<typeof normalizeAssignedEmployees>;
+    materials: Array<{
+      name: string;
+      unit: string | null;
+      notes: string | null;
+    }>;
+  };
+  type MainTaskPlan = {
+    matchedMainTask: MainTaskRow;
+    taskName: string;
+    subTaskPlans: SubTaskPlan[];
+  };
 
-  const insertedProjectSubTasksForCost: InsertedProjectSubTaskCostRow[] = [];
-  const insertedProjectTaskMaterialsForCost: InsertedProjectTaskMaterialCostRow[] = [];
-  const insertedProjectSubTaskStaffForCost: InsertedProjectSubTaskStaffCostRow[] = [];
+  const taskPlans: MainTaskPlan[] = [];
 
   for (const task of generatedTasks) {
     const matchedMainTask = mainTaskMap.get(norm(task.name));
-
     if (!matchedMainTask?.main_task_id) {
       return NextResponse.json(
         {
@@ -855,44 +860,16 @@ export async function POST(req: Request) {
           error: `Generated main task "${task.name}" was not found in main_task.`,
           code: "MAIN_TASK_NOT_FOUND",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const { data: insertedProjectTask, error: projectTaskInsertError } = await supabaseAdmin
-      .from("project_task")
-      .insert({
-        project_id: insertedProject.project_id,
-        main_task_id: matchedMainTask.main_task_id,
-        sort_order: Number(matchedMainTask.sort_order ?? 0),
-      })
-      .select("project_task_id, main_task_id, sort_order")
-      .single<ProjectTaskRow>();
-
-    const insertedMaterialNames = new Set<string>();
-
-    if (projectTaskInsertError || !insertedProjectTask?.project_task_id) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `Failed to create project_task for "${task.name}".`,
-          code: "PROJECT_TASK_CREATE_FAILED",
-          details: projectTaskInsertError?.message || "project_task insert failed.",
-        },
-        { status: 500 }
-      );
-    }
-
-    insertedProjectTasksForCost.push({
-      project_task_id: insertedProjectTask.project_task_id,
-      main_task_id: matchedMainTask.main_task_id,
-    });
+    const subTaskPlans: SubTaskPlan[] = [];
 
     for (const subTask of task.sub_tasks) {
       const matchedSubTask = subTaskMap.get(
-        `${matchedMainTask.main_task_id}::${norm(subTask.title)}`
+        `${matchedMainTask.main_task_id}::${norm(subTask.title)}`,
       );
-
       if (!matchedSubTask?.sub_task_id) {
         return NextResponse.json(
           {
@@ -900,25 +877,21 @@ export async function POST(req: Request) {
             error: `Generated sub task "${subTask.title}" under "${task.name}" was not found in sub_task.`,
             code: "SUB_TASK_NOT_FOUND",
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
-      const assignedEmployees = normalizeAssignedEmployees(subTask);
       const estimatedHours =
         subTask.duration?.estimatedHours ??
         subTask.duration?.roundedHours ??
         subTask.duration?.adjustedDurationHours ??
         null;
 
-      const equipmentPayload = normalizeEquipmentUsageForStorage(
-        subTask.equipment,
-      );
-
       // Prefer the server-side schedule (already snapped past holidays +
-      // manual unavailable days) over the client payload. Falls back to the
-      // client value only if the lib didn't produce a slot for this subtask
-      // — which can happen when the project has no scheduled_start_datetime.
+      // manual unavailable days AND sequenced via projectCursor so two
+      // subtasks under the same project can't overlap each other) over
+      // the client payload. Falls back to the client value only if the
+      // schedule lib didn't produce a slot.
       const serverScheduleForSubTask = serverScheduleByKey.get(
         `${task.name}__${subTask.title}`,
       );
@@ -931,167 +904,343 @@ export async function POST(req: Request) {
         subTask.scheduledEndDatetime ??
         null;
 
-      const { data: insertedProjectSubTask, error: projectSubTaskInsertError } =
-        await supabaseAdmin
-          .from("project_sub_task")
-          .insert({
-            project_task_id: insertedProjectTask.project_task_id,
-            sub_task_id: matchedSubTask.sub_task_id,
-            estimated_hours: estimatedHours,
-            equipments_used: equipmentPayload,
-            scheduled_start_datetime: subTaskScheduledStart,
-            scheduled_end_datetime: subTaskScheduledEnd,
-            status: "pending",
-            sort_order: Number(matchedSubTask.sort_order ?? 0),
-            notes: null,
-          })
-          .select(
-            "project_sub_task_id, project_task_id, sub_task_id, estimated_hours, scheduled_start_datetime, scheduled_end_datetime"
-          )
-          .single<InsertedProjectSubTaskCostRow>();
-
-      if (projectSubTaskInsertError || !insertedProjectSubTask?.project_sub_task_id) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: `Failed to create project_sub_task for "${subTask.title}".`,
-            code: "PROJECT_SUB_TASK_CREATE_FAILED",
-            details:
-              projectSubTaskInsertError?.message ||
-              "project_sub_task insert did not return an id.",
-          },
-          { status: 500 }
-        );
-      }
-
-      insertedProjectSubTasksForCost.push(insertedProjectSubTask);
-
-      if (assignedEmployees.length > 0) {
-        const projectSubTaskStaffRows = assignedEmployees.map(
-          (
-            employee: { id: string; name: string; role: string | null },
-            index: number
-          ) => ({
-            project_sub_task_id: insertedProjectSubTask.project_sub_task_id,
-            user_id: employee.id,
-            role: index === 0 ? "lead" : "assigned",
-            assignment_status: "assigned",
-          })
-        );
-
-        const { error: projectSubTaskStaffInsertError } = await supabaseAdmin
-          .from("project_sub_task_staff")
-          .insert(projectSubTaskStaffRows);
-
-        if (projectSubTaskStaffInsertError) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: `Failed to create project_sub_task_staff for "${subTask.title}".`,
-              code: "PROJECT_SUB_TASK_STAFF_CREATE_FAILED",
-              details: projectSubTaskStaffInsertError.message,
-            },
-            { status: 500 }
-          );
-        }
-
-        insertedProjectSubTaskStaffForCost.push(
-          ...projectSubTaskStaffRows.map((row: {
-            project_sub_task_id: string;
-            user_id: string;
-          }) => ({
-            project_sub_task_id: row.project_sub_task_id,
-            user_id: row.user_id,
-          }))
-        );
-      }
-
-      const estimatedMaterials = await estimateMaterialsForSubTask({
-        mainTaskId: matchedMainTask.main_task_id,
-        subTaskId: matchedSubTask.sub_task_id,
-        areas,
-        materialCatalog: subTask.materials.map((material) => ({
-          name: material.name,
-          unit: material.unit ?? "",
-          notes: material.notes ?? undefined,
-        })),
+      subTaskPlans.push({
+        matchedSubTask,
+        subTaskTitle: subTask.title,
+        estimatedHours,
+        equipmentPayload: normalizeEquipmentUsageForStorage(subTask.equipment),
+        subTaskScheduledStart,
+        subTaskScheduledEnd,
+        assignedEmployees: normalizeAssignedEmployees(subTask),
+        materials: subTask.materials,
       });
+    }
 
-      for (const material of subTask.materials) {
-        const matchedMaterial = materialMap.get(norm(material.name));
-        if (!matchedMaterial?.material_id) {
+    taskPlans.push({
+      matchedMainTask,
+      taskName: task.name,
+      subTaskPlans,
+    });
+  }
+
+  // ── Schedule overlap guard: single-cursor walk over resolved
+  // subtask plans (mirrors the single projectCursor in
+  // buildProjectSchedule). Each subtask must start at or after the
+  // previous subtask's end across the WHOLE project — strict serial,
+  // no two subtasks ever share a time slot.
+  {
+    const unavailableDateSet = new Set(
+      unavailableDays.map((day) => day.blockedDate),
+    );
+    let cursorMs: number | null = null;
+    for (const taskPlan of taskPlans) {
+      for (const subPlan of taskPlan.subTaskPlans) {
+        if (!subPlan.subTaskScheduledStart || !subPlan.subTaskScheduledEnd) {
           continue;
         }
+        const startMs = new Date(subPlan.subTaskScheduledStart).getTime();
+        const endMs = new Date(subPlan.subTaskScheduledEnd).getTime();
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
 
-        const materialKey = norm(material.name);
-        if (insertedMaterialNames.has(materialKey)) {
-          continue;
-        }
-        insertedMaterialNames.add(materialKey);
+        const baseStartMs =
+          cursorMs !== null && startMs < cursorMs ? cursorMs : startMs;
 
-        const estimatedMaterial = findEstimatedMaterialByName(
-          estimatedMaterials,
-          material.name
-        );
-
-        // Fall back to 1 unit when no formula rule is configured for this material
-        const estimatedQuantity = estimatedMaterial?.qty ?? 1;
-        const unitCostRow = await supabaseAdmin
-          .from("materials")
-          .select("unit_cost")
-          .eq("material_id", matchedMaterial.material_id)
-          .maybeSingle();
-
-        if (unitCostRow.error) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: `Failed to load unit cost for "${material.name}".`,
-              code: "MATERIAL_COST_LOOKUP_FAILED",
-              details: unitCostRow.error.message,
-            },
-            { status: 500 }
+        if (baseStartMs !== startMs) {
+          const hours =
+            typeof subPlan.estimatedHours === "number" &&
+            subPlan.estimatedHours > 0
+              ? subPlan.estimatedHours
+              : Math.max((endMs - startMs) / 3_600_000, 0.25);
+          const placed = placeWorkSpan(
+            new Date(baseStartMs),
+            hours,
+            unavailableDateSet,
           );
+          subPlan.subTaskScheduledStart = placed.start.toISOString();
+          subPlan.subTaskScheduledEnd = placed.end.toISOString();
+          cursorMs = placed.end.getTime();
+        } else {
+          cursorMs = endMs;
         }
-
-        const unitCost =
-          typeof unitCostRow.data?.unit_cost === "number"
-            ? unitCostRow.data.unit_cost
-            : Number(unitCostRow.data?.unit_cost ?? 0) || 0;
-
-        const estimatedCost = estimatedQuantity * unitCost;
-
-        const { data: insertedProjectTaskMaterial, error: projectTaskMaterialInsertError } =
-          await supabaseAdmin
-            .from("project_task_material")
-            .insert({
-              project_task_id: insertedProjectTask.project_task_id,
-              material_id: matchedMaterial.material_id,
-              estimated_quantity: estimatedQuantity,
-              estimated_cost: estimatedCost,
-            })
-            .select(
-              "project_task_material_id, project_task_id, material_id, estimated_quantity, estimated_cost"
-            )
-            .single<InsertedProjectTaskMaterialCostRow>();
-
-        if (projectTaskMaterialInsertError || !insertedProjectTaskMaterial) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: `Failed to create project_task_material for "${material.name}".`,
-              code: "PROJECT_TASK_MATERIAL_CREATE_FAILED",
-              details:
-                projectTaskMaterialInsertError?.message ||
-                "project_task_material insert failed.",
-            },
-            { status: 500 }
-          );
-        }
-
-        insertedProjectTaskMaterialsForCost.push(insertedProjectTaskMaterial);
       }
     }
+  }
+
+  const insertedProjectTasksForCost: Array<{
+    project_task_id: string;
+    main_task_id: string;
+  }> = [];
+
+  const insertedProjectSubTasksForCost: InsertedProjectSubTaskCostRow[] = [];
+  const insertedProjectTaskMaterialsForCost: InsertedProjectTaskMaterialCostRow[] = [];
+  const insertedProjectSubTaskStaffForCost: InsertedProjectSubTaskStaffCostRow[] = [];
+
+  // ── PHASE B: bulk INSERT all project_task rows, get back IDs.
+  const projectTaskRowsToInsert = taskPlans.map((plan) => ({
+    project_id: insertedProject.project_id,
+    main_task_id: plan.matchedMainTask.main_task_id,
+    sort_order: Number(plan.matchedMainTask.sort_order ?? 0),
+  }));
+
+  const { data: insertedProjectTaskRows, error: projectTaskBulkError } =
+    await supabaseAdmin
+      .from("project_task")
+      .insert(projectTaskRowsToInsert)
+      .select("project_task_id, main_task_id, sort_order")
+      .returns<ProjectTaskRow[]>();
+
+  if (
+    projectTaskBulkError ||
+    !insertedProjectTaskRows ||
+    insertedProjectTaskRows.length !== projectTaskRowsToInsert.length
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to create project_task rows.",
+        code: "PROJECT_TASK_CREATE_FAILED",
+        details:
+          projectTaskBulkError?.message ||
+          "Bulk project_task insert returned a partial result.",
+      },
+      { status: 500 },
+    );
+  }
+
+  // Map main_task_id → project_task_id. main_task_id is unique within a
+  // project (each main task appears at most once), so no collision risk.
+  const projectTaskIdByMainTaskId = new Map<string, string>();
+  for (const row of insertedProjectTaskRows) {
+    if (row.project_task_id && row.main_task_id) {
+      projectTaskIdByMainTaskId.set(row.main_task_id, row.project_task_id);
+    }
+  }
+
+  for (const plan of taskPlans) {
+    const projectTaskId = projectTaskIdByMainTaskId.get(
+      plan.matchedMainTask.main_task_id,
+    );
+    if (projectTaskId) {
+      insertedProjectTasksForCost.push({
+        project_task_id: projectTaskId,
+        main_task_id: plan.matchedMainTask.main_task_id,
+      });
+    }
+  }
+
+  // ── PHASE C: bulk INSERT all project_sub_task rows, get back IDs.
+  // Each row's project_task_id comes from the phase-B mapping above.
+  type SubTaskInsertContext = {
+    plan: SubTaskPlan;
+    mainTaskId: string;
+    projectTaskId: string;
+  };
+  const subTaskInsertContexts: SubTaskInsertContext[] = [];
+  const subTaskRowsToInsert: Array<{
+    project_task_id: string;
+    sub_task_id: string;
+    estimated_hours: number | null;
+    equipments_used: ReturnType<typeof normalizeEquipmentUsageForStorage>;
+    scheduled_start_datetime: string | null;
+    scheduled_end_datetime: string | null;
+    status: string;
+    sort_order: number;
+    notes: string | null;
+  }> = [];
+
+  for (const plan of taskPlans) {
+    const projectTaskId = projectTaskIdByMainTaskId.get(
+      plan.matchedMainTask.main_task_id,
+    );
+    if (!projectTaskId) continue;
+    for (const subPlan of plan.subTaskPlans) {
+      subTaskInsertContexts.push({
+        plan: subPlan,
+        mainTaskId: plan.matchedMainTask.main_task_id,
+        projectTaskId,
+      });
+      subTaskRowsToInsert.push({
+        project_task_id: projectTaskId,
+        sub_task_id: subPlan.matchedSubTask.sub_task_id,
+        estimated_hours: subPlan.estimatedHours,
+        equipments_used: subPlan.equipmentPayload,
+        scheduled_start_datetime: subPlan.subTaskScheduledStart,
+        scheduled_end_datetime: subPlan.subTaskScheduledEnd,
+        status: "pending",
+        sort_order: Number(subPlan.matchedSubTask.sort_order ?? 0),
+        notes: null,
+      });
+    }
+  }
+
+  let insertedSubTaskRows: InsertedProjectSubTaskCostRow[] = [];
+  if (subTaskRowsToInsert.length > 0) {
+    const { data, error } = await supabaseAdmin
+      .from("project_sub_task")
+      .insert(subTaskRowsToInsert)
+      .select(
+        "project_sub_task_id, project_task_id, sub_task_id, estimated_hours, scheduled_start_datetime, scheduled_end_datetime",
+      )
+      .returns<InsertedProjectSubTaskCostRow[]>();
+
+    if (
+      error ||
+      !data ||
+      data.length !== subTaskRowsToInsert.length
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Failed to create project_sub_task rows.",
+          code: "PROJECT_SUB_TASK_CREATE_FAILED",
+          details:
+            error?.message ||
+            "Bulk project_sub_task insert returned a partial result.",
+        },
+        { status: 500 },
+      );
+    }
+    insertedSubTaskRows = data;
+    insertedProjectSubTasksForCost.push(...data);
+  }
+
+  // ── PHASE D: build staff + material rows (parallel-safe — no
+  // cross-table dependency) and bulk INSERT both.
+  const staffRowsToInsert: Array<{
+    project_sub_task_id: string;
+    user_id: string;
+    role: string;
+    assignment_status: string;
+  }> = [];
+  const materialRowsToInsert: Array<{
+    project_task_id: string;
+    material_id: string;
+    estimated_quantity: number;
+    estimated_cost: number;
+  }> = [];
+
+  // Track inserted material names PER project_task (matches the legacy
+  // dedup behavior — same material shouldn't get a second row inside the
+  // same main task).
+  const insertedMaterialNamesByProjectTask = new Map<string, Set<string>>();
+
+  for (let i = 0; i < subTaskInsertContexts.length; i++) {
+    const ctx = subTaskInsertContexts[i];
+    const insertedRow = insertedSubTaskRows[i];
+    if (!insertedRow?.project_sub_task_id) continue;
+
+    for (const [employeeIdx, employee] of ctx.plan.assignedEmployees.entries()) {
+      staffRowsToInsert.push({
+        project_sub_task_id: insertedRow.project_sub_task_id,
+        user_id: employee.id,
+        role: employeeIdx === 0 ? "lead" : "assigned",
+        assignment_status: "assigned",
+      });
+    }
+
+    // estimateMaterialsForSubTask is now cache-backed (no DB on warm
+    // cache) so awaiting it in this loop is cheap. We still need it
+    // sequentially per subtask because each result depends only on its
+    // own (mainTaskId, subTaskId, areas).
+    const estimatedMaterials = await estimateMaterialsForSubTask({
+      mainTaskId: ctx.mainTaskId,
+      subTaskId: ctx.plan.matchedSubTask.sub_task_id,
+      areas,
+      materialCatalog: ctx.plan.materials.map((material) => ({
+        name: material.name,
+        unit: material.unit ?? "",
+        notes: material.notes ?? undefined,
+      })),
+    });
+
+    const namesSet =
+      insertedMaterialNamesByProjectTask.get(ctx.projectTaskId) ??
+      new Set<string>();
+
+    for (const material of ctx.plan.materials) {
+      const matchedMaterial = materialMap.get(norm(material.name));
+      if (!matchedMaterial?.material_id) continue;
+
+      const materialKey = norm(material.name);
+      if (namesSet.has(materialKey)) continue;
+      namesSet.add(materialKey);
+
+      const estimatedMaterial = findEstimatedMaterialByName(
+        estimatedMaterials,
+        material.name,
+      );
+      const estimatedQuantity = estimatedMaterial?.qty ?? 1;
+      const unitCost =
+        typeof matchedMaterial.unit_cost === "number"
+          ? matchedMaterial.unit_cost
+          : Number(matchedMaterial.unit_cost ?? 0) || 0;
+      const estimatedCost = estimatedQuantity * unitCost;
+
+      materialRowsToInsert.push({
+        project_task_id: ctx.projectTaskId,
+        material_id: matchedMaterial.material_id,
+        estimated_quantity: estimatedQuantity,
+        estimated_cost: estimatedCost,
+      });
+    }
+
+    insertedMaterialNamesByProjectTask.set(ctx.projectTaskId, namesSet);
+  }
+
+  // Run the two final bulk inserts in parallel — they touch separate
+  // tables and have no cross-dependency.
+  const [staffInsertResult, materialInsertResult] = await Promise.all([
+    staffRowsToInsert.length > 0
+      ? supabaseAdmin
+          .from("project_sub_task_staff")
+          .insert(staffRowsToInsert)
+          .select("project_sub_task_id, user_id")
+      : Promise.resolve({ data: [], error: null }),
+    materialRowsToInsert.length > 0
+      ? supabaseAdmin
+          .from("project_task_material")
+          .insert(materialRowsToInsert)
+          .select(
+            "project_task_material_id, project_task_id, material_id, estimated_quantity, estimated_cost",
+          )
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (staffInsertResult.error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to create project_sub_task_staff rows.",
+        code: "PROJECT_SUB_TASK_STAFF_CREATE_FAILED",
+        details: staffInsertResult.error.message,
+      },
+      { status: 500 },
+    );
+  }
+  if (materialInsertResult.error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to create project_task_material rows.",
+        code: "PROJECT_TASK_MATERIAL_CREATE_FAILED",
+        details: materialInsertResult.error.message,
+      },
+      { status: 500 },
+    );
+  }
+
+  for (const row of (staffInsertResult.data ?? []) as Array<{
+    project_sub_task_id: string;
+    user_id: string;
+  }>) {
+    insertedProjectSubTaskStaffForCost.push({
+      project_sub_task_id: row.project_sub_task_id,
+      user_id: row.user_id,
+    });
+  }
+  for (const row of (materialInsertResult.data ??
+    []) as InsertedProjectTaskMaterialCostRow[]) {
+    insertedProjectTaskMaterialsForCost.push(row);
   }
 
   // (Stock decrement intentionally NOT done at draft/creation time. The

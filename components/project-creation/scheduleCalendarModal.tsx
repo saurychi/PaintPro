@@ -178,7 +178,8 @@ export default function ScheduleCalendarModal({
           background: #fef9c3 !important;
         }
 
-        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day {
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day,
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-offday {
           background:
             repeating-linear-gradient(
               -45deg,
@@ -191,11 +192,13 @@ export default function ScheduleCalendarModal({
           color: #94a3b8;
         }
 
-        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day .fc-daygrid-day-frame {
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day .fc-daygrid-day-frame,
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-offday .fc-daygrid-day-frame {
           cursor: not-allowed;
         }
 
-        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day .fc-daygrid-day-number {
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-past-reference-day .fc-daygrid-day-number,
+        .schedule-calendar-modal .fc .fc-daygrid-day.fc-offday .fc-daygrid-day-number {
           color: #94a3b8;
         }
 
@@ -296,11 +299,16 @@ export default function ScheduleCalendarModal({
                     center: "title",
                     right: "next",
                   }}
-                  dayCellClassNames={(arg) =>
-                    toDateKey(arg.date) < todayKey
-                      ? ["fc-past-reference-day"]
-                      : []
-                  }
+                  dayCellClassNames={(arg) => {
+                    const classes: string[] = [];
+                    if (toDateKey(arg.date) < todayKey) {
+                      classes.push("fc-past-reference-day");
+                    }
+                    if (arg.date.getDay() === 0) {
+                      classes.push("fc-offday");
+                    }
+                    return classes;
+                  }}
                   events={[
                     ...availableDateEvents,
                     ...(selectedDate
@@ -318,6 +326,8 @@ export default function ScheduleCalendarModal({
                     const clickedDate = info.dateStr;
 
                     if (clickedDate < todayKey) return;
+
+                    if (info.date.getDay() === 0) return;
 
                     const dayEvents = availableDateEvents.filter(
                       (event) => event.date === clickedDate,

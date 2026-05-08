@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabaseAdmin"
 import { openRouterChat } from "@/lib/ai/openrouter"
 import type { ProjectDimensions } from "@/lib/planning/materialEstimator"
+import { getPlanningCatalog } from "@/lib/planning/catalogCache"
 
 type SubTaskOut = {
   title: string
@@ -231,42 +231,44 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing description." }, { status: 400 })
   }
 
-  const { data: mainTaskRows, error: mainTaskError } = await supabaseAdmin
-  .from("main_task")
-  .select("main_task_id, name, sort_order:default_sort_order, is_active")
-  .order("default_sort_order", { ascending: true })
-
-  if (mainTaskError) {
+  let planningCatalog;
+  try {
+    planningCatalog = await getPlanningCatalog();
+  } catch (e: any) {
     return NextResponse.json(
       {
-        error: "Failed to fetch main tasks.",
-        details: mainTaskError.message,
+        error: "Failed to load planning catalog.",
+        details: e?.message ?? String(e),
       },
-      { status: 500 }
+      { status: 500 },
     )
   }
 
-  const { data: subTaskRows, error: subTaskError } = await supabaseAdmin
-    .from("sub_task")
-    .select(
-      "sub_task_id, main_task_id, description, sort_order:default_sort_order, is_active",
-    )
-    .order("default_sort_order", { ascending: true })
-
-  if (subTaskError) {
-    return NextResponse.json(
-      {
-        error: "Failed to fetch sub tasks.",
-        details: subTaskError.message,
-      },
-      { status: 500 }
-    )
+  // Adapt the cached catalog into the existing buildCatalog input shape
+  // so downstream prompt-building stays untouched. The cache is what
+  // saves the round-trips; this is just shape glue.
+  const mainTaskRows: MainTaskRow[] = planningCatalog.mainTasksOrdered.map(
+    (t) => ({
+      main_task_id: t.id,
+      name: t.name,
+      sort_order: t.sortOrder,
+      is_active: true,
+    }),
+  )
+  const subTaskRows: SubTaskRow[] = []
+  for (const list of planningCatalog.subTasksByMainTaskId.values()) {
+    for (const sub of list) {
+      subTaskRows.push({
+        sub_task_id: sub.id,
+        main_task_id: sub.mainTaskId,
+        description: sub.description,
+        sort_order: sub.sortOrder,
+        is_active: true,
+      })
+    }
   }
 
-  const catalog = buildCatalog({
-    mainTasks: (mainTaskRows ?? []) as MainTaskRow[],
-    subTasks: (subTaskRows ?? []) as SubTaskRow[],
-  })
+  const catalog = buildCatalog({ mainTasks: mainTaskRows, subTasks: subTaskRows })
 
   if (!catalog.length) {
     return NextResponse.json(
