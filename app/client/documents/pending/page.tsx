@@ -68,7 +68,11 @@ function getDocumentType(status: string): DocumentType {
     return "quotation";
   }
 
-  if (status === "invoice_agreement_pending" || status === "payment_pending") {
+  if (
+    status === "invoice_agreement_pending" ||
+    status === "invoice_signed" ||
+    status === "payment_pending"
+  ) {
     return "invoice";
   }
 
@@ -117,7 +121,13 @@ export default function ClientPendingDocumentsPage() {
   const isPendingInvoiceAgreement = projectStatus === "invoice_agreement_pending";
   const isClientQuotationDone = projectStatus === "client_quotation_done";
   const isQuotationApproved = projectStatus === "ready_to_start";
-  const isInvoiceAccepted = projectStatus === "payment_pending";
+  // Client-signed invoice — kept distinct from payment_pending so the
+  // admin can hold the project at this state until they confirm
+  // "Proceed to Payment". The signed-PDF download is only offered to
+  // both client and admin while the project sits in invoice_signed.
+  const isInvoiceSigned = projectStatus === "invoice_signed";
+  const isInvoiceAccepted =
+    projectStatus === "invoice_signed" || projectStatus === "payment_pending";
 
   const documentLabel =
     documentType === "invoice"
@@ -372,6 +382,9 @@ export default function ClientPendingDocumentsPage() {
         description:
           "A message has been sent in the project conversation. They will review and update the project from their side.",
       });
+      // Auto-clear the "notified" confirmation after a short cooldown so the
+      // client can re-notify if the manager hasn't acted on it yet.
+      window.setTimeout(() => setPmNotified(false), 10_000);
     } catch (error) {
       toast.error("Couldn't notify project manager", {
         description:
@@ -426,15 +439,15 @@ export default function ClientPendingDocumentsPage() {
         prev
           ? {
               ...prev,
-              status: "payment_pending",
+              status: "invoice_signed",
             }
           : prev,
       );
 
       signatureRef.current.clear();
 
-      toast.success("Invoice accepted.", {
-        description: "The project is now pending payment.",
+      toast.success("Invoice signed.", {
+        description: "Your project manager will proceed to payment shortly.",
       });
     } catch (error) {
       const message =
@@ -544,44 +557,30 @@ export default function ClientPendingDocumentsPage() {
                 </span>
               )}
 
-              <button
-                type="button"
-                onClick={downloadDocumentPdf}
-                disabled={
-                  !projectId ||
-                  downloading ||
-                  loading ||
-                  documentType === "none"
-                }
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
-                {downloading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                Download PDF
-              </button>
-
-              {documentType === "quotation" &&
-              (justSignedQuotation || isClientQuotationDone) ? (
+              {/* Download PDF only appears once the invoice is signed
+                  (status: invoice_signed). Quotations follow their own
+                  rule and stay downloadable across their relevant
+                  statuses. */}
+              {documentType === "invoice" && !isInvoiceSigned ? null : (
                 <button
                   type="button"
-                  onClick={notifyProjectManager}
-                  disabled={!projectId || notifyingPM || pmNotified}
-                  className="inline-flex h-9 items-center gap-2 rounded-full bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {notifyingPM ? (
+                  onClick={downloadDocumentPdf}
+                  disabled={
+                    !projectId ||
+                    downloading ||
+                    loading ||
+                    documentType === "none"
+                  }
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  {downloading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : pmNotified ? (
-                    <Check className="h-3.5 w-3.5" />
                   ) : (
-                    <Send className="h-3.5 w-3.5" />
+                    <Download className="h-3.5 w-3.5" />
                   )}
-                  {pmNotified
-                    ? "Project Manager Notified"
-                    : "Notify Project Manager"}
+                  Download PDF
                 </button>
-              ) : null}
+              )}
+
             </div>
           </div>
         </div>
@@ -822,6 +821,35 @@ export default function ClientPendingDocumentsPage() {
                             {signatureErr}
                           </p>
                         ) : null}
+                      </div>
+                    ) : documentType === "quotation" &&
+                      (justSignedQuotation || isClientQuotationDone) ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-emerald-800">
+                          Quotation signed
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-emerald-700">
+                          Awaiting project manager review. Let them know your
+                          signature is in so they can advance the project.
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={notifyProjectManager}
+                          disabled={!projectId || notifyingPM || pmNotified}
+                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {notifyingPM ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : pmNotified ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Send className="h-3.5 w-3.5" />
+                          )}
+                          {pmNotified
+                            ? "Project Manager Notified"
+                            : "Notify Project Manager"}
+                        </button>
                       </div>
                     ) : isQuotationApproved ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
