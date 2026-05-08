@@ -7,6 +7,7 @@ import {
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
+  markAllConversationsAsRead,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
@@ -123,6 +124,16 @@ export default function AdminMessages() {
   const startHideDots = () => {
     dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
   }
+
+  // Bulk-clear unread state across every one of the user's conversations
+  // the moment the messages page mounts. This makes the sidebar badge drop
+  // to zero on arrival rather than only after the user clicks each thread.
+  // The per-conversation unread pills in the sidebar still work — they
+  // track the same `last_read_at` field, so they reset together.
+  useEffect(() => {
+    if (!currentUserId) return
+    void markAllConversationsAsRead(currentUserId)
+  }, [currentUserId])
 
   // 1. Get current user
   useEffect(() => {
@@ -312,14 +323,24 @@ export default function AdminMessages() {
 
   // Helper: apply a chatHistory update AND mirror it into the cache for the
   // active conversation so the cache doesn't go stale on send/edit/delete.
+  // Always dedupes by id at the end — realtime + polling + send-handler can
+  // each independently try to add the same message in tight races (worst
+  // case StrictMode double-invokes everything in dev), and React errors
+  // hard on duplicate keys.
   const applyChatUpdate = useCallback(
     (updater: (prev: Message[]) => Message[]) => {
       setChatHistory((prev) => {
         const next = updater(prev)
+        const seen = new Set<string>()
+        const deduped = next.filter((msg) => {
+          if (seen.has(msg.id)) return false
+          seen.add(msg.id)
+          return true
+        })
         if (activeChatId) {
-          setMessageCache((cache) => new Map(cache).set(activeChatId, next))
+          setMessageCache((cache) => new Map(cache).set(activeChatId, deduped))
         }
-        return next
+        return deduped
       })
     },
     [activeChatId],
@@ -342,10 +363,75 @@ export default function AdminMessages() {
     if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
-  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  // Polling fallback for the chat panel: every 5s, refetch the active
+  // conversation and merge any new messages in. Realtime alone isn't
+  // reliable because the browser Supabase client is subject to RLS — if
+  // the user can't SELECT a new message row directly the realtime push
+  // is filtered out and the chat panel goes stale even though the sidebar
+  // badge (which uses the server-side admin client) correctly shows the
+  // new count. Pauses when the tab isn't visible.
   useEffect(() => {
-    if (!currentUserId) return
+    if (!activeChatId) return
 
+    let cancelled = false
+
+    async function pollActiveChat() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      const result = await fetchMessages(activeChatId!)
+      if (cancelled) return
+      setChatHistory((prev) => {
+        // Build the dedup set incrementally so a fetch that itself contains
+        // duplicate rows (rare API race) can't slip a second copy through.
+        const seen = new Set(prev.map((m) => m.id))
+        const merged = [...prev]
+        for (const msg of result.messages) {
+          if (seen.has(msg.id)) continue
+          seen.add(msg.id)
+          merged.push(msg)
+        }
+        merged.sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+        return merged
+      })
+    }
+
+    const interval = window.setInterval(() => {
+      void pollActiveChat()
+    }, 5_000)
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void pollActiveChat()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [activeChatId])
+
+  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  //
+  // Subscription mounts ONCE per page life. Earlier we had `activeChatId`
+  // in the deps array, which forced an unsubscribe + resubscribe every
+  // time the user clicked a different conversation — and messages that
+  // arrived during that window were dropped, which is why new messages
+  // only appeared after navigating away and back. The handler now reads
+  // `activeChatId` and `currentUserId` through refs so we can keep the
+  // channel stable.
+  const activeChatIdRef = useRef(activeChatId)
+  const currentUserIdRef = useRef(currentUserId)
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId
+  }, [activeChatId])
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId
+  }, [currentUserId])
+
+  useEffect(() => {
     const channel = supabase
       .channel(`global-chat-listener`)
       .on(
@@ -353,12 +439,24 @@ export default function AdminMessages() {
         { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
         (payload) => {
           const newMessage = payload.new as Message
+          const activeChat = activeChatIdRef.current
+          const me = currentUserIdRef.current
 
-          if (newMessage.conversation_id === activeChatId) {
+          // Skip the realtime echo for our own outgoing messages —
+          // handleSendMessage already updated chatHistory + the
+          // sidebar optimistically, so processing it again would
+          // re-mark the conversation as unread (line further down)
+          // even though we're the one who just sent it.
+          if (me && newMessage.sender_id === me) return
+
+          if (newMessage.conversation_id === activeChat) {
             // It's the chat we are currently looking at
-            if (newMessage.sender_id !== currentUserId) {
-              setChatHistory((prev) => [...prev, newMessage])
-              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
+            if (newMessage.sender_id !== me) {
+              setChatHistory((prev) => {
+                if (prev.some((m) => m.id === newMessage.id)) return prev
+                return [...prev, newMessage]
+              })
+              if (me) markConversationAsRead(activeChat, me) // We read it instantly
             }
           }
 
@@ -384,7 +482,7 @@ export default function AdminMessages() {
               c.id === newMessage.conversation_id
                 ? {
                     ...c,
-                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
+                    unread: c.id !== activeChat, // Red dot only if we aren't looking at it
                     lastMessage: newMessage.content,
                     lastActivity: new Date(newMessage.created_at).getTime()
                   }
@@ -393,15 +491,15 @@ export default function AdminMessages() {
             return updated.sort((a, b) => b.lastActivity - a.lastActivity)
           })
 
-          if (!conversationKnown && currentUserId) {
-            void loadConversations(currentUserId)
+          if (!conversationKnown && me) {
+            void loadConversations(me)
           }
         }
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeChatId, currentUserId])
+  }, [loadConversations])
 
   // 8. Handle Sending a Message
   const handleSendMessage = async () => {

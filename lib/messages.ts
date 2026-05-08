@@ -182,6 +182,18 @@ export async function deleteMessage(messageId: string) {
   if (error) throw error
 }
 
+// Custom DOM event the sidebar badge listens for so it can refetch the
+// unread count the instant a conversation is marked read, instead of
+// waiting up to ~15s for the next polling tick.
+const MESSAGES_READ_EVENT = "paintpro:messages-read"
+
+function dispatchMessagesReadEvent() {
+  if (typeof window === "undefined") return
+  try {
+    window.dispatchEvent(new CustomEvent(MESSAGES_READ_EVENT))
+  } catch {}
+}
+
 export async function markConversationAsRead(conversationId: string, userId: string) {
   const { error } = await supabase
     .from('conversation_participants')
@@ -190,4 +202,18 @@ export async function markConversationAsRead(conversationId: string, userId: str
     .eq('user_id', userId)
 
   if (error) console.error("Error marking as read:", error)
+  else dispatchMessagesReadEvent()
+}
+
+// Bulk-clears unread state across every conversation the user participates
+// in. Called when the messages page mounts so the badge drops to zero on
+// arrival, instead of only after the user clicks through each thread.
+export async function markAllConversationsAsRead(userId: string) {
+  const { error } = await supabase
+    .from('conversation_participants')
+    .update({ last_read_at: new Date().toISOString() })
+    .eq('user_id', userId)
+
+  if (error) console.error("Error marking all as read:", error)
+  else dispatchMessagesReadEvent()
 }

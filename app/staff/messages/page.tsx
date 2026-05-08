@@ -7,6 +7,7 @@ import {
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
+  markAllConversationsAsRead,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
@@ -60,7 +61,7 @@ type ConversationPayload = {
   last_read_at?: string | null
 }
 
-export default function AdminMessages() {
+export default function StaffMessages() {
   // UI State
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -71,6 +72,7 @@ export default function AdminMessages() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [chatHistory, setChatHistory] = useState<Message[]>([])
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false)
 
   // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
@@ -93,8 +95,28 @@ export default function AdminMessages() {
 
   // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Per-conversation message cache so repeat visits don't refetch and the
+  // sidebar prefetch-on-hover has somewhere to drop its results.
+  const [messageCache, setMessageCache] = useState<Map<string, Message[]>>(new Map())
+  // Per-conversation "has older messages still on the server" flag so the
+  // scroll-to-top loader stops asking once we've reached the beginning.
+  const [hasMoreMap, setHasMoreMap] = useState<Map<string, boolean>>(new Map())
+  // Tracks an in-flight older-messages fetch to prevent duplicate requests
+  // when the user keeps scrolling at the top.
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  // When prepending older messages we want to keep the visually-anchored
+  // message in place. Capture the scroll height before the prepend so we can
+  // restore the visible position after.
+  const prependScrollAnchor = useRef<{ prevHeight: number; prevTop: number } | null>(null)
+  // Tracks in-flight prefetches per conversation so hovering twice doesn't
+  // fire two requests.
+  const prefetchingRef = useRef<Set<string>>(new Set())
+
+  const PAGE_SIZE = 7
 
   const showDots = (msgId: string) => {
     if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
@@ -103,6 +125,16 @@ export default function AdminMessages() {
   const startHideDots = () => {
     dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
   }
+
+  // Bulk-clear unread state across every one of the user's conversations
+  // the moment the messages page mounts. This makes the sidebar badge drop
+  // to zero on arrival rather than only after the user clicks each thread.
+  // The per-conversation unread pills in the sidebar still work — they
+  // track the same `last_read_at` field, so they reset together.
+  useEffect(() => {
+    if (!currentUserId) return
+    void markAllConversationsAsRead(currentUserId)
+  }, [currentUserId])
 
   // 1. Get current user
   useEffect(() => {
@@ -119,6 +151,9 @@ export default function AdminMessages() {
   }
 
   useEffect(() => {
+    // Don't auto-scroll to the bottom when the change came from prepending
+    // older messages — the prepend handler restores scroll position itself.
+    if (prependScrollAnchor.current) return
     scrollToBottom()
   }, [chatHistory])
 
@@ -139,26 +174,32 @@ export default function AdminMessages() {
         profile_image_url: cp.users?.profile_image_url || null,
         lastMessage: lastMsg?.content || "Say hello!",
         unread: isUnread,
-        lastActivity: lastMsgTime // <-- NEW: Store time for sorting
+        lastActivity: lastMsgTime
       }
     })
 
-    // <-- NEW: Sort initial load (highest timestamp first)
+    // Sort by latest activity, newest first
     mappedConvos.sort((a, b) => b.lastActivity - a.lastActivity)
 
     setConversations(mappedConvos)
 
     if (selectChatId) {
       setActiveChatId(selectChatId)
+      setMobileView("chat")
     } else if (mappedConvos.length > 0) {
       setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
     }
     setIsLoading(false)
   }, [])
 
-  // 4. Initial Load
+  // 4. Initial Load — pick up pendingConvId set by other pages (e.g., a
+  // "Message" CTA elsewhere in the app stashes the conversation id in
+  // localStorage so the messages page opens directly to it).
   useEffect(() => {
-    if (currentUserId) loadConversations(currentUserId)
+    if (!currentUserId) return
+    const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined
+    if (pendingConvId) localStorage.removeItem("pendingConvId")
+    loadConversations(currentUserId, pendingConvId)
   }, [currentUserId, loadConversations])
 
   // 5. When user CLICKS a chat, Mark as Read in DB
@@ -171,26 +212,229 @@ export default function AdminMessages() {
     }
   }, [activeChatId, currentUserId])
 
-  // 6. Fetch Chat History
+  // 6. Fetch Chat History (with in-memory cache + pagination)
   useEffect(() => {
     if (!activeChatId) return
 
-    async function loadMessages() {
-      const result = await fetchMessages(activeChatId!)
-      setChatHistory(result.messages)
+    let cancelled = false
+
+    // If we already have this conversation cached, render it instantly —
+    // no spinner, no flicker. The realtime listener keeps the cache fresh
+    // for any new messages that arrive while the conversation is open.
+    const cached = messageCache.get(activeChatId)
+    if (cached) {
+      setChatHistory(cached)
+      setIsLoadingMessages(false)
+      return () => {
+        cancelled = true
+      }
     }
-    loadMessages()
-  }, [activeChatId])
+
+    // First time opening this conversation in this session — clear stale
+    // messages from the previous one and show the loader.
+    setChatHistory([])
+    setIsLoadingMessages(true)
+
+    ;(async () => {
+      const result = await fetchMessages(activeChatId, { limit: PAGE_SIZE })
+      if (cancelled) return
+      setChatHistory(result.messages)
+      setMessageCache((prev) => new Map(prev).set(activeChatId, result.messages))
+      setHasMoreMap((prev) => new Map(prev).set(activeChatId, result.hasMore))
+      setIsLoadingMessages(false)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeChatId, messageCache])
+
+  // Prefetch the most recent page for a conversation in the background. Wired
+  // to onMouseEnter on each sidebar row so by the time the user clicks, the
+  // messages are already cached and the chat opens with no spinner.
+  const prefetchConversation = useCallback((conversationId: string) => {
+    if (messageCache.has(conversationId)) return
+    if (prefetchingRef.current.has(conversationId)) return
+    prefetchingRef.current.add(conversationId)
+    void (async () => {
+      try {
+        const result = await fetchMessages(conversationId, { limit: PAGE_SIZE })
+        // Skip overwriting if the user got there first and triggered the
+        // primary fetch — its result is fresher.
+        setMessageCache((prev) => {
+          if (prev.has(conversationId)) return prev
+          return new Map(prev).set(conversationId, result.messages)
+        })
+        setHasMoreMap((prev) => {
+          if (prev.has(conversationId)) return prev
+          return new Map(prev).set(conversationId, result.hasMore)
+        })
+      } finally {
+        prefetchingRef.current.delete(conversationId)
+      }
+    })()
+  }, [messageCache])
+
+  // Load the next page of older messages, prepending them while preserving
+  // the user's visible scroll position.
+  const loadOlderMessages = useCallback(async () => {
+    if (!activeChatId) return
+    if (isLoadingOlder) return
+    if (chatHistory.length === 0) return
+    if (hasMoreMap.get(activeChatId) === false) return
+
+    setIsLoadingOlder(true)
+
+    // Capture scroll metrics so we can restore the user's position after
+    // the new content is prepended.
+    const scrollEl = messagesScrollRef.current
+    if (scrollEl) {
+      prependScrollAnchor.current = {
+        prevHeight: scrollEl.scrollHeight,
+        prevTop: scrollEl.scrollTop,
+      }
+    }
+
+    const oldest = chatHistory[0]
+    const result = await fetchMessages(activeChatId, {
+      limit: PAGE_SIZE,
+      before: oldest.created_at,
+    })
+
+    setChatHistory((prev) => {
+      const merged = [...result.messages, ...prev]
+      setMessageCache((cache) => new Map(cache).set(activeChatId, merged))
+      return merged
+    })
+    setHasMoreMap((prev) => new Map(prev).set(activeChatId, result.hasMore))
+    setIsLoadingOlder(false)
+  }, [activeChatId, chatHistory, hasMoreMap, isLoadingOlder])
+
+  // Trigger loading the next older page when the user scrolls near the top.
+  useEffect(() => {
+    const scrollEl = messagesScrollRef.current
+    if (!scrollEl) return
+
+    const onScroll = () => {
+      if (scrollEl.scrollTop <= 40) {
+        void loadOlderMessages()
+      }
+    }
+    scrollEl.addEventListener("scroll", onScroll)
+    return () => scrollEl.removeEventListener("scroll", onScroll)
+  }, [loadOlderMessages])
+
+  // Helper: apply a chatHistory update AND mirror it into the cache for the
+  // active conversation so the cache doesn't go stale on send/edit/delete.
+  // Always dedupes by id at the end — realtime + polling + send-handler can
+  // each independently try to add the same message in tight races (worst
+  // case StrictMode double-invokes everything in dev), and React errors
+  // hard on duplicate keys.
+  const applyChatUpdate = useCallback(
+    (updater: (prev: Message[]) => Message[]) => {
+      setChatHistory((prev) => {
+        const next = updater(prev)
+        const seen = new Set<string>()
+        const deduped = next.filter((msg) => {
+          if (seen.has(msg.id)) return false
+          seen.add(msg.id)
+          return true
+        })
+        if (activeChatId) {
+          setMessageCache((cache) => new Map(cache).set(activeChatId, deduped))
+        }
+        return deduped
+      })
+    },
+    [activeChatId],
+  )
+
+  // After older messages are prepended, restore scroll so the message the
+  // user was looking at stays put instead of jumping to the top.
+  useEffect(() => {
+    const anchor = prependScrollAnchor.current
+    if (!anchor) return
+    const scrollEl = messagesScrollRef.current
+    if (!scrollEl) return
+    const heightDelta = scrollEl.scrollHeight - anchor.prevHeight
+    scrollEl.scrollTop = anchor.prevTop + heightDelta
+    prependScrollAnchor.current = null
+  }, [chatHistory])
 
   // Focus input whenever a conversation is opened
   useEffect(() => {
     if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
-  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  // Polling fallback for the chat panel: every 5s, refetch the active
+  // conversation and merge any new messages in. Realtime alone isn't
+  // reliable because the browser Supabase client is subject to RLS — if
+  // the user can't SELECT a new message row directly the realtime push
+  // is filtered out and the chat panel goes stale even though the sidebar
+  // badge (which uses the server-side admin client) correctly shows the
+  // new count. Pauses when the tab isn't visible.
   useEffect(() => {
-    if (!currentUserId) return
+    if (!activeChatId) return
 
+    let cancelled = false
+
+    async function pollActiveChat() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      const result = await fetchMessages(activeChatId!)
+      if (cancelled) return
+      setChatHistory((prev) => {
+        // Build the dedup set incrementally so a fetch that itself contains
+        // duplicate rows (rare API race) can't slip a second copy through.
+        const seen = new Set(prev.map((m) => m.id))
+        const merged = [...prev]
+        for (const msg of result.messages) {
+          if (seen.has(msg.id)) continue
+          seen.add(msg.id)
+          merged.push(msg)
+        }
+        merged.sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+        return merged
+      })
+    }
+
+    const interval = window.setInterval(() => {
+      void pollActiveChat()
+    }, 5_000)
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void pollActiveChat()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [activeChatId])
+
+  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  //
+  // Subscription mounts ONCE per page life. Earlier we had `activeChatId`
+  // in the deps array, which forced an unsubscribe + resubscribe every
+  // time the user clicked a different conversation — and messages that
+  // arrived during that window were dropped, which is why new messages
+  // only appeared after navigating away and back. The handler now reads
+  // `activeChatId` and `currentUserId` through refs so we can keep the
+  // channel stable.
+  const activeChatIdRef = useRef(activeChatId)
+  const currentUserIdRef = useRef(currentUserId)
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId
+  }, [activeChatId])
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId
+  }, [currentUserId])
+
+  useEffect(() => {
     const channel = supabase
       .channel(`global-chat-listener`)
       .on(
@@ -198,36 +442,66 @@ export default function AdminMessages() {
         { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
         (payload) => {
           const newMessage = payload.new as Message
+          const activeChat = activeChatIdRef.current
+          const me = currentUserIdRef.current
 
-          if (newMessage.conversation_id === activeChatId) {
+          // Skip the realtime echo for our own outgoing messages —
+          // handleSendMessage already updated state optimistically, so
+          // processing it again would re-mark the conversation as
+          // unread further down even though we sent it ourselves.
+          if (me && newMessage.sender_id === me) return
+
+          if (newMessage.conversation_id === activeChat) {
             // It's the chat we are currently looking at
-            if (newMessage.sender_id !== currentUserId) {
-              setChatHistory((prev) => [...prev, newMessage])
-              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
+            if (newMessage.sender_id !== me) {
+              setChatHistory((prev) => {
+                if (prev.some((m) => m.id === newMessage.id)) return prev
+                return [...prev, newMessage]
+              })
+              if (me) markConversationAsRead(activeChat, me) // We read it instantly
             }
           }
 
-          // <-- NEW: Update the sidebar for ALL incoming messages and bump to top
+          // Keep the cache in sync so a later switch back to this conversation
+          // shows the freshly-arrived message instead of a stale snapshot.
+          setMessageCache((prev) => {
+            const cached = prev.get(newMessage.conversation_id)
+            if (!cached) return prev
+            if (cached.some((m) => m.id === newMessage.id)) return prev
+            return new Map(prev).set(newMessage.conversation_id, [...cached, newMessage])
+          })
+
+          // Update the sidebar for ALL incoming messages and bump to top.
+          // If the message is for a conversation NOT currently in the sidebar
+          // (e.g., a brand-new project conversation just created by a server
+          // route like /api/planning/notifyQuotationClient), refetch the
+          // conversations list so it appears instead of being silently dropped.
+          let conversationKnown = false
           setConversations(prev => {
+            conversationKnown = prev.some(c => c.id === newMessage.conversation_id)
+            if (!conversationKnown) return prev
             const updated = prev.map(c =>
               c.id === newMessage.conversation_id
                 ? {
                     ...c,
-                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
+                    unread: c.id !== activeChat, // Red dot only if we aren't looking at it
                     lastMessage: newMessage.content,
                     lastActivity: new Date(newMessage.created_at).getTime()
                   }
                 : c
             )
-            // Re-sort the array so this chat jumps to the top
             return updated.sort((a, b) => b.lastActivity - a.lastActivity)
           })
+
+          if (!conversationKnown && me) {
+            void loadConversations(me)
+          }
         }
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeChatId, currentUserId])
+  }, [loadConversations])
 
   // 8. Handle Sending a Message
   const handleSendMessage = async () => {
@@ -235,9 +509,9 @@ export default function AdminMessages() {
     setIsSending(true)
     try {
       const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
-      setChatHistory((prev) => [...prev, sentMsg])
+      applyChatUpdate((prev) => [...prev, sentMsg])
 
-      // <-- NEW: Update sidebar instantly for ourselves and bump to top
+      // Update sidebar instantly for ourselves and bump to top
       setConversations(prev => {
         const updated = prev.map(c =>
           c.id === activeChatId
@@ -252,6 +526,7 @@ export default function AdminMessages() {
       console.error("Error sending message:", error)
     } finally {
       setIsSending(false)
+      // Focus after isSending clears so the input is no longer disabled
       setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
@@ -266,7 +541,7 @@ export default function AdminMessages() {
     try {
       const res = await fetch(`/api/messages/manage?messageId=${messageId}`, { method: "DELETE" })
       if (!res.ok) throw new Error("Failed to delete")
-      setChatHistory((prev) => prev.filter((m) => m.id !== messageId))
+      applyChatUpdate((prev) => prev.filter((m) => m.id !== messageId))
     } catch (error) {
       console.error("Error deleting message:", error)
     }
@@ -282,7 +557,7 @@ export default function AdminMessages() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || "Failed to update")
-      setChatHistory((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
+      applyChatUpdate((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
       setEditingId(null)
       startHideDots()
     } catch (error) {
@@ -390,17 +665,17 @@ export default function AdminMessages() {
         subtitle="Send and receive messages with your manager and teammates in real time."
         bodyClassName="overflow-hidden"
       >
-        <div className="flex h-full flex-col gap-3 overflow-hidden md:flex-row md:gap-6">
-          <aside className="flex w-full flex-1 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm md:flex-none md:w-[260px] md:min-w-[260px] lg:w-1/4 xl:w-1/5 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex h-full gap-4 sm:gap-6 overflow-hidden">
+          <aside className="w-full lg:w-72 xl:w-80 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col dark:border-slate-700 dark:bg-slate-900">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
               <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
             </div>
-            <div className="flex flex-1 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-300 dark:text-slate-500" />
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="h-5 w-5 text-gray-300 animate-spin dark:text-slate-500" />
             </div>
           </aside>
-          <div className="hidden min-w-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm md:flex">
-            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+          <div className="hidden flex-1 rounded-lg border border-gray-200 bg-white shadow-sm items-center justify-center min-w-0 lg:flex">
+            <Loader2 className="h-5 w-5 text-gray-300 animate-spin" />
           </div>
         </div>
       </StaffPageShell>
@@ -413,224 +688,241 @@ export default function AdminMessages() {
       subtitle="Send and receive messages with your manager and teammates in real time."
       bodyClassName="overflow-hidden"
     >
-      <div className="flex h-full flex-col gap-3 overflow-hidden md:flex-row md:gap-6">
+      <div className="flex h-full gap-4 sm:gap-6 overflow-hidden">
 
-          {/* Conversation Sidebar */}
-          <aside
-            className={[
-              "w-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900",
-              "md:flex md:flex-none md:w-[260px] md:min-w-[260px] lg:w-1/4 xl:w-1/5",
-              activeChatId ? "hidden md:flex" : "flex flex-1",
-            ].join(" ")}>
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
-                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">Recent message threads</p>
+        {/* Conversation Sidebar */}
+        <aside className={[
+          "rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col dark:border-slate-700 dark:bg-slate-900",
+          "w-full lg:w-72 xl:w-80 lg:flex",
+          mobileView === "list" ? "flex" : "hidden lg:flex",
+        ].join(" ")}>
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
+              <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">Recent message threads</p>
+            </div>
+            <button
+              onClick={handleOpenNewChat}
+              aria-label="Start new message"
+              title="Start new message"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00c065] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-[#00c065]/50 dark:hover:bg-[#00c065]/10 dark:hover:text-[#00c065]"
+            >
+              <UserPlus className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
+            {conversations.map((chat) => {
+              const isActive = activeChatId === chat.id
+
+              return (
+                <button
+                  key={chat.id}
+                  onClick={() => { setActiveChatId(chat.id); setMobileView("chat") }}
+                  onMouseEnter={() => prefetchConversation(chat.id)}
+                  onFocus={() => prefetchConversation(chat.id)}
+                  className={[
+                    "group relative w-full text-left border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 dark:border-slate-800",
+                    isActive
+                      ? "bg-emerald-50/70 dark:bg-[#00c065]/10"
+                      : "bg-white hover:bg-gray-50 dark:bg-slate-900 dark:hover:bg-slate-800/70",
+                  ].join(" ")}
+                >
+                  <span
+                    className={[
+                      "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-opacity",
+                      isActive ? "opacity-100 bg-[#00c065]" : "opacity-0 bg-transparent",
+                    ].join(" ")}
+                  />
+                  <div className="flex items-start gap-3 pl-1">
+                    <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      {chat.profile_image_url ? (
+                        <img src={chat.profile_image_url} alt={chat.name} className="h-full w-full rounded-full object-cover" />
+                      ) : (
+                        <span>{chat.name.slice(0, 2).toUpperCase()}</span>
+                      )}
+                      {chat.unread ? <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900" /> : null}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{chat.name}</p>
+                      </div>
+                      <p className={`mt-1 line-clamp-1 text-xs leading-5 ${chat.unread ? 'font-semibold text-gray-900 dark:text-slate-100' : 'text-gray-500 dark:text-slate-400'}`}>
+                        {chat.lastMessage}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+            {conversations.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-slate-500">No active chats</div>
+            )}
+          </div>
+        </aside>
+
+        {/* Chat Area */}
+        {activeChat ? (
+          <section className={[
+            "flex-1 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col min-w-0",
+            mobileView === "chat" ? "flex" : "hidden lg:flex",
+          ].join(" ")}>
+            {/* Header */}
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  onClick={() => setMobileView("list")}
+                  className="lg:hidden mr-1 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+                  aria-label="Back to conversations"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+                <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
+                  <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
+                  <span className="text-xs font-semibold text-gray-700">
+                    {activeChat.name.slice(0, 1).toUpperCase()}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{activeChat.name}</p>
+                  <p className="text-xs text-gray-600 capitalize">{activeChat.role}</p>
+                </div>
               </div>
-              <button
-                onClick={handleOpenNewChat}
-                aria-label="Start new message"
-                title="Start new message"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00c065] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-[#00c065]/50 dark:hover:bg-[#00c065]/10 dark:hover:text-[#00c065]"
-              >
-                <UserPlus className="h-4 w-4" />
-              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
-              {conversations.map((chat) => {
-                const isActive = activeChatId === chat.id
+            {/* Messages List */}
+            <div ref={messagesScrollRef} className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
+              {isLoadingMessages ? (
+                <div className="m-auto flex items-center gap-2 text-gray-500 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading messages...
+                </div>
+              ) : chatHistory.length === 0 ? (
+                <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
+              ) : null}
+              {isLoadingOlder ? (
+                <div className="flex justify-center py-2 text-xs text-gray-500">
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Loading older messages...
+                </div>
+              ) : null}
+              {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
+              {chatHistory.map((msg) => {
+                const isMe = msg.sender_id === currentUserId
+                const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                const isEditing = editingId === msg.id
+                const menuOpen = openMenuId === msg.id
+                const dotsVisible = visibleDotsId === msg.id || menuOpen
 
                 return (
-                  <button
-                    key={chat.id}
-                    onClick={() => setActiveChatId(chat.id)}
-                    className={[
-                      "group relative w-full text-left border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 dark:border-slate-800",
-                      isActive
-                        ? "bg-emerald-50/70 dark:bg-[#00c065]/10"
-                        : "bg-white hover:bg-gray-50 dark:bg-slate-900 dark:hover:bg-slate-800/70",
-                    ].join(" ")}
+                  <div
+                    key={msg.id}
+                    className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}
+                    onMouseEnter={() => isMe && showDots(msg.id)}
+                    onMouseLeave={() => isMe && startHideDots()}
                   >
-                    <span
-                      className={[
-                        "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-opacity",
-                        isActive ? "opacity-100 bg-[#00c065]" : "opacity-0 bg-transparent",
-                      ].join(" ")}
-                    />
-                    <div className="flex items-start gap-3 pl-1">
-                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                        {chat.profile_image_url ? (
-                          <img src={chat.profile_image_url} alt={chat.name} className="h-full w-full rounded-full object-cover" />
-                        ) : (
-                          <span>{chat.name.slice(0, 2).toUpperCase()}</span>
-                        )}
-                        {chat.unread ? <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900" /> : null}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{chat.name}</p>
-                        </div>
-                        <p className={`mt-1 line-clamp-1 text-xs leading-5 ${chat.unread ? 'font-semibold text-gray-900 dark:text-slate-100' : 'text-gray-500 dark:text-slate-400'}`}>
-                          {chat.lastMessage}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                )
-              })}
-              {conversations.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-slate-500">No active chats</div>
-              )}
-            </div>
-          </aside>
-
-          {/* Chat Area */}
-          {activeChat ? (
-            <section className="flex flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
-              {/* Header */}
-              <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => setActiveChatId(null)}
-                    aria-label="Back to conversations"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 md:hidden"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </button>
-                  <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
-                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-gray-800" style={{ backgroundColor: ACCENT }} />
-                    <span className="text-xs font-semibold text-gray-700">
-                      {activeChat.name.slice(0, 1).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{activeChat.name}</p>
-                    <p className="text-xs text-gray-600 capitalize">{activeChat.role}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Messages List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
-                {chatHistory.length === 0 && (
-                  <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
-                )}
-                {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
-                {chatHistory.map((msg) => {
-                  const isMe = msg.sender_id === currentUserId
-                  const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                  const isEditing = editingId === msg.id
-                  const menuOpen = openMenuId === msg.id
-                  const dotsVisible = visibleDotsId === msg.id || menuOpen
-
-                  return (
-                    <div
-                      key={msg.id}
-                      className={isMe ? "flex w-full flex-col items-end" : "flex w-full flex-col items-start"}
-                      onMouseEnter={() => isMe && showDots(msg.id)}
-                      onMouseLeave={() => isMe && startHideDots()}
-                    >
-                      <div className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}>
-                        {isMe && (
-                          <div className="relative shrink-0 mb-0.5">
+                    {/* Dots button — left of bubble for sent messages */}
+                    {isMe && (
+                      <div className="relative shrink-0 mb-0.5">
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
+                          className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                        {menuOpen && (
+                          <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
                             <button
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
-                              className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                              onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
+                              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
                             >
-                              <MoreHorizontal className="h-3.5 w-3.5" />
+                              Edit
                             </button>
-                            {menuOpen && (
-                              <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
-                                <button
-                                  onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
-                                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleDelete(msg.id)}
-                                  className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {isEditing ? (
-                          <div className="max-w-[72%] flex flex-col gap-1">
-                            <input
-                              autoFocus
-                              value={editText}
-                              onChange={(e) => setEditText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveEdit(msg.id)
-                                if (e.key === 'Escape') setEditingId(null)
-                              }}
-                              className="px-3 py-2 text-sm rounded-lg border-2 outline-none"
-                              style={{ borderColor: ACCENT }}
-                            />
-                            <div className="flex gap-2 justify-end">
-                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveEdit(msg.id)} className="text-xs font-semibold" style={{ color: ACCENT }}>Save</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            className={[
-                              "max-w-[72%] px-4 py-2.5 text-sm shadow-sm",
-                              isMe ? "rounded-lg text-white" : "rounded-lg border border-gray-200 bg-gray-100 text-gray-900",
-                            ].join(" ")}
-                            style={isMe ? { backgroundColor: ACCENT } : undefined}
-                          >
-                            {msg.content}
+                            <button
+                              onClick={() => handleDelete(msg.id)}
+                              className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                            >
+                              Delete
+                            </button>
                           </div>
                         )}
                       </div>
+                    )}
+
+                    {/* Bubble + timestamp */}
+                    <div className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
+                      {isEditing ? (
+                        <div className="w-full flex flex-col gap-1">
+                          <input
+                            autoFocus
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveEdit(msg.id)
+                              if (e.key === 'Escape') setEditingId(null)
+                            }}
+                            className="px-3 py-2 text-sm rounded-lg border-2 outline-none"
+                            style={{ borderColor: ACCENT }}
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                            <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveEdit(msg.id)} className="text-xs font-semibold" style={{ color: ACCENT }}>Save</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className={[
+                            "px-4 py-2.5 text-sm shadow-sm rounded-lg",
+                            isMe ? "text-white" : "border border-gray-200 bg-white text-gray-900",
+                          ].join(" ")}
+                          style={isMe ? { backgroundColor: ACCENT } : undefined}
+                        >
+                          {msg.content}
+                        </div>
+                      )}
                       <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
                     </div>
-                  )
-                })}
-                {/* Auto-scroll target */}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Input Area */}
-              <div className="p-4 border-t border-gray-200 shrink-0">
-                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm">
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    placeholder="Enter your message..."
-                    className="flex-1 outline-none bg-transparent text-sm text-gray-700 placeholder:text-gray-400"
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                  />
-                  <button
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={handleSendMessage}
-                    disabled={isSending || !inputMessage.trim()}
-                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
-                    style={{ backgroundColor: ACCENT }}
-                  >
-                    {isSending ? "..." : "Send"}
-                  </button>
-                </div>
-              </div>
-            </section>
-          ) : (
-            <div className="hidden flex-1 flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0 md:flex">
-              <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
-              <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
-              <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
+                  </div>
+                )
+              })}
+              {/* Auto-scroll target */}
+              <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
+
+            {/* Input Area */}
+            <div className="p-4 border-t border-gray-200 shrink-0">
+              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Enter your message..."
+                  className="flex-1 outline-none bg-white text-sm text-gray-700 placeholder:text-gray-400"
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                />
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleSendMessage}
+                  disabled={isSending || !inputMessage.trim()}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
+                  style={{ backgroundColor: ACCENT }}
+                >
+                  {isSending ? "..." : "Send"}
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <div className="hidden lg:flex flex-1 flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
+            <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
+            <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
+            <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
+          </div>
+        )}
+      </div>
 
       {/* --- NEW CHAT MODAL --- */}
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
