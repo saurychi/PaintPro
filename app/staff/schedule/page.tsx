@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import type {
   EventClickArg,
@@ -22,6 +23,10 @@ import { toast } from "sonner";
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjectNow } from "@/lib/time/useProjectNow";
+import {
+  buildTimelineSegmentEvents,
+  timelineSegmentClassName,
+} from "@/lib/schedule/timelineSegments";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -51,6 +56,14 @@ type StaffScheduleResponse = {
   projects?: ScheduleProject[];
   currentProject?: ScheduleProject | null;
   unavailability?: StaffUnavailability[];
+  subtasks?: Array<{
+    id: string;
+    projectId: string;
+    title: string;
+    scheduledStartDatetime: string | null;
+    scheduledEndDatetime: string | null;
+    status: string;
+  }>;
   error?: string;
 };
 
@@ -82,19 +95,38 @@ type CalendarUnavailableItem = {
   date: string;
   label: string;
   source: "blocked" | "holiday" | "personal-approved";
-  notes: string | null;
 };
 
 const BORDER = "border border-gray-200";
 
 const STATUS_COLORS: Record<
   EventStatus,
-  { bg: string; border: string; text: string }
+  { bg: string; border: string; text: string; tint: string }
 > = {
-  current: { bg: "#00c065", border: "#00a054", text: "#ffffff" },
-  behind: { bg: "#ef4444", border: "#dc2626", text: "#ffffff" },
-  done: { bg: "#9ca3af", border: "#6b7280", text: "#ffffff" },
-  pending: { bg: "#facc15", border: "#eab308", text: "#1f2937" },
+  current: {
+    bg: "#00c065",
+    border: "#00a054",
+    text: "#ffffff",
+    tint: "rgba(0, 192, 101, 0.10)",
+  },
+  behind: {
+    bg: "#ef4444",
+    border: "#dc2626",
+    text: "#ffffff",
+    tint: "rgba(239, 68, 68, 0.10)",
+  },
+  done: {
+    bg: "#9ca3af",
+    border: "#6b7280",
+    text: "#ffffff",
+    tint: "rgba(156, 163, 175, 0.10)",
+  },
+  pending: {
+    bg: "#facc15",
+    border: "#eab308",
+    text: "#1f2937",
+    tint: "rgba(250, 204, 21, 0.18)",
+  },
 };
 
 function addUtcDays(yyyymmdd: string, days: number) {
@@ -148,6 +180,59 @@ function toFCEventSegments(project: ScheduleProject): FCEvent[] {
 }
 
 function renderEventContent(info: EventContentArg) {
+  // Subtask events (timeline mode) carry the parent project's code so we
+  // can stack the subtask name on top with the project code as a small
+  // secondary line. That makes blocks readable even when the FC column is
+  // narrow — the subtask name is what the user wants to see first.
+  const ext = info.event.extendedProps as {
+    type?: string;
+    projectCode?: string | null;
+  };
+  if (ext?.type === "subtask") {
+    const segIndex = (info.event.extendedProps as { segmentIndex?: number })
+      ?.segmentIndex ?? 0;
+    const totalSegs = (info.event.extendedProps as { totalSegments?: number })
+      ?.totalSegments ?? 1;
+    if (totalSegs > 1 && segIndex > 0) {
+      return (
+        <div className="px-1.5 py-0.5 text-[10px] font-medium leading-tight opacity-90 truncate">
+          ↳ continued
+        </div>
+      );
+    }
+    return (
+      <div className="flex w-full flex-col overflow-hidden px-1.5 py-0.5 leading-tight">
+        <span className="truncate text-[11px] font-semibold">
+          {info.event.title}
+        </span>
+        {ext.projectCode ? (
+          <span className="truncate text-[9px] opacity-80">
+            {ext.projectCode}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (ext?.type === "unavailable-day-bg") {
+    return (
+      <div className="flex h-full w-full items-start overflow-hidden px-1.5 py-1">
+        <span className="truncate text-[11px] font-semibold leading-tight text-red-900 dark:text-red-100">
+          {info.event.title}
+        </span>
+      </div>
+    );
+  }
+  if (ext?.type === "holiday-bg") {
+    return (
+      <div className="flex h-full w-full items-start overflow-hidden px-1.5 py-1">
+        <span className="truncate text-[11px] font-semibold leading-tight text-amber-900 dark:text-amber-100">
+          {info.event.title}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex w-full items-center overflow-hidden px-1.5 py-0.5">
       <span className="truncate text-[11px] font-semibold leading-tight">
@@ -229,6 +314,17 @@ export default function StaffSchedulePage() {
   const { now: projectNow, todayKey } = useProjectNow();
 
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
+
+  type ScheduleSubtask = {
+    id: string;
+    projectId: string;
+    title: string;
+    scheduledStartDatetime: string | null;
+    scheduledEndDatetime: string | null;
+    status: string;
+    estimatedHours: number | null;
+  };
+  const [subtasks, setSubtasks] = useState<ScheduleSubtask[]>([]);
   const [currentProject, setCurrentProject] = useState<ScheduleProject | null>(
     null,
   );
@@ -241,6 +337,12 @@ export default function StaffSchedulePage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Toggle between the month-grid "calendar" view and the time-axis
+  // "timeline" view (mirrors how the project-schedule page in
+  // /admin/job-creation/project-schedule presents the schedule).
+  const [scheduleViewMode, setScheduleViewMode] = useState<
+    "calendar" | "timeline"
+  >("calendar");
 
   const loadData = useCallback(async () => {
     try {
@@ -287,6 +389,32 @@ export default function StaffSchedulePage() {
 
       setProjects(nextProjects);
       setCurrentProject(scheduleData?.currentProject ?? null);
+      setSubtasks(
+        Array.isArray(scheduleData?.subtasks)
+          ? (scheduleData.subtasks as Array<Record<string, unknown>>).map(
+              (raw): ScheduleSubtask => ({
+                id: String(raw.id ?? ""),
+                projectId: String(raw.projectId ?? ""),
+                title: String(raw.title ?? ""),
+                scheduledStartDatetime:
+                  typeof raw.scheduledStartDatetime === "string"
+                    ? raw.scheduledStartDatetime
+                    : null,
+                scheduledEndDatetime:
+                  typeof raw.scheduledEndDatetime === "string"
+                    ? raw.scheduledEndDatetime
+                    : null,
+                status: String(raw.status ?? ""),
+                estimatedHours:
+                  typeof raw.estimatedHours === "number" &&
+                  Number.isFinite(raw.estimatedHours) &&
+                  raw.estimatedHours > 0
+                    ? raw.estimatedHours
+                    : null,
+              }),
+            )
+          : [],
+      );
       setSharedUnavailableDays(
         Array.isArray(unavailableData?.unavailableDays)
           ? unavailableData.unavailableDays
@@ -304,6 +432,7 @@ export default function StaffSchedulePage() {
       );
       setProjects([]);
       setCurrentProject(null);
+      setSubtasks([]);
       setSharedUnavailableDays([]);
       setPersonalUnavailability([]);
       throw error;
@@ -329,6 +458,61 @@ export default function StaffSchedulePage() {
     }
   }
 
+  // Timeline-mode events: one block per assigned SUBTASK at its real
+  // start/end times. The calendar-mode events are date-only segments which
+  // timeGridWeek hides (allDaySlot=false), so we'd see nothing without
+  // these.
+  // Date-only set of full-day blocks the segment renderer should skip
+  // past so a subtask spanning a holiday paints as two pieces with the
+  // blocked column empty between them. Only full-day blocks go in here
+  // — partial-time blocks split visually via background events
+  // elsewhere on the page, not via segment splitting.
+  const timelineUnavailableDateSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const day of sharedUnavailableDays) {
+      if (day.isFullDay && typeof day.blockedDate === "string") {
+        set.add(day.blockedDate);
+      }
+    }
+    return set;
+  }, [sharedUnavailableDays]);
+
+  const fcTimelineEvents = useMemo<EventInput[]>(() => {
+    const projectsById = new Map(projects.map((p) => [p.id, p]));
+    const out: EventInput[] = [];
+    for (const s of subtasks) {
+      if (typeof s.scheduledStartDatetime !== "string") continue;
+      const project = projectsById.get(s.projectId);
+      if (!project) continue;
+      const colors = STATUS_COLORS[project.status];
+      const segments = buildTimelineSegmentEvents(
+        {
+          id: s.id,
+          title: s.title,
+          scheduledStartDatetime: s.scheduledStartDatetime,
+          scheduledEndDatetime: s.scheduledEndDatetime,
+          estimatedHours: s.estimatedHours,
+          backgroundColor: colors.bg,
+          borderColor: colors.border,
+          textColor: colors.text,
+          extendedProps: {
+            status: project.status,
+            type: "subtask",
+            projectCode: project.projectCode,
+            rawStatus: project.rawStatus,
+            scheduledStartDatetime: s.scheduledStartDatetime,
+            scheduledEndDatetime: s.scheduledEndDatetime,
+            subtaskTitle: s.title,
+            subtaskStatus: s.status,
+          },
+        },
+        timelineUnavailableDateSet,
+      );
+      out.push(...segments);
+    }
+    return out;
+  }, [subtasks, projects, timelineUnavailableDateSet]);
+
   const fcEvents = useMemo<FCEvent[]>(
     () => projects.flatMap((project) => toFCEventSegments(project)),
     [projects],
@@ -343,7 +527,6 @@ export default function StaffSchedulePage() {
           date,
           label: entry.reason?.trim() || "Approved leave",
           source: "personal-approved" as const,
-          notes: null,
         })),
       );
   }, [personalUnavailability]);
@@ -354,7 +537,6 @@ export default function StaffSchedulePage() {
       date: day.blockedDate,
       label: day.reason,
       source: day.source === "holiday" ? "holiday" : "blocked",
-      notes: day.notes,
     }));
   }, [sharedUnavailableDays]);
 
@@ -365,9 +547,38 @@ export default function StaffSchedulePage() {
     });
   }, [approvedLeaveItems, sharedUnavailableItems]);
 
+  // (Project-tinted backgrounds removed — they painted a soft green
+  // wash behind every project's run of subtasks. Each subtask chip
+  // already carries the project's status color.)
+
   const unavailableEvents = useMemo<EventInput[]>(() => {
-    const sharedEvents = sharedUnavailableDays.map((day) => {
-      if (day.source === "holiday") {
+    // Timeline mode renders blocks as bg events at the actual
+    // start/end datetimes so partial-time blocks (e.g. Tue 1-3pm)
+    // paint a striped band over just those hours, while full-day
+    // blocks naturally span the entire 00:00-24:00 column. Calendar
+    // mode keeps the original all-day rendering since timeGridWeek
+    // hides the all-day row but dayGridMonth uses it.
+    const sharedEvents: EventInput[] = sharedUnavailableDays.map((day) => {
+      const isHoliday = day.source === "holiday";
+      if (scheduleViewMode === "timeline") {
+        return {
+          id: day.id,
+          title: day.reason,
+          start: day.blockedStartDatetime,
+          end: day.blockedEndDatetime,
+          allDay: false,
+          display: "background",
+          classNames: [
+            isHoliday
+              ? "fc-staff-holiday-event"
+              : "fc-staff-unavailable-event",
+          ],
+          extendedProps: {
+            type: isHoliday ? "holiday-bg" : "unavailable-day-bg",
+          },
+        } satisfies EventInput;
+      }
+      if (isHoliday) {
         return {
           id: day.id,
           title: day.reason,
@@ -382,7 +593,6 @@ export default function StaffSchedulePage() {
           },
         } satisfies EventInput;
       }
-
       return {
         id: day.id,
         title: day.reason,
@@ -398,7 +608,7 @@ export default function StaffSchedulePage() {
       } satisfies EventInput;
     });
 
-    const leaveEvents = approvedLeaveItems.map((item) => ({
+    const leaveEvents: EventInput[] = approvedLeaveItems.map((item) => ({
       id: item.id,
       title: item.label,
       start: item.date,
@@ -410,10 +620,10 @@ export default function StaffSchedulePage() {
       extendedProps: {
         type: "approved-leave",
       },
-    })) satisfies EventInput[];
+    }));
 
     return [...sharedEvents, ...leaveEvents];
-  }, [approvedLeaveItems, sharedUnavailableDays]);
+  }, [approvedLeaveItems, sharedUnavailableDays, scheduleViewMode]);
 
   const projectsByDate = useMemo(() => {
     const map = new Map<string, ScheduleProject[]>();
@@ -534,6 +744,66 @@ export default function StaffSchedulePage() {
           filter: brightness(0.95);
         }
 
+        /* Multi-segment chips: see admin/schedule for full notes. */
+        .fc .fc-event.seg-first {
+          border-bottom-left-radius: 0 !important;
+          border-bottom-right-radius: 0 !important;
+        }
+        .fc .fc-event.seg-mid,
+        .fc .fc-event.seg-last {
+          opacity: 0.78;
+        }
+        .fc .fc-event.seg-mid {
+          border-radius: 0 !important;
+        }
+        .fc .fc-event.seg-last {
+          border-top-left-radius: 0 !important;
+          border-top-right-radius: 0 !important;
+        }
+        .fc .fc-timegrid-event-harness {
+          left: 0 !important;
+          right: 0 !important;
+          width: auto !important;
+          margin-right: 0 !important;
+        }
+        .fc .fc-timegrid-event-harness-inset {
+          left: 0 !important;
+          right: 0 !important;
+        }
+
+        /* Sunday + manual unavailable days — red striped column wash
+           in timeline view, mirroring the project-schedule wizard. */
+        .fc .fc-day.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.1) !important;
+        }
+        .fc-timeGridWeek-view .fc-timegrid-col.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.1) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 8px,
+            rgba(239, 68, 68, 0.12) 8px,
+            rgba(239, 68, 68, 0.12) 12px
+          ) !important;
+        }
+        .fc-timeGridWeek-view .fc-col-header-cell.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.18) !important;
+          color: #b91c1c !important;
+        }
+        .fc-timeGridWeek-view .fc-col-header-cell.fc-day-unavailable a {
+          color: #b91c1c !important;
+        }
+        .dark .fc-timeGridWeek-view .fc-timegrid-col.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.16) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 8px,
+            rgba(239, 68, 68, 0.22) 8px,
+            rgba(239, 68, 68, 0.22) 12px
+          ) !important;
+        }
+
         .fc .fc-daygrid-event-harness {
           margin-top: 2px;
         }
@@ -551,6 +821,60 @@ export default function StaffSchedulePage() {
         .fc .fc-event.fc-staff-holiday-event {
           border-radius: 6px !important;
           border: 1px solid #fde68a !important;
+        }
+
+        /* Timeline-mode unavailable + holiday bg events: red / amber
+           diagonal-stripe band that matches the project-schedule
+           wizard. Full-day rows produce a column-wide striped wash;
+           partial-time rows produce a horizontal striped band over
+           just the affected hours. The 3px left accent makes the band
+           read as "blocked time"; the title rides on top via
+           renderEventContent. */
+        .fc-timeGridWeek-view .fc-bg-event.fc-staff-unavailable-event {
+          background-color: rgba(239, 68, 68, 0.12) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(239, 68, 68, 0.22) 6px,
+            rgba(239, 68, 68, 0.22) 10px
+          ) !important;
+          opacity: 1 !important;
+          border-left: 3px solid rgb(239, 68, 68) !important;
+          border-radius: 0 !important;
+        }
+        .fc-timeGridWeek-view .fc-bg-event.fc-staff-holiday-event {
+          background-color: rgba(245, 158, 11, 0.12) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(245, 158, 11, 0.28) 6px,
+            rgba(245, 158, 11, 0.28) 10px
+          ) !important;
+          opacity: 1 !important;
+          border-left: 3px solid rgb(245, 158, 11) !important;
+          border-radius: 0 !important;
+        }
+        .dark .fc-timeGridWeek-view .fc-bg-event.fc-staff-unavailable-event {
+          background-color: rgba(239, 68, 68, 0.18) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(239, 68, 68, 0.32) 6px,
+            rgba(239, 68, 68, 0.32) 10px
+          ) !important;
+        }
+        .dark .fc-timeGridWeek-view .fc-bg-event.fc-staff-holiday-event {
+          background-color: rgba(245, 158, 11, 0.18) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(245, 158, 11, 0.34) 6px,
+            rgba(245, 158, 11, 0.34) 10px
+          ) !important;
         }
 
         .fc .fc-daygrid-day-frame {
@@ -583,18 +907,33 @@ export default function StaffSchedulePage() {
               ) : (
                 <div className="grid grid-cols-12 gap-2 lg:h-full lg:min-h-0">
                   <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-semibold text-gray-900">
-                          Monthly Schedule
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-gray-500">
-                          Calendar view of your scheduled projects, blocked days,
-                          and approved leave.
-                        </p>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                      {/* Left: view toggle */}
+                      <div className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
+                        {(["calendar", "timeline"] as const).map((mode) => {
+                          const active = scheduleViewMode === mode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setScheduleViewMode(mode)}
+                              className={`inline-flex h-7 items-center justify-center rounded-md px-2.5 text-[11px] font-semibold transition ${
+                                active
+                                  ? "text-white shadow-sm"
+                                  : "text-gray-600 hover:text-gray-900"
+                              }`}
+                              style={
+                                active ? { backgroundColor: "#00c065" } : undefined
+                              }
+                            >
+                              {mode === "calendar" ? "Calendar" : "Timeline"}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-end gap-3">
+                      {/* Center: legend */}
+                      <div className="flex flex-wrap items-center justify-center gap-3">
                         {[
                           { label: "Current", color: "#00c065" },
                           { label: "Behind", color: "#ef4444" },
@@ -617,7 +956,10 @@ export default function StaffSchedulePage() {
                             </span>
                           </div>
                         ))}
+                      </div>
 
+                      {/* Right: refresh */}
+                      <div className="flex flex-nowrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => void handleRefresh()}
@@ -637,14 +979,83 @@ export default function StaffSchedulePage() {
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
-                          key={todayKey}
-                          plugins={[dayGridPlugin, interactionPlugin]}
-                          initialView="dayGridMonth"
+                          key={`${todayKey}-${scheduleViewMode}`}
+                          plugins={[
+                            dayGridPlugin,
+                            timeGridPlugin,
+                            interactionPlugin,
+                          ]}
+                          initialView={
+                            scheduleViewMode === "timeline"
+                              ? "timeGridWeek"
+                              : "dayGridMonth"
+                          }
                           initialDate={projectNow}
-                          events={[...fcEvents, ...unavailableEvents]}
+                          events={
+                            scheduleViewMode === "timeline"
+                              ? [...fcTimelineEvents, ...unavailableEvents]
+                              : [...fcEvents, ...unavailableEvents]
+                          }
+                          dayCellClassNames={(arg) => {
+                            const yyyy = arg.date.getFullYear();
+                            const mm = String(
+                              arg.date.getMonth() + 1,
+                            ).padStart(2, "0");
+                            const dd = String(arg.date.getDate()).padStart(
+                              2,
+                              "0",
+                            );
+                            const dateKey = `${yyyy}-${mm}-${dd}`;
+                            // Sunday only gets the off-day wash in
+                            // timeline view — calendar (month) view
+                            // stays neutral.
+                            const isSunday =
+                              scheduleViewMode === "timeline" &&
+                              arg.date.getDay() === 0;
+                            return isSunday ||
+                              timelineUnavailableDateSet.has(dateKey)
+                              ? ["fc-day-unavailable"]
+                              : [];
+                          }}
+                          dayHeaderClassNames={(arg) => {
+                            const yyyy = arg.date.getFullYear();
+                            const mm = String(
+                              arg.date.getMonth() + 1,
+                            ).padStart(2, "0");
+                            const dd = String(arg.date.getDate()).padStart(
+                              2,
+                              "0",
+                            );
+                            const dateKey = `${yyyy}-${mm}-${dd}`;
+                            const isSunday =
+                              scheduleViewMode === "timeline" &&
+                              arg.date.getDay() === 0;
+                            return isSunday ||
+                              timelineUnavailableDateSet.has(dateKey)
+                              ? ["fc-day-unavailable"]
+                              : [];
+                          }}
                           eventClick={handleEventClick}
                           dateClick={handleDateClick}
                           eventContent={renderEventContent}
+                          slotEventOverlap={false}
+                          eventClassNames={(arg) => {
+                            const segIndex = (
+                              arg.event.extendedProps as {
+                                segmentIndex?: number;
+                              }
+                            )?.segmentIndex;
+                            const totalSegs = (
+                              arg.event.extendedProps as {
+                                totalSegments?: number;
+                              }
+                            )?.totalSegments;
+                            const cls = timelineSegmentClassName(
+                              segIndex,
+                              totalSegs,
+                            );
+                            return cls ? [cls] : [];
+                          }}
                           headerToolbar={{
                             left: "prev",
                             center: "title",
@@ -652,9 +1063,28 @@ export default function StaffSchedulePage() {
                           }}
                           firstDay={1}
                           height="100%"
-                          contentHeight="100%"
-                          expandRows={true}
+                          // contentHeight=100% on time-grid forces the
+                          // 24-hour table to compress into the visible
+                          // area, killing the scroller. Only set it for
+                          // month view, where there's no internal scroll.
+                          contentHeight={
+                            scheduleViewMode === "timeline" ? undefined : "100%"
+                          }
+                          // expandRows on the 24h time-grid would compress
+                          // every hour into the viewport and kill scroll.
+                          // Disabling it lets each slot keep its natural
+                          // height (~25px) so FullCalendar's own internal
+                          // vertical scroller appears in timeline mode.
+                          expandRows={scheduleViewMode !== "timeline"}
                           dayMaxEvents={2}
+                          // Time-grid view config (ignored by dayGridMonth).
+                          allDaySlot={false}
+                          nowIndicator
+                          slotMinTime="00:00:00"
+                          slotMaxTime="24:00:00"
+                          scrollTime="08:00:00"
+                          slotDuration="00:30:00"
+                          slotLabelInterval="01:00"
                         />
                       </div>
                     </div>
@@ -913,11 +1343,6 @@ export default function StaffSchedulePage() {
                                     {getUnavailableBadge(item)}
                                   </span>
                                 </div>
-                                {item.notes ? (
-                                  <p className="mt-1 text-xs text-gray-600">
-                                    {item.notes}
-                                  </p>
-                                ) : null}
                               </div>
                             </div>
                           </div>

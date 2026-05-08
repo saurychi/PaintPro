@@ -6,7 +6,6 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const ONE_DAY_SECONDS = 60 * 60 * 24;
 const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
-const SYNCED_HOLIDAY_NOTE_PREFIX = "Synced public holiday";
 
 type NagerHoliday = {
   date: string;
@@ -16,10 +15,10 @@ type NagerHoliday = {
 
 type HolidayRow = {
   unavailable_day_id: string;
-  blocked_date: string;
+  blocked_start_datetime: string;
+  blocked_end_datetime: string;
   block_type: string | null;
   reason: string | null;
-  notes: string | null;
 };
 
 function createRouteClient(cookieStore: Awaited<ReturnType<typeof cookies>>) {
@@ -71,6 +70,15 @@ function getHolidayYears() {
   return Array.from(new Set([now.getFullYear(), now.getFullYear() + 1]));
 }
 
+// Holidays are stored as 24h full-day blocks: midnight UTC → next
+// midnight UTC. Slicing the start gives the canonical YYYY-MM-DD key.
+function holidayDayRange(date: string) {
+  const start = `${date}T00:00:00.000Z`;
+  const endDate = new Date(start);
+  endDate.setUTCDate(endDate.getUTCDate() + 1);
+  return { start, end: endDate.toISOString() };
+}
+
 async function fetchCountryHolidays(countryCode: string) {
   const results = await Promise.all(
     getHolidayYears().map(async (year) => {
@@ -85,36 +93,41 @@ async function fetchCountryHolidays(countryCode: string) {
 
       const payload = (await response.json()) as NagerHoliday[];
 
-      return (Array.isArray(payload) ? payload : []).map((holiday) => ({
-        blocked_date: holiday.date,
-        reason: holiday.localName || holiday.name || "Public holiday",
-        block_type: "holiday",
-        notes: `${SYNCED_HOLIDAY_NOTE_PREFIX} (${countryCode})`,
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      }));
+      return (Array.isArray(payload) ? payload : []).map((holiday) => {
+        const range = holidayDayRange(holiday.date);
+        return {
+          blocked_start_datetime: range.start,
+          blocked_end_datetime: range.end,
+          reason: holiday.localName || holiday.name || "Public holiday",
+          block_type: "holiday",
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        };
+      });
     }),
   );
 
-  const byDate = new Map<string, (typeof results)[number][number]>();
+  // De-dup by start datetime — multiple regional names for the same
+  // calendar day collapse into one row, joined by " / " in the reason.
+  const byStart = new Map<string, (typeof results)[number][number]>();
 
   for (const holiday of results.flat()) {
-    const existing = byDate.get(holiday.blocked_date);
+    const existing = byStart.get(holiday.blocked_start_datetime);
 
     if (!existing) {
-      byDate.set(holiday.blocked_date, holiday);
+      byStart.set(holiday.blocked_start_datetime, holiday);
       continue;
     }
 
     if (!existing.reason.includes(holiday.reason)) {
-      byDate.set(holiday.blocked_date, {
+      byStart.set(holiday.blocked_start_datetime, {
         ...existing,
         reason: `${existing.reason} / ${holiday.reason}`,
       });
     }
   }
 
-  return Array.from(byDate.values());
+  return Array.from(byStart.values());
 }
 
 export async function POST(request: NextRequest) {
@@ -141,6 +154,9 @@ export async function POST(request: NextRequest) {
 
   try {
     if (!enabled) {
+      // The MANUAL_UNAVAILABLE_BLOCK_TYPES list excludes "holiday", so any
+      // row with block_type='holiday' came from a previous sync run —
+      // safe to deactivate them all.
       const { data, error } = await supabaseAdmin
         .from("unavailable_days")
         .update({
@@ -148,7 +164,6 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq("block_type", "holiday")
-        .ilike("notes", `${SYNCED_HOLIDAY_NOTE_PREFIX}%`)
         .select("unavailable_day_id");
 
       if (error) {
@@ -171,8 +186,13 @@ export async function POST(request: NextRequest) {
 
     const { data: existingRows, error: existingError } = await supabaseAdmin
       .from("unavailable_days")
-      .select("unavailable_day_id, blocked_date, block_type, reason, notes")
-      .in("blocked_date", holidays.map((holiday) => holiday.blocked_date))
+      .select(
+        "unavailable_day_id, blocked_start_datetime, blocked_end_datetime, block_type, reason",
+      )
+      .in(
+        "blocked_start_datetime",
+        holidays.map((holiday) => holiday.blocked_start_datetime),
+      )
       .returns<HolidayRow[]>();
 
     if (existingError) {
@@ -182,26 +202,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingByDate = new Map(
-      (existingRows ?? []).map((row) => [row.blocked_date, row]),
+    const existingByStart = new Map(
+      (existingRows ?? []).map((row) => [row.blocked_start_datetime, row]),
     );
 
     const rowsToInsert = holidays.filter(
-      (holiday) => !existingByDate.has(holiday.blocked_date),
+      (holiday) => !existingByStart.has(holiday.blocked_start_datetime),
     );
 
     const rowsToUpdate = holidays
       .map((holiday) => {
-        const existing = existingByDate.get(holiday.blocked_date);
+        const existing = existingByStart.get(holiday.blocked_start_datetime);
         if (!existing || existing.block_type !== "holiday") return null;
 
         return {
           id: existing.unavailable_day_id,
           reason: holiday.reason,
-          notes: holiday.notes,
         };
       })
-      .filter((row): row is { id: string; reason: string; notes: string } => Boolean(row));
+      .filter((row): row is { id: string; reason: string } => Boolean(row));
 
     if (rowsToInsert.length > 0) {
       const { error: insertError } = await supabaseAdmin
@@ -222,7 +241,6 @@ export async function POST(request: NextRequest) {
           .from("unavailable_days")
           .update({
             reason: row.reason,
-            notes: row.notes,
             is_active: true,
             updated_at: new Date().toISOString(),
           })

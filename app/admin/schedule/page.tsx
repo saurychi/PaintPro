@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import type {
   DayCellMountArg,
@@ -26,9 +27,14 @@ import { toast } from "sonner";
 import UnavailableDayModal, {
   type UnavailableDayFormValue,
 } from "@/components/schedule/UnavailableDayModal";
+import UnavailableBlockDetailModal from "@/components/schedule/UnavailableBlockDetailModal";
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 import { useProjectNow } from "@/lib/time/useProjectNow";
+import {
+  buildTimelineSegmentEvents,
+  timelineSegmentClassName,
+} from "@/lib/schedule/timelineSegments";
 
 type EventStatus = "current" | "behind" | "done" | "pending";
 
@@ -70,12 +76,32 @@ const BORDER = "border border-gray-200";
 
 const STATUS_COLORS: Record<
   EventStatus,
-  { bg: string; border: string; text: string }
+  { bg: string; border: string; text: string; tint: string }
 > = {
-  current: { bg: "#00c065", border: "#00a054", text: "#ffffff" },
-  behind: { bg: "#ef4444", border: "#dc2626", text: "#ffffff" },
-  done: { bg: "#9ca3af", border: "#6b7280", text: "#ffffff" },
-  pending: { bg: "#facc15", border: "#eab308", text: "#1f2937" },
+  current: {
+    bg: "#00c065",
+    border: "#00a054",
+    text: "#ffffff",
+    tint: "rgba(0, 192, 101, 0.10)",
+  },
+  behind: {
+    bg: "#ef4444",
+    border: "#dc2626",
+    text: "#ffffff",
+    tint: "rgba(239, 68, 68, 0.10)",
+  },
+  done: {
+    bg: "#9ca3af",
+    border: "#6b7280",
+    text: "#ffffff",
+    tint: "rgba(156, 163, 175, 0.10)",
+  },
+  pending: {
+    bg: "#facc15",
+    border: "#eab308",
+    text: "#1f2937",
+    tint: "rgba(250, 204, 21, 0.18)",
+  },
 };
 
 function addUtcDays(yyyymmdd: string, days: number) {
@@ -130,6 +156,79 @@ function toFCEventSegments(project: ScheduleProject): FCEvent[] {
 }
 
 function renderEventContent(info: EventContentArg) {
+  // Subtask events (timeline mode) carry the parent project's code so we
+  // can stack the subtask name on top with the project code as a small
+  // secondary line. That makes blocks readable even when the FC column is
+  // narrow — the subtask name is what the user wants to see first.
+  const ext = info.event.extendedProps as {
+    type?: string;
+    projectCode?: string | null;
+  };
+  if (ext?.type === "subtask") {
+    const segIndex = (info.event.extendedProps as { segmentIndex?: number })
+      ?.segmentIndex ?? 0;
+    const totalSegs = (info.event.extendedProps as { totalSegments?: number })
+      ?.totalSegments ?? 1;
+    // Continuation chips skip the title/code block and just render a
+    // continuation arrow so a multi-segment subtask reads as one labeled
+    // chip plus visual continuations rather than three separate items.
+    if (totalSegs > 1 && segIndex > 0) {
+      return (
+        <div className="px-1.5 py-0.5 text-[10px] font-medium leading-tight opacity-90 truncate">
+          ↳ continued
+        </div>
+      );
+    }
+    return (
+      <div className="flex w-full flex-col overflow-hidden px-1.5 py-0.5 leading-tight">
+        <span className="truncate text-[11px] font-semibold">
+          {info.event.title}
+        </span>
+        {ext.projectCode ? (
+          <span className="truncate text-[9px] opacity-80">
+            {ext.projectCode}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  // Timeline-mode background events: render the title at the top of
+  // the tinted block so the user can see WHAT is blocking those hours
+  // (matches the way the legend chip looks). Manual blocks get red
+  // text, holidays get amber.
+  if (ext?.type === "unavailable-day-bg") {
+    return (
+      <div className="flex h-full w-full items-start overflow-hidden px-1.5 py-1">
+        <span className="truncate text-[11px] font-semibold leading-tight text-red-900 dark:text-red-100">
+          {info.event.title}
+        </span>
+      </div>
+    );
+  }
+  if (ext?.type === "holiday-bg") {
+    return (
+      <div className="flex h-full w-full items-start overflow-hidden px-1.5 py-1">
+        <span className="truncate text-[11px] font-semibold leading-tight text-amber-900 dark:text-amber-100">
+          {info.event.title}
+        </span>
+      </div>
+    );
+  }
+
+  // Calendar-mode unavailable bg event fills the entire day cell. The
+  // reason text rides on top, centered, so each blocked day reads as
+  // ONE element — colored cell + label.
+  if (ext?.type === "unavailable-day-cell") {
+    return (
+      <div className="flex h-full w-full items-center justify-center px-1.5 py-0.5 text-center">
+        <span className="truncate text-[11px] font-bold leading-tight text-red-900 dark:text-red-100">
+          {info.event.title}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex w-full items-center overflow-hidden px-1.5 py-0.5">
       <span className="truncate text-[11px] font-semibold leading-tight">
@@ -160,21 +259,183 @@ function formatShortDate(dateKey: string) {
   });
 }
 
+// Convert a stored ISO datetime (UTC) into the "YYYY-MM-DDTHH:mm" shape
+// the <input type="datetime-local"> element expects, in the user's local
+// timezone. The server side reverses this via new Date(value).toISOString().
+function isoToLocalInput(iso: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
+// Slice the YYYY-MM-DD portion off an ISO timestamp. UTC-based to match
+// how the lib computes blockedDate.
+function isoDateKey(iso: string): string {
+  return String(iso || "").slice(0, 10);
+}
+
+// Add `days` to a YYYY-MM-DD string, returning a YYYY-MM-DD. UTC-based
+// to avoid DST / local-tz drift.
+function addDateKeyDays(dateKey: string, days: number): string {
+  const d = new Date(`${dateKey}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return dateKey;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Find the contiguous "batch" of full-day rows containing `target` —
+// rows produced by the multi-day-create flow share reason + blockType
+// and fall on consecutive calendar days. When the user edits any one
+// of them, we want the modal to surface the whole series as a
+// "Multiple days" range so they can adjust or shrink the batch in one
+// shot. Returns null when `target` is a standalone block, a holiday,
+// or a sub-day specific-time block.
+function detectBatchCluster(
+  target: Partial<ScheduleUnavailableDay> | null | undefined,
+  allDays: ScheduleUnavailableDay[],
+): { startDate: string; endDate: string; ids: string[] } | null {
+  if (
+    !target ||
+    !target.id ||
+    !target.blockedDate ||
+    !target.isFullDay ||
+    target.source === "holiday"
+  ) {
+    return null;
+  }
+
+  // Index every active manual full-day row that shares this row's
+  // reason + blockType, keyed by its blockedDate.
+  const byDate = new Map<string, ScheduleUnavailableDay>();
+  for (const d of allDays) {
+    if (
+      d.source === "manual" &&
+      d.isFullDay &&
+      d.reason === target.reason &&
+      d.blockType === target.blockType
+    ) {
+      byDate.set(d.blockedDate, d);
+    }
+  }
+
+  if (!byDate.has(target.blockedDate)) return null;
+
+  // Walk back to the first day of the cluster.
+  let firstDate = target.blockedDate;
+  // Bound the loop so corrupt data can't spin forever.
+  for (let i = 0; i < 1000; i += 1) {
+    const prev = addDateKeyDays(firstDate, -1);
+    if (byDate.has(prev)) firstDate = prev;
+    else break;
+  }
+
+  // Walk forward to the last day of the cluster.
+  let lastDate = target.blockedDate;
+  for (let i = 0; i < 1000; i += 1) {
+    const next = addDateKeyDays(lastDate, 1);
+    if (byDate.has(next)) lastDate = next;
+    else break;
+  }
+
+  // Single-day "cluster" isn't a batch — fall back to whole-day mode.
+  if (firstDate === lastDate) return null;
+
+  const ids: string[] = [];
+  let cursor = firstDate;
+  while (cursor <= lastDate) {
+    const d = byDate.get(cursor);
+    if (d) ids.push(d.id);
+    cursor = addDateKeyDays(cursor, 1);
+  }
+
+  return { startDate: firstDate, endDate: lastDate, ids };
+}
+
 function toUnavailableModalValue(
   day?: Partial<ScheduleUnavailableDay> | null,
   dateOverride?: string | null,
+  // The full active list, so we can detect that a single-row click
+  // actually belongs to a contiguous multi-day batch and open the modal
+  // in "Multiple days" mode with the whole series pre-filled.
+  allDays?: ScheduleUnavailableDay[],
 ): UnavailableDayFormValue {
-  const resolvedDate = dateOverride ?? day?.blockedDate ?? "";
+  // dateOverride is a YYYY-MM-DD from the calendar context menu / selected
+  // day. When opening "create from this day" we default to whole-day mode
+  // pre-filled with that date. Empty fallbacks are intentional — the modal
+  // fills them from the simulated/real clock via useProjectNow internally.
+  const fullDayDate =
+    dateOverride ?? (day?.isFullDay ? day?.blockedDate : "") ?? "";
+
+  // Pre-fill the specific-time inputs from an existing time-bound block.
+  // Empty defaults are filled by the modal's [TIME-SIM] seeding step.
+  const startDefault = day?.blockedStartDatetime
+    ? isoToLocalInput(day.blockedStartDatetime)
+    : "";
+  const endDefault = day?.blockedEndDatetime
+    ? isoToLocalInput(day.blockedEndDatetime)
+    : "";
+
+  // Detect the mode from the block's stored start/end + sibling rows:
+  //   1. The clicked row sits inside a contiguous batch of full-day
+  //      rows with the same reason+blockType → "multi-day" with the
+  //      whole batch range pre-filled.
+  //   2. 24h midnight-to-midnight singleton                 → "full-day"
+  //   3. Single row whose end's date ≠ start's date         → "multi-day"
+  //   4. Everything else (sub-day on a single date)         → "specific-time"
+  // Creating fresh (no day) defaults to "full-day".
+  const startDateKey = day?.blockedStartDatetime
+    ? isoDateKey(day.blockedStartDatetime)
+    : "";
+  const endDateKey = day?.blockedEndDatetime
+    ? isoDateKey(day.blockedEndDatetime)
+    : "";
+  const spansMultipleDays = Boolean(
+    day &&
+      !day.isFullDay &&
+      startDateKey &&
+      endDateKey &&
+      startDateKey !== endDateKey,
+  );
+
+  const cluster =
+    day && allDays ? detectBatchCluster(day, allDays) : null;
+
+  const blockMode: "full-day" | "specific-time" | "multi-day" = cluster
+    ? "multi-day"
+    : day
+      ? day.isFullDay
+        ? "full-day"
+        : spansMultipleDays
+          ? "multi-day"
+          : "specific-time"
+      : "full-day";
+
+  // Multi-day defaults: cluster range first (so all sibling rows are
+  // surfaced as one series), then the single row's literal start/end,
+  // finally the override / blockedDate fallbacks.
+  const multiDayStart =
+    dateOverride ?? cluster?.startDate ?? day?.blockedDate ?? "";
+  const multiDayEnd =
+    dateOverride ?? cluster?.endDate ?? endDateKey ?? day?.blockedDate ?? "";
+
   return {
-    blockedDate: resolvedDate,
-    startDate: resolvedDate,
-    endDate: resolvedDate,
+    blockMode,
+    fullDayDate,
+    startDatetime: startDefault,
+    endDatetime: endDefault,
+    multiDayStartDate: multiDayStart,
+    multiDayEndDate: multiDayEnd,
     reason: day?.reason ?? "",
     blockType:
       day?.blockType && day.blockType !== "holiday"
         ? day.blockType
         : "manual_block",
-    notes: day?.notes ?? "",
   };
 }
 
@@ -193,6 +454,17 @@ export default function AdminSchedule() {
   const { now: projectNow, todayKey } = useProjectNow();
 
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
+
+  type ScheduleSubtask = {
+    id: string;
+    projectId: string;
+    title: string;
+    scheduledStartDatetime: string | null;
+    scheduledEndDatetime: string | null;
+    status: string;
+    estimatedHours: number | null;
+  };
+  const [subtasks, setSubtasks] = useState<ScheduleSubtask[]>([]);
   const [unavailableDays, setUnavailableDays] = useState<
     ScheduleUnavailableDay[]
   >([]);
@@ -209,6 +481,11 @@ export default function AdminSchedule() {
   const [isUnavailableModalOpen, setIsUnavailableModalOpen] = useState(false);
   const [editingUnavailableDay, setEditingUnavailableDay] =
     useState<ScheduleUnavailableDay | null>(null);
+  // Distinct from editingUnavailableDay: this drives the read-only
+  // detail modal that opens when the user clicks an item in the side
+  // panel's Unavailable Days list.
+  const [viewingUnavailableDay, setViewingUnavailableDay] =
+    useState<ScheduleUnavailableDay | null>(null);
   const [modalDateOverride, setModalDateOverride] = useState<string | null>(
     null,
   );
@@ -217,7 +494,22 @@ export default function AdminSchedule() {
     x: number;
     y: number;
   } | null>(null);
+  // Toggle between the month-grid "calendar" view and the time-axis
+  // "timeline" view (mirrors how the project-schedule page in
+  // /admin/job-creation/project-schedule presents the schedule).
+  const [scheduleViewMode, setScheduleViewMode] = useState<
+    "calendar" | "timeline"
+  >("calendar");
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingUnavailableDays, setRefreshingUnavailableDays] =
+    useState(false);
+  // The calendar's currently visible date range, fed by FullCalendar's
+  // datesSet callback. Used to scope the side panel's Unavailable Days
+  // list to whatever month / week the user is looking at.
+  const [calendarViewRange, setCalendarViewRange] = useState<{
+    startKey: string;
+    endKey: string;
+  } | null>(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -240,41 +532,52 @@ export default function AdminSchedule() {
 
       setProjects(nextProjects);
       setCurrentProject(data?.currentProject ?? null);
+      setSubtasks(Array.isArray(data?.subtasks) ? data.subtasks : []);
     } catch (error) {
       console.error("Failed to load schedule projects:", error);
       setProjects([]);
       setCurrentProject(null);
+      setSubtasks([]);
       throw error;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const loadUnavailableDays = useCallback(async () => {
-    try {
-      setUnavailableLoading(true);
+  // manualOnly=true skips the external Nager.at holidays fetch and only
+  // returns rows from the unavailable_days table. Used by the panel-level
+  // refresh button so it returns fast without the holiday API roundtrip.
+  const loadUnavailableDays = useCallback(
+    async (options?: { manualOnly?: boolean }) => {
+      try {
+        setUnavailableLoading(true);
 
-      const response = await fetch("/api/schedule/unavailable-days", {
-        method: "GET",
-        cache: "no-store",
-      });
-      const data = await response.json();
+        const url = options?.manualOnly
+          ? "/api/schedule/unavailable-days?manualOnly=true"
+          : "/api/schedule/unavailable-days";
+        const response = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data?.error || "Failed to load unavailable days.");
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to load unavailable days.");
+        }
+
+        setUnavailableDays(
+          Array.isArray(data?.unavailableDays) ? data.unavailableDays : [],
+        );
+      } catch (error) {
+        console.error("Failed to load unavailable days:", error);
+        setUnavailableDays([]);
+        throw error;
+      } finally {
+        setUnavailableLoading(false);
       }
-
-      setUnavailableDays(
-        Array.isArray(data?.unavailableDays) ? data.unavailableDays : [],
-      );
-    } catch (error) {
-      console.error("Failed to load unavailable days:", error);
-      setUnavailableDays([]);
-      throw error;
-    } finally {
-      setUnavailableLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     void loadProjects();
@@ -289,13 +592,123 @@ export default function AdminSchedule() {
     [projects],
   );
 
+  // Map of YYYY-MM-DD → the unavailable block that covers that date.
+  // Drives both the full-cell tint (dayCellClassNames asks "is this key
+  // present?") and the inline reason label (dayCellContent reads the
+  // block off this map). When two blocks overlap on the same day, the
+  // first one wins — UI shows one label per cell. Defined here, before
+  // the timeline events memo, because the segment renderer needs the
+  // set to know which days to skip past in computeWorkSegments.
+  const unavailableByDate = useMemo(() => {
+    const map = new Map<string, ScheduleUnavailableDay>();
+    for (const day of unavailableDays) {
+      // Holidays already render as their own pill in dayGrid; skip the
+      // tint so they don't double up.
+      if (day.source === "holiday") continue;
+
+      let cursor = day.blockedStartDatetime.slice(0, 10);
+      const endMs = new Date(day.blockedEndDatetime).getTime() - 1;
+      const lastKey = !Number.isNaN(endMs)
+        ? new Date(endMs).toISOString().slice(0, 10)
+        : cursor;
+
+      let safety = 0;
+      while (cursor <= lastKey && safety < 1000) {
+        if (!map.has(cursor)) map.set(cursor, day);
+        cursor = addDateKeyDays(cursor, 1);
+        safety += 1;
+      }
+    }
+    return map;
+  }, [unavailableDays]);
+
+  // Set wrapper — dayCellClassNames just needs membership.
+  const unavailableDateSet = useMemo(
+    () => new Set(unavailableByDate.keys()),
+    [unavailableByDate],
+  );
+
+  // Timeline-mode events: one block per SUBTASK (not per project) so the
+  // user actually sees the individual scheduled work blocks inside each
+  // project, with proper start/end times. Each subtask is colored by its
+  // parent project's status. Date-only fallback (project segments) would
+  // render as all-day, which is hidden here, so we couldn't see anything.
+  const fcTimelineEvents = useMemo<EventInput[]>(() => {
+    const projectsById = new Map(projects.map((p) => [p.id, p]));
+    const out: EventInput[] = [];
+    for (const s of subtasks) {
+      if (typeof s.scheduledStartDatetime !== "string") continue;
+      const project = projectsById.get(s.projectId);
+      if (!project) continue;
+      const colors = STATUS_COLORS[project.status];
+      // Fan out into per-segment chips so a subtask that crosses lunch
+      // / a non-working day shows as multiple pieces with the lunch row
+      // visually empty between them, matching the wizard's view.
+      const segments = buildTimelineSegmentEvents(
+        {
+          id: s.id,
+          title: s.title,
+          scheduledStartDatetime: s.scheduledStartDatetime,
+          scheduledEndDatetime: s.scheduledEndDatetime,
+          estimatedHours: s.estimatedHours,
+          backgroundColor: colors.bg,
+          borderColor: colors.border,
+          textColor: colors.text,
+          extendedProps: {
+            status: project.status,
+            type: "subtask",
+            projectCode: project.projectCode,
+            rawStatus: project.rawStatus,
+            scheduledStartDatetime: s.scheduledStartDatetime,
+            scheduledEndDatetime: s.scheduledEndDatetime,
+            subtaskTitle: s.title,
+            subtaskStatus: s.status,
+          },
+        },
+        unavailableDateSet,
+      );
+      out.push(...segments);
+    }
+    return out;
+  }, [subtasks, projects, unavailableDateSet]);
+
+  // (Project-tinted background containers were removed — they painted a
+  // soft green wash behind every project's run of subtasks, which the
+  // user found visually noisy. Subtask chips alone now carry the
+  // project status via their fill color.)
+
   const unavailableDayEvents = useMemo<EventInput[]>(() => {
-    return unavailableDays.map((day) => {
-      if (day.source === "holiday") {
-        return {
+    const events: EventInput[] = [];
+
+    // Holidays: per-row events. Calendar view shows the visible
+    // "Holiday" pill on the all-day row; timeline shows a tinted
+    // column at the holiday's hour range. Distinct extendedProps
+    // types let renderEventContent decide when to draw the title.
+    for (const day of unavailableDays) {
+      if (day.source !== "holiday") continue;
+
+      if (scheduleViewMode === "timeline") {
+        events.push({
           id: day.id,
           title: day.reason,
-          start: day.blockedDate,
+          start: day.blockedStartDatetime,
+          end: day.blockedEndDatetime,
+          allDay: false,
+          display: "background",
+          backgroundColor: "rgba(253, 224, 71, 0.45)",
+          borderColor: "#facc15",
+          classNames: ["fc-admin-holiday-event"],
+          extendedProps: {
+            type: "holiday-bg",
+            unavailableDayId: day.id,
+          },
+        });
+      } else {
+        events.push({
+          id: day.id,
+          title: day.reason,
+          start: day.blockedStartDatetime.slice(0, 10),
+          end: day.blockedEndDatetime.slice(0, 10),
           allDay: true,
           backgroundColor: "#fef3c7",
           borderColor: "#fde68a",
@@ -305,25 +718,58 @@ export default function AdminSchedule() {
             type: "holiday",
             unavailableDayId: day.id,
           },
-        };
+        });
       }
+    }
 
-      return {
-        id: day.id,
-        title: day.reason,
-        start: day.blockedDate,
-        allDay: true,
-        display: "background",
-        backgroundColor: "#fee2e2",
-        borderColor: "#fecaca",
-        classNames: ["fc-admin-unavailable-event"],
-        extendedProps: {
-          type: "unavailable-day",
-          unavailableDayId: day.id,
-        },
-      };
-    });
-  }, [unavailableDays]);
+    // Manual blocks:
+    //   - Timeline: per-row bg event at the actual hour range.
+    //   - Calendar: ONE bg event per blocked DATE (deduped via
+    //     unavailableByDate). FC's bg events are already
+    //     `position: absolute; inset: 0` inside .fc-daygrid-day-frame,
+    //     so each event paints the full cell — that's the "single
+    //     layer" the user asked for. The reason text rides on top via
+    //     renderEventContent.
+    if (scheduleViewMode === "timeline") {
+      for (const day of unavailableDays) {
+        if (day.source === "holiday") continue;
+        events.push({
+          id: day.id,
+          title: day.reason,
+          start: day.blockedStartDatetime,
+          end: day.blockedEndDatetime,
+          allDay: false,
+          display: "background",
+          backgroundColor: "rgba(248, 113, 113, 0.55)",
+          borderColor: "rgba(220, 38, 38, 0.7)",
+          classNames: ["fc-admin-unavailable-event"],
+          extendedProps: {
+            type: "unavailable-day-bg",
+            unavailableDayId: day.id,
+          },
+        });
+      }
+    } else {
+      for (const [dateKey, block] of unavailableByDate) {
+        events.push({
+          id: `unavailable-cell-${dateKey}`,
+          title: block.reason,
+          start: dateKey,
+          end: addDateKeyDays(dateKey, 1),
+          allDay: true,
+          display: "background",
+          backgroundColor: "rgba(248, 113, 113, 0.45)",
+          classNames: ["fc-admin-unavailable-event"],
+          extendedProps: {
+            type: "unavailable-day-cell",
+            unavailableDayId: block.id,
+          },
+        });
+      }
+    }
+
+    return events;
+  }, [unavailableDays, scheduleViewMode, unavailableByDate]);
 
   const projectsByDate = useMemo(() => {
     const map = new Map<string, ScheduleProject[]>();
@@ -353,11 +799,25 @@ export default function AdminSchedule() {
   const selectedDayUnavailableDays = selectedDate
     ? (unavailableDaysByDate.get(selectedDate) ?? [])
     : [];
+  // Side panel mirrors the calendar view: when the user navigates to
+  // May, the list shows May's blocks; navigate to June and the list
+  // updates. Falls back to "upcoming from today" before FC has fired
+  // its first datesSet (mount race).
   const upcomingUnavailableDays = useMemo(() => {
+    if (calendarViewRange) {
+      // FC's endStr is exclusive — filter < endKey, not <=.
+      return unavailableDays
+        .filter(
+          (day) =>
+            day.blockedDate >= calendarViewRange.startKey &&
+            day.blockedDate < calendarViewRange.endKey,
+        )
+        .sort((a, b) => a.blockedDate.localeCompare(b.blockedDate));
+    }
     return unavailableDays
       .filter((day) => day.blockedDate >= todayKey)
       .slice(0, 8);
-  }, [unavailableDays, todayKey]);
+  }, [unavailableDays, todayKey, calendarViewRange]);
 
   const handleEventClick = (info: EventClickArg) => {
     const startStr = info.event.startStr || "";
@@ -437,23 +897,94 @@ export default function AdminSchedule() {
     }
   }
 
+  async function handleRefreshUnavailableDays() {
+    if (refreshingUnavailableDays) return;
+    setRefreshingUnavailableDays(true);
+    try {
+      await loadUnavailableDays({ manualOnly: true });
+      toast.success("Unavailable days refreshed.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to refresh unavailable days.",
+      );
+    } finally {
+      setRefreshingUnavailableDays(false);
+    }
+  }
+
   async function handleSaveUnavailableDay(value: UnavailableDayFormValue) {
     setSavingUnavailableDay(true);
 
     try {
+      // Editing + switching to multi-day means "replace this single row
+      // with N full-day rows over the picked range." PATCH only updates
+      // a single row, so we do DELETE-then-POST instead. Other edit
+      // flows (whole-day / specific-time) go through PATCH as before.
+      const isReplacingWithMultiDay =
+        editingUnavailableDay !== null && value.blockMode === "multi-day";
+
+      if (isReplacingWithMultiDay) {
+        // The clicked row may be part of a multi-row batch (same reason
+        // + blockType, consecutive days). Delete every row in the
+        // cluster so the new POST can replace the entire series in one
+        // shot — otherwise we'd leave stale day-rows behind that would
+        // re-appear on the calendar after the new range was inserted.
+        const cluster = detectBatchCluster(
+          editingUnavailableDay,
+          unavailableDays,
+        );
+        const idsToDelete = cluster?.ids ?? [editingUnavailableDay.id];
+
+        const deleteResults = await Promise.all(
+          idsToDelete.map((id) =>
+            fetch("/api/schedule/unavailable-days", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ unavailableDayId: id }),
+            }),
+          ),
+        );
+        const failed = deleteResults.find((r) => !r.ok);
+        if (failed) {
+          const errBody = await failed.json().catch(() => null);
+          throw new Error(
+            errBody?.error || "Failed to remove existing block(s).",
+          );
+        }
+      }
+
+      const method =
+        editingUnavailableDay && !isReplacingWithMultiDay ? "PATCH" : "POST";
+
       const response = await fetch("/api/schedule/unavailable-days", {
-        method: editingUnavailableDay ? "PATCH" : "POST",
+        method,
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          unavailableDayId: editingUnavailableDay?.id,
-          blockedDate: value.blockedDate,
-          startDate: value.startDate,
-          endDate: value.endDate,
+          // PATCH needs the id. POST flows ignore it.
+          ...(method === "PATCH"
+            ? { unavailableDayId: editingUnavailableDay?.id }
+            : {}),
+          // Whole-day:    server stamps midnight-UTC → next-midnight-UTC.
+          // Specific-time: datetime-local pair → ISO start/end.
+          // Multi-day:    server enumerates [start, end] inclusive and
+          //               creates one full-day row per calendar day.
+          ...(value.blockMode === "full-day"
+            ? { fullDayDate: value.fullDayDate }
+            : value.blockMode === "specific-time"
+              ? {
+                  blockedStartDatetime: value.startDatetime,
+                  blockedEndDatetime: value.endDatetime,
+                }
+              : {
+                  multiDayStartDate: value.multiDayStartDate,
+                  multiDayEndDate: value.multiDayEndDate,
+                }),
           reason: value.reason,
           blockType: value.blockType,
-          notes: value.notes,
         }),
       });
       const data = await response.json();
@@ -465,16 +996,22 @@ export default function AdminSchedule() {
         );
       }
 
+      // Refresh both manual + holiday rows so the side panel + calendar
+      // pick up the new block right after the modal closes. (Using
+      // manualOnly here would drop already-loaded holidays from state.)
       await loadUnavailableDays();
       setIsUnavailableModalOpen(false);
       setEditingUnavailableDay(null);
       setModalDateOverride(null);
+      const createdCount = Number(data?.createdCount ?? 1);
       toast.success(
-        editingUnavailableDay
-          ? "Unavailable day updated."
-          : `${Math.max(1, Number(data?.createdCount ?? 1))} unavailable day${
-              Number(data?.createdCount ?? 1) === 1 ? "" : "s"
-            } created.`,
+        isReplacingWithMultiDay
+          ? `Replaced block with ${createdCount} day${createdCount === 1 ? "" : "s"}.`
+          : editingUnavailableDay
+            ? "Unavailable block updated."
+            : createdCount > 1
+              ? `${createdCount} unavailable blocks created.`
+              : "Unavailable block created.",
       );
     } catch (error) {
       toast.error(
@@ -487,12 +1024,9 @@ export default function AdminSchedule() {
     }
   }
 
-  async function handleDeleteUnavailableDay(day: ScheduleUnavailableDay) {
-    const confirmed = window.confirm(
-      `Delete unavailable day on ${formatLongDate(day.blockedDate)}?`,
-    );
-    if (!confirmed) return;
-
+  // Raw delete: no native confirm prompt. Used by the new detail modal,
+  // which has its own explicit Delete button.
+  async function deleteUnavailableDay(day: ScheduleUnavailableDay) {
     setDeletingUnavailableDayId(day.id);
 
     try {
@@ -522,6 +1056,14 @@ export default function AdminSchedule() {
     } finally {
       setDeletingUnavailableDayId(null);
     }
+  }
+
+  async function handleDeleteUnavailableDay(day: ScheduleUnavailableDay) {
+    const confirmed = window.confirm(
+      `Delete unavailable day on ${formatLongDate(day.blockedDate)}?`,
+    );
+    if (!confirmed) return;
+    await deleteUnavailableDay(day);
   }
 
   function getProjectRoute(projectId: string, rawStatus: string) {
@@ -738,6 +1280,43 @@ export default function AdminSchedule() {
           margin-top: 1px;
         }
 
+        /* Multi-segment chips share a subTaskId — the first segment
+           carries the title, continuations show "↳ continued". The
+           continuation chips drop their borders + dim slightly so a
+           pair reads as one task wrapping past lunch / off-day. */
+        .fc .fc-event.seg-first {
+          border-bottom-left-radius: 0 !important;
+          border-bottom-right-radius: 0 !important;
+        }
+        .fc .fc-event.seg-mid,
+        .fc .fc-event.seg-last {
+          opacity: 0.78;
+        }
+        .fc .fc-event.seg-mid {
+          border-radius: 0 !important;
+        }
+        .fc .fc-event.seg-last {
+          border-top-left-radius: 0 !important;
+          border-top-right-radius: 0 !important;
+        }
+
+        /* Pin every event harness to the full column width so FC's
+           column-split layout doesn't render half-width chips when two
+           events overlap in time. Mirrors the project-schedule wizard
+           view — overlap is rare with the new strict-serial scheduler,
+           but legacy DB rows can still produce it until they're
+           re-saved through the on-load normalize. */
+        .fc .fc-timegrid-event-harness {
+          left: 0 !important;
+          right: 0 !important;
+          width: auto !important;
+          margin-right: 0 !important;
+        }
+        .fc .fc-timegrid-event-harness-inset {
+          left: 0 !important;
+          right: 0 !important;
+        }
+
         .fc .fc-daygrid-event {
           min-height: 18px;
         }
@@ -757,13 +1336,21 @@ export default function AdminSchedule() {
           height: 100% !important;
         }
 
-        .fc .fc-scroller,
-        .fc .fc-scroller-liquid-absolute {
+        /* Only flatten the scrollers for the dayGrid month view — the
+           timeGrid week view needs its internal vertical scroller alive
+           so the user can reach later hours. */
+        .fc .fc-daygrid .fc-scroller,
+        .fc .fc-daygrid .fc-scroller-liquid-absolute {
           overflow: hidden !important;
         }
 
         .fc .fc-daygrid-day-frame {
           min-height: 0 !important;
+        }
+
+        /* Make sure the time-grid scroller is allowed to scroll. */
+        .fc .fc-timegrid .fc-scroller {
+          overflow-y: auto !important;
         }
 
         .fc .fc-scroller {
@@ -814,8 +1401,144 @@ export default function AdminSchedule() {
           color: #78350f !important;
         }
 
-        .dark .fc .fc-admin-unavailable-event {
-          background-color: rgba(248, 113, 113, 0.22) !important;
+        /* Bg events fill .fc-daygrid-day-frame via FC's default
+           position:absolute / inset:0 — we just bump opacity past FC's
+           0.3 default so the tint reads on white, and let the reason
+           text render on top via renderEventContent. One DOM element,
+           one visual layer. Timeline mode reuses the same rules — the
+           bg event there covers the precise hour range because we feed
+           it real start/end datetimes. */
+        /* Calendar-mode unavailable cells: the COLOR comes from the TD
+           itself (via .fc-day-unavailable from dayCellClassNames). FC's
+           bg event sits on top transparent — its only job is to host
+           the centered reason label. The border-color match makes the
+           fill reach edge-to-edge with no visible gap between cells. */
+        .fc .fc-day.fc-day-unavailable {
+          background-color: rgba(248, 113, 113, 0.45) !important;
+          border-color: rgba(248, 113, 113, 0.45) !important;
+        }
+        .dark .fc .fc-day.fc-day-unavailable {
+          background-color: rgba(248, 113, 113, 0.35) !important;
+          border-color: rgba(248, 113, 113, 0.35) !important;
+        }
+
+        /* Timeline view: paint blocked / Sunday columns with the same
+           red diagonal-stripe wash the project-schedule wizard uses, so
+           they visually read as off-limits even when there's no chip
+           in them. The header cell above the column gets a tinted
+           background + red label so the day name doesn't look "open". */
+        .fc-timeGridWeek-view .fc-timegrid-col.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.1) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 8px,
+            rgba(239, 68, 68, 0.12) 8px,
+            rgba(239, 68, 68, 0.12) 12px
+          ) !important;
+        }
+        .fc-timeGridWeek-view .fc-col-header-cell.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.18) !important;
+          color: #b91c1c !important;
+        }
+        .fc-timeGridWeek-view .fc-col-header-cell.fc-day-unavailable a {
+          color: #b91c1c !important;
+        }
+        .dark .fc-timeGridWeek-view .fc-timegrid-col.fc-day-unavailable {
+          background-color: rgba(239, 68, 68, 0.16) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 8px,
+            rgba(239, 68, 68, 0.22) 8px,
+            rgba(239, 68, 68, 0.22) 12px
+          ) !important;
+        }
+
+        /* Both classes need opacity:1 to override FC's
+           --fc-bg-event-opacity: 0.3 default — without this, even an
+           rgba(...) at 0.85 alpha gets multiplied down by FC's 30%
+           opacity, ending up looking like a 25% wash. */
+        .fc .fc-bg-event.fc-admin-unavailable-event,
+        .fc .fc-bg-event.fc-admin-holiday-event {
+          opacity: 1 !important;
+          margin: 0 !important;
+        }
+
+        /* Calendar view: bg event is just a transparent host for the
+           label — the .fc-day-unavailable TD rule paints the whole
+           cell, so we don't want a border/radius/fill cluttering it. */
+        .fc-dayGridMonth-view .fc-bg-event.fc-admin-unavailable-event,
+        .fc-dayGridMonth-view .fc-bg-event.fc-admin-holiday-event {
+          background-color: transparent !important;
+          border: 0 !important;
+          border-radius: 0 !important;
+        }
+
+        /* Timeline view: red diagonal-stripe band that visually
+           matches the project-schedule wizard's unavailable blocks.
+           Full-day rows produce a full column-wide striped wash
+           (since the bg event spans the whole 00:00-24:00 column);
+           partial-time rows produce a horizontal striped band over
+           just the affected hours. The 3px red left accent makes the
+           band read as "blocked time", and the title text rides on
+           top via renderEventContent. */
+        .fc-timeGridWeek-view .fc-bg-event.fc-admin-unavailable-event {
+          background-color: rgba(239, 68, 68, 0.12) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(239, 68, 68, 0.22) 6px,
+            rgba(239, 68, 68, 0.22) 10px
+          ) !important;
+          opacity: 1 !important;
+          border-left: 3px solid rgb(239, 68, 68) !important;
+          border-radius: 0 !important;
+        }
+        .fc-timeGridWeek-view .fc-bg-event.fc-admin-holiday-event {
+          background-color: rgba(245, 158, 11, 0.12) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(245, 158, 11, 0.28) 6px,
+            rgba(245, 158, 11, 0.28) 10px
+          ) !important;
+          opacity: 1 !important;
+          border-left: 3px solid rgb(245, 158, 11) !important;
+          border-radius: 0 !important;
+        }
+        .dark .fc-timeGridWeek-view .fc-bg-event.fc-admin-unavailable-event {
+          background-color: rgba(239, 68, 68, 0.18) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(239, 68, 68, 0.32) 6px,
+            rgba(239, 68, 68, 0.32) 10px
+          ) !important;
+        }
+        .dark .fc-timeGridWeek-view .fc-bg-event.fc-admin-holiday-event {
+          background-color: rgba(245, 158, 11, 0.18) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(245, 158, 11, 0.34) 6px,
+            rgba(245, 158, 11, 0.34) 10px
+          ) !important;
+        }
+
+        /* Project-container background events in the timeline view.
+           Default FC styling on background events would let the tint
+           bleed off the column edges; tighten it down so the container
+           reads as a single capsule encasing its subtasks. */
+        .fc .fc-project-bg-event {
+          opacity: 1 !important;
+        }
+        .dark .fc .fc-project-bg-event {
+          filter: brightness(1.4);
         }
 
         .fc .fc-daygrid-day-frame {
@@ -829,6 +1552,14 @@ export default function AdminSchedule() {
 
         .dark .fc .fc-daygrid-day-frame:hover {
           background: rgba(30, 41, 59, 0.78);
+        }
+
+        /* Don't let the frame hover-bg cover the cell's red tint when
+           hovering a blocked day — the inner frame paints over the
+           TD's background-color, which is what was making the cell go
+           white/gray on hover. */
+        .fc .fc-day.fc-day-unavailable .fc-daygrid-day-frame:hover {
+          background: transparent !important;
         }
       `}</style>
 
@@ -855,50 +1586,60 @@ export default function AdminSchedule() {
               ) : (
                 <div className="grid grid-cols-12 gap-3 lg:h-full lg:min-h-0">
                   <div className="col-span-12 flex flex-col rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: ACCENT }}
-                            aria-hidden="true"
-                          />
-                          <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
-                            Monthly Schedule
-                          </p>
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">
-                          Calendar view of scheduled jobs and activity.
-                        </p>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                      {/* Left: view toggle */}
+                      <div className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                        {(["calendar", "timeline"] as const).map((mode) => {
+                          const active = scheduleViewMode === mode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setScheduleViewMode(mode)}
+                              className={`inline-flex h-8 items-center justify-center rounded-md px-3 text-xs font-semibold transition ${
+                                active
+                                  ? "text-white shadow-sm"
+                                  : "text-gray-600 hover:text-gray-900 dark:text-slate-400 dark:hover:text-slate-100"
+                              }`}
+                              style={
+                                active ? { backgroundColor: ACCENT } : undefined
+                              }
+                            >
+                              {mode === "calendar" ? "Calendar" : "Timeline"}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                          {[
-                            { label: "Current", color: "#00c065" },
-                            { label: "Behind", color: "#ef4444" },
-                            { label: "Done", color: "#9ca3af" },
-                            { label: "Pending", color: "#facc15" },
-                            { label: "Blocked day", color: "#fca5a5" },
-                            ...(holidaySettings.enabled
-                              ? [{ label: "Holiday", color: "#fde68a" }]
-                              : []),
-                          ].map((item) => (
-                            <div
-                              key={item.label}
-                              className="flex items-center gap-1.5"
-                            >
-                              <span
-                                className="inline-block h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: item.color }}
-                              />
-                              <span className="text-[11px] font-medium text-gray-600 dark:text-slate-300">
-                                {item.label}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                      {/* Center: legend */}
+                      <div className="flex flex-wrap items-center justify-center gap-3">
+                        {[
+                          { label: "Current", color: "#00c065" },
+                          { label: "Behind", color: "#ef4444" },
+                          { label: "Done", color: "#9ca3af" },
+                          { label: "Pending", color: "#facc15" },
+                          { label: "Blocked day", color: "#fca5a5" },
+                          ...(holidaySettings.enabled
+                            ? [{ label: "Holiday", color: "#fde68a" }]
+                            : []),
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            className="flex items-center gap-1.5"
+                          >
+                            <span
+                              className="inline-block h-2.5 w-2.5 rounded-full"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className="text-[11px] font-medium text-gray-600 dark:text-slate-300">
+                              {item.label}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
 
+                      {/* Right: refresh + requests */}
+                      <div className="flex flex-nowrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => void handleRefresh()}
@@ -926,15 +1667,125 @@ export default function AdminSchedule() {
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
-                          key={todayKey}
-                          plugins={[dayGridPlugin, interactionPlugin]}
-                          initialView="dayGridMonth"
+                          // Re-key on view change so FullCalendar fully
+                          // remounts with the new initialView and the view-
+                          // specific props below take effect cleanly.
+                          key={`${todayKey}-${scheduleViewMode}`}
+                          plugins={[
+                            dayGridPlugin,
+                            timeGridPlugin,
+                            interactionPlugin,
+                          ]}
+                          initialView={
+                            scheduleViewMode === "timeline"
+                              ? "timeGridWeek"
+                              : "dayGridMonth"
+                          }
                           initialDate={projectNow}
-                          events={[...fcEvents, ...unavailableDayEvents]}
+                          // Timeline mode needs events with real start/end
+                          // TIMES, not date-only segments — those would be
+                          // treated as all-day and hidden by allDaySlot=false.
+                          // The project-background events go FIRST so the
+                          // subtask blocks render on top of their tinted
+                          // project container.
+                          events={
+                            scheduleViewMode === "timeline"
+                              ? [...fcTimelineEvents, ...unavailableDayEvents]
+                              : [...fcEvents, ...unavailableDayEvents]
+                          }
                           dayCellDidMount={handleCalendarDayMount}
+                          // Tint the entire <td> for blocked days. FC's
+                          // bg events paint inside .fc-daygrid-day-frame,
+                          // so the cell border still shows around them.
+                          // Painting the TD itself fills the whole cell
+                          // including the border-box area; the matching
+                          // CSS rule also nukes the cell border so the
+                          // fill reaches edge-to-edge with no visible
+                          // gap. Skipped in timeline mode — bg events
+                          // there cover the precise hour range.
+                          dayCellClassNames={(arg) => {
+                            const yyyy = arg.date.getFullYear();
+                            const mm = String(arg.date.getMonth() + 1).padStart(
+                              2,
+                              "0",
+                            );
+                            const dd = String(arg.date.getDate()).padStart(
+                              2,
+                              "0",
+                            );
+                            const dateKey = `${yyyy}-${mm}-${dd}`;
+                            // Sunday only gets the off-day wash in
+                            // timeline view — in calendar (month) view
+                            // it stays neutral, since the workweek rule
+                            // is a scheduling concept and the month
+                            // overview is meant to look like a normal
+                            // calendar.
+                            const isSunday =
+                              scheduleViewMode === "timeline" &&
+                              arg.date.getDay() === 0;
+                            return isSunday || unavailableDateSet.has(dateKey)
+                              ? ["fc-day-unavailable"]
+                              : [];
+                          }}
+                          // Header row gets the same class so the day
+                          // label above a blocked column reads red too.
+                          dayHeaderClassNames={(arg) => {
+                            const yyyy = arg.date.getFullYear();
+                            const mm = String(arg.date.getMonth() + 1).padStart(
+                              2,
+                              "0",
+                            );
+                            const dd = String(arg.date.getDate()).padStart(
+                              2,
+                              "0",
+                            );
+                            const dateKey = `${yyyy}-${mm}-${dd}`;
+                            const isSunday =
+                              scheduleViewMode === "timeline" &&
+                              arg.date.getDay() === 0;
+                            return isSunday || unavailableDateSet.has(dateKey)
+                              ? ["fc-day-unavailable"]
+                              : [];
+                          }}
                           eventClick={handleEventClick}
                           dateClick={handleDateClick}
                           eventContent={renderEventContent}
+                          // Force chips to fill their day column even
+                          // when two events overlap in time. Combined
+                          // with the segment fan-out above, this keeps
+                          // the timeline visually clean — no half-width
+                          // / quarter-width "split" chips.
+                          slotEventOverlap={false}
+                          // Tag continuation chips so the CSS can drop
+                          // their borders / dim them — same model as
+                          // the wizard's project-schedule view.
+                          eventClassNames={(arg) => {
+                            const segIndex = (
+                              arg.event.extendedProps as {
+                                segmentIndex?: number;
+                              }
+                            )?.segmentIndex;
+                            const totalSegs = (
+                              arg.event.extendedProps as {
+                                totalSegments?: number;
+                              }
+                            )?.totalSegments;
+                            const cls = timelineSegmentClassName(
+                              segIndex,
+                              totalSegs,
+                            );
+                            return cls ? [cls] : [];
+                          }}
+                          // Fires whenever the visible date range changes
+                          // (prev/next, today, view switch, initial mount).
+                          // Powers the "show only what's currently
+                          // visible" filter on the side-panel list.
+                          datesSet={(arg) => {
+                            setCalendarViewRange({
+                              startKey: arg.startStr.slice(0, 10),
+                              endKey: arg.endStr.slice(0, 10),
+                            });
+                          }}
                           headerToolbar={{
                             left: "prev",
                             center: "title",
@@ -942,10 +1793,30 @@ export default function AdminSchedule() {
                           }}
                           firstDay={1}
                           height="100%"
-                          contentHeight="100%"
-                          expandRows={true}
+                          // contentHeight=100% on time-grid forces the
+                          // 24-hour table to compress into the visible
+                          // area, killing the scroller. Only set it for
+                          // month view, where there's no internal scroll.
+                          contentHeight={
+                            scheduleViewMode === "timeline" ? undefined : "100%"
+                          }
+                          // expandRows on the 24h time-grid would also
+                          // compress every hour into the viewport. Off
+                          // for timeline mode so each slot keeps its
+                          // natural height and FC's own internal vertical
+                          // scroller appears.
+                          expandRows={scheduleViewMode !== "timeline"}
+                          // Month-view only props — no-ops in time-grid view.
                           fixedWeekCount={false}
                           dayMaxEvents={1}
+                          // Time-grid view config (ignored by dayGridMonth).
+                          allDaySlot={false}
+                          nowIndicator
+                          slotMinTime="00:00:00"
+                          slotMaxTime="24:00:00"
+                          scrollTime="08:00:00"
+                          slotDuration="00:30:00"
+                          slotLabelInterval="01:00"
                         />
                       </div>
                     </div>
@@ -997,14 +1868,32 @@ export default function AdminSchedule() {
                             </p>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => openCreateUnavailableDay()}
-                            className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
-                          >
-                            <Plus className="h-3 w-3" />
-                            Add
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleRefreshUnavailableDays()
+                              }
+                              disabled={refreshingUnavailableDays}
+                              aria-label="Refresh unavailable days"
+                              title="Refresh unavailable days"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                            >
+                              <RefreshCw
+                                className={`h-3 w-3 ${
+                                  refreshingUnavailableDays ? "animate-spin" : ""
+                                }`}
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openCreateUnavailableDay()}
+                              className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                            >
+                              <Plus className="h-3 w-3" />
+                              Add
+                            </button>
+                          </div>
                         </div>
 
                         <div className="max-h-[210px] divide-y divide-gray-200 overflow-y-auto pr-1 dark:divide-slate-800">
@@ -1018,7 +1907,7 @@ export default function AdminSchedule() {
                               <button
                                 key={day.id}
                                 type="button"
-                                onClick={() => setSelectedDate(day.blockedDate)}
+                                onClick={() => setViewingUnavailableDay(day)}
                                 className="w-full rounded-lg px-2 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800/80"
                               >
                                 <div className="flex items-start justify-between gap-2">
@@ -1261,11 +2150,21 @@ export default function AdminSchedule() {
                                     {getUnavailableTypeLabel(day)}
                                   </span>
                                 </div>
-                                {day.notes ? (
-                                  <p className="mt-1 text-xs text-gray-600 dark:text-slate-300">
-                                    {day.notes}
-                                  </p>
-                                ) : null}
+                                <p className="mt-1 text-xs text-gray-600 dark:text-slate-300">
+                                  {day.isFullDay
+                                    ? "All day"
+                                    : `${new Date(
+                                        day.blockedStartDatetime,
+                                      ).toLocaleString("en-US", {
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                      })} – ${new Date(
+                                        day.blockedEndDatetime,
+                                      ).toLocaleString("en-US", {
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                      })}`}
+                                </p>
                               </div>
 
                               {day.isEditable ? (
@@ -1372,6 +2271,7 @@ export default function AdminSchedule() {
         initialValue={toUnavailableModalValue(
           editingUnavailableDay,
           modalDateOverride,
+          unavailableDays,
         )}
         saving={savingUnavailableDay}
         onClose={() => {
@@ -1381,6 +2281,29 @@ export default function AdminSchedule() {
           setModalDateOverride(null);
         }}
         onSubmit={(value) => void handleSaveUnavailableDay(value)}
+      />
+
+      <UnavailableBlockDetailModal
+        open={viewingUnavailableDay !== null}
+        block={viewingUnavailableDay}
+        deleting={
+          viewingUnavailableDay !== null &&
+          deletingUnavailableDayId === viewingUnavailableDay.id
+        }
+        onClose={() => setViewingUnavailableDay(null)}
+        onEdit={() => {
+          if (!viewingUnavailableDay) return;
+          // Hand off to the create/edit modal in edit mode. The detail
+          // modal closes; the user's actions land in the existing flow.
+          openEditUnavailableDay(viewingUnavailableDay);
+          setViewingUnavailableDay(null);
+        }}
+        onDelete={async () => {
+          if (!viewingUnavailableDay) return;
+          const target = viewingUnavailableDay;
+          await deleteUnavailableDay(target);
+          setViewingUnavailableDay(null);
+        }}
       />
     </>
   );
