@@ -48,6 +48,7 @@ type StatusKey =
   | "review_pending"
   | "invoice_pending"
   | "invoice_agreement_pending"
+  | "invoice_signed"
   | "payment_pending"
   | "employee_management_pending"
   | "conclude_job_pending"
@@ -75,6 +76,7 @@ const POST_CREATION_STATUSES: StatusKey[] = [
   "review_pending",
   "invoice_pending",
   "invoice_agreement_pending",
+  "invoice_signed",
   "payment_pending",
   "employee_management_pending",
   "conclude_job_pending",
@@ -197,6 +199,12 @@ const STATUS_META: Record<StatusKey, StatusMeta> = {
     badgeBorder: "#c7d2fe",
     badgeColor: "#4338ca",
   },
+  invoice_signed: {
+    label: "Invoice Signed",
+    badgeBg: "#ecfeff",
+    badgeBorder: "#a5f3fc",
+    badgeColor: "#0e7490",
+  },
   payment_pending: {
     label: "Payment Pending",
     badgeBg: "#fff7ed",
@@ -263,12 +271,31 @@ function getProjectRoute(projectId: string, status: StatusKey | "unknown"): stri
       // quotation page before advancing to downpayment.
       return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
     case "downpayment_pending":
+      // Land on the admin dashboard with a query flag the JobProgressCard
+      // listens for, which opens the Downpayment modal automatically.
+      return `/admin?openDownpayment=${projectId}`;
     case "ready_to_start":
+      // Same pattern: dashboard + a flag that pops the kickoff modal so
+      // the manager can confirm-start from one click.
+      return `/admin?openKickoff=${projectId}`;
     case "in_progress":
-    case "review_pending":
+      // Live projects belong on the dashboard — that's where the
+      // JobProgressCard tracks subtask completion in real time. The
+      // ?projectId param tells admin/page.tsx to pre-select this row
+      // on load instead of falling through to whatever the auto-pick
+      // would have chosen.
+      return `/admin?projectId=${projectId}`;
     case "invoice_pending":
     case "invoice_agreement_pending":
+    case "invoice_signed":
     case "payment_pending":
+      // Anything invoice-related (preparing → sent → signed → payment
+      // pending) lands on the invoice-generation page. From there the
+      // admin can preview/download the PDF, send it to the client, or
+      // hit "Go to Payment" which redirects to the dashboard with the
+      // FinalPaymentModal pre-opened.
+      return `/admin/projects/invoice-generation?projectId=${projectId}`;
+    case "review_pending":
     case "employee_management_pending":
     case "conclude_job_pending":
     case "completed":
