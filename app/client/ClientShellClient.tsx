@@ -13,6 +13,7 @@ import {
   SidebarBadgesProvider,
   useSidebarBadge,
 } from "@/components/sidebar-badges"
+import { useMessagesUnread } from "@/lib/hooks/useMessagesUnread"
 import { cn } from "@/lib/utils"
 
 type Role = "client" | "staff" | "manager" | "admin"
@@ -38,6 +39,15 @@ const PENDING_DOCUMENT_STATUSES = new Set([
   "grant_access_quotation",
   "invoice_agreement_pending",
 ])
+
+function ClientMessagesBadge() {
+  // Lazily import the unread-count hook here so this file's prop signature
+  // stays untouched. The hook is a no-op for project-cookie clients (the
+  // unread-count API short-circuits to 0 when there's no auth user).
+  const total = useMessagesUnread("/client/messages")
+  useSidebarBadge("messages", total, "danger")
+  return null
+}
 
 function ClientPendingDocumentBadge() {
   const { projectId } = useClientProject()
@@ -106,6 +116,7 @@ function ClientShell({
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
       <AppSidebar role={role} user={user} />
       <ClientPendingDocumentBadge />
+      <ClientMessagesBadge />
 
       {/* Mobile-only top bar with the hamburger trigger. The sidebar primitive
           renders the desktop sidebar `hidden md:block`, so on phones there's
@@ -113,8 +124,8 @@ function ClientShell({
       <div
         className="md:hidden sticky top-0 z-30 flex items-center gap-2 border-b px-3 py-2"
         style={{
-          background: "var(--cp-bg)",
-          borderColor: "var(--cp-border, rgb(226 232 240))",
+          background: "var(--app-bg)",
+          borderColor: "rgb(226 232 240)",
         }}
       >
         <SidebarTrigger
@@ -133,7 +144,7 @@ function ClientShell({
           "md:transition-[padding-left] md:duration-300 md:ease-in-out",
           open ? "md:pl-(--sidebar-width)" : "md:pl-(--sidebar-width-icon)",
         )}
-        style={{ background: "var(--cp-bg)" }}
+        style={{ background: "var(--app-bg)" }}
       >
         {children}
       </main>
