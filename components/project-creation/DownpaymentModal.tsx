@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Send, Check } from "lucide-react";
+import { toast } from "sonner";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
@@ -21,6 +22,8 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
   const [percentage, setPercentage] = useState<string>("50");
   const [paidAmount, setPaidAmount] = useState<string>("");
   const [confirming, setConfirming] = useState(false);
+  const [notifying, setNotifying] = useState(false);
+  const [notified, setNotified] = useState(false);
 
   useEffect(() => {
     if (!open || !projectId) return;
@@ -29,6 +32,7 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
     setPercentage("50");
     setEstimatedCost(0);
     setEstimatedBudget(0);
+    setNotified(false);
 
     async function fetchBudget() {
       setLoadingBudget(true);
@@ -59,6 +63,52 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
   const paid = parseFloat(paidAmount) || 0;
   const neededDownpayment = Math.max(0, calculatedDownpayment - paid);
   const canConfirm = paid > 0 && paid >= calculatedDownpayment;
+
+  async function handleNotifyClient() {
+    if (!projectId || notifying) return;
+
+    try {
+      setNotifying(true);
+      const response = await fetch("/api/planning/notifyDownpaymentClient", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          // Send the figures the manager is currently looking at so the
+          // reminder message tells the client exactly how much is needed,
+          // rather than a generic "downpayment due".
+          calculatedDownpayment,
+          paidAmount: paid,
+          neededDownpayment,
+          percentage: pct,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to notify client.",
+        );
+      }
+
+      setNotified(true);
+      toast.success("Client notified about downpayment.", {
+        description:
+          "A reminder was posted in the project conversation.",
+      });
+      // Auto-clear so the manager can re-notify if the client hasn't acted
+      // on it yet.
+      window.setTimeout(() => setNotified(false), 10_000);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to notify client.",
+      );
+    } finally {
+      setNotifying(false);
+    }
+  }
 
   async function handleConfirm() {
     if (!projectId || confirming) return;
@@ -212,7 +262,23 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-5 py-4">
+          <button
+            type="button"
+            onClick={handleNotifyClient}
+            disabled={notifying || notified || confirming || loadingBudget || !projectId}
+            className="mr-auto inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {notifying ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : notified ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {notified ? "Client notified" : "Notify Client"}
+          </button>
+
           <button
             type="button"
             onClick={onClose}

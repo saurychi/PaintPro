@@ -3,6 +3,17 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+// POST /api/planning/notifyDownpaymentClient
+//
+// Drops a message in the project's conversation telling the client their
+// downpayment is needed. Mirrors the notifyQuotationClient pattern:
+//   - sender is the project owner (created_by), not whichever staff member
+//     happened to click the button
+//   - if a matching auth-user client exists (linked by email), add them as
+//     a participant so they actually see the conversation in their messages
+//   - project-cookie clients are reached via the existing project_id-based
+//     fallback in /api/messages/conversations
+
 async function getAuthUserId(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
@@ -24,41 +35,61 @@ async function getAuthUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function buildQuotationReminderMessage(
-  projectCode: string | null,
-  title: string | null,
-  status: string,
-) {
-  const label =
-    typeof projectCode === "string" && projectCode.trim()
-      ? `quotation ${projectCode.trim()}`
-      : typeof title === "string" && title.trim()
-        ? `quotation for ${title.trim()}`
-        : "quotation";
+function formatAud(amount: number) {
+  return `$AUD ${amount.toLocaleString("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
-  // grant_access_quotation means the admin has explicitly released the
-  // quotation for client signature; the message should call that out so the
-  // client knows they can take action now (not just preview).
-  if (status === "grant_access_quotation") {
-    return `Your ${label} is ready to be signed. Please open the pending quotation in your documents and submit your signature when you're ready.`;
+function buildDownpaymentReminderMessage(opts: {
+  projectCode: string | null;
+  title: string | null;
+  calculatedDownpayment: number;
+  paidAmount: number;
+  neededDownpayment: number;
+  percentage: number;
+}) {
+  const label =
+    typeof opts.projectCode === "string" && opts.projectCode.trim()
+      ? `project ${opts.projectCode.trim()}`
+      : typeof opts.title === "string" && opts.title.trim()
+        ? `project ${opts.title.trim()}`
+        : "your project";
+
+  const calculated = opts.calculatedDownpayment;
+  const paid = opts.paidAmount;
+  const needed = opts.neededDownpayment;
+
+  // No amount was supplied (older client or bad data) — fall back to a
+  // generic reminder so we still get the message out.
+  if (!Number.isFinite(calculated) || calculated <= 0) {
+    return `${label} is ready for downpayment. Please review the amount and submit your payment so we can move forward with the work.`;
   }
 
-  return `Your ${label} is ready for review. Please check the pending quotation in your documents and let us know if you have any questions.`;
+  if (paid > 0 && needed > 0) {
+    return `${label} is ready for downpayment. ${formatAud(paid)} has already been recorded against the required ${formatAud(calculated)}, leaving ${formatAud(needed)} still due. Please submit the remainder so we can move forward with the work.`;
+  }
+
+  return `${label} is ready for downpayment. The amount due is ${formatAud(calculated)}. Please submit your payment so we can move forward with the work.`;
 }
 
 export async function POST(request: NextRequest) {
   const userId = await getAuthUserId();
-
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   const body = await request.json().catch(() => null);
   const projectId = String(body?.projectId ?? "").trim();
-
   if (!projectId) {
     return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
   }
+
+  const calculatedDownpayment = Number(body?.calculatedDownpayment ?? 0);
+  const paidAmount = Number(body?.paidAmount ?? 0);
+  const neededDownpayment = Number(body?.neededDownpayment ?? 0);
+  const percentage = Number(body?.percentage ?? 0);
 
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
@@ -76,16 +107,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (
-    project.status !== "quotation_pending" &&
-    project.status !== "grant_access_quotation"
-  ) {
+  if (project.status !== "downpayment_pending") {
     return NextResponse.json(
-      { error: "This quotation is no longer pending client review." },
+      { error: "This project is not currently awaiting downpayment." },
       { status: 400 },
     );
   }
 
+  // Find or create the project conversation.
   let conversationId: string | null = null;
 
   const { data: existingConvos, error: convoLookupError } = await supabaseAdmin
@@ -106,7 +135,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (existingConvos && existingConvos.length > 0) {
-    conversationId = existingConvos[0].id;
+    conversationId = existingConvos[0].id as string;
   } else {
     const { data: newConversation, error: convError } = await supabaseAdmin
       .from("conversations")
@@ -124,54 +153,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    conversationId = newConversation.id;
+    conversationId = newConversation.id as string;
   }
 
-  // The notification is always FROM the project's owning manager (the user
-  // who created the project), regardless of which staff or admin actually
-  // clicked the button. This keeps the conversation cleanly scoped to
-  // "manager <-> client" instead of leaking whoever was helping.
-  const projectOwnerId = (project as { created_by?: string | null }).created_by ?? userId;
+  const projectOwnerId = project.created_by ?? userId;
 
-  const { data: existingParticipant, error: participantLookupError } =
-    await supabaseAdmin
-      .from("conversation_participants")
-      .select("conversation_id")
-      .eq("conversation_id", conversationId)
-      .eq("user_id", projectOwnerId)
-      .maybeSingle();
+  // Ensure the project owner is a participant.
+  const { data: ownerParticipant } = await supabaseAdmin
+    .from("conversation_participants")
+    .select("conversation_id")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", projectOwnerId)
+    .maybeSingle();
 
-  if (participantLookupError) {
-    return NextResponse.json(
-      {
-        error: "Failed to verify conversation participant.",
-        details: participantLookupError.message,
-      },
-      { status: 500 },
-    );
-  }
-
-  if (!existingParticipant) {
-    const { error: participantInsertError } = await supabaseAdmin
+  if (!ownerParticipant) {
+    const { error: ownerInsertError } = await supabaseAdmin
       .from("conversation_participants")
       .insert([{ conversation_id: conversationId, user_id: projectOwnerId }]);
 
-    if (participantInsertError) {
+    if (ownerInsertError) {
       return NextResponse.json(
         {
           error: "Failed to add conversation participant.",
-          details: participantInsertError.message,
+          details: ownerInsertError.message,
         },
         { status: 500 },
       );
     }
   }
 
-  // Also add the project's client as a participant if they have a matching
-  // auth user (clients linked by email). Without this, an auth-user client
-  // can't see the conversation via conversation_participants and would miss
-  // the notification entirely. Project-cookie clients are reached separately
-  // through the project_id-based fallback in /api/messages/conversations.
+  // If the client has a matching auth user, add them too so they see the
+  // conversation in their participant list. Project-cookie clients reach
+  // the conversation through the project_id fallback regardless.
   if (project.client_id) {
     const { data: clientRow } = await supabaseAdmin
       .from("clients")
@@ -209,18 +222,21 @@ export async function POST(request: NextRequest) {
     {
       conversation_id: conversationId,
       sender_id: projectOwnerId,
-      content: buildQuotationReminderMessage(
-        project.project_code,
-        project.title,
-        project.status,
-      ),
+      content: buildDownpaymentReminderMessage({
+        projectCode: project.project_code,
+        title: project.title,
+        calculatedDownpayment,
+        paidAmount,
+        neededDownpayment,
+        percentage,
+      }),
     },
   ]);
 
   if (messageError) {
     return NextResponse.json(
       {
-        error: "Failed to send quotation notification.",
+        error: "Failed to send downpayment notification.",
         details: messageError.message,
       },
       { status: 500 },

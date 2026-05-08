@@ -336,7 +336,12 @@ export default function OverviewPage() {
   async function handleGenerateQuotation() {
     setIsNavigating("quote");
 
-    // Batch-save all cached wizard data to the database
+    // Batch-save all cached wizard data to the database. We deliberately
+    // DO NOT advance the status here — if PDF generation fails below,
+    // the status flip would still be committed and a refresh would land
+    // the user on /quotation-generation with no PDF in storage (the
+    // "Failed to generate quotation PDF" loop). The status only moves
+    // forward AFTER the PDF is in the bucket.
     const cache = getWizardCache(projectId);
     if (cache) {
       try {
@@ -349,7 +354,7 @@ export default function OverviewPage() {
             subTasks: cache.subTasks,
             materials: cache.materials,
             markupRate: cache.markupRate,
-            status: "quotation_pending",
+            status: "overview_pending",
           }),
         });
 
@@ -381,12 +386,41 @@ export default function OverviewPage() {
 
       if (!generateResponse.ok) {
         const data = await generateResponse.json().catch(() => null);
-        toast.error(data?.error || "Failed to generate quotation PDF.");
+        // Surface whatever the server reported in `details` so the
+        // toast actually tells us what's failing — the bare "Failed to
+        // generate quotation PDF" message hides the real cause.
+        const baseError = data?.error || "Failed to generate quotation PDF.";
+        toast.error(
+          data?.details ? `${baseError} (${data.details})` : baseError,
+        );
         setIsNavigating(null);
         return;
       }
     } catch (error: any) {
       toast.error(error?.message || "Failed to generate quotation PDF.");
+      setIsNavigating(null);
+      return;
+    }
+
+    // PDF is in the bucket — now (and only now) flip the status so a
+    // refresh from anywhere routes the user to /quotation-generation.
+    try {
+      const statusResponse = await fetch("/api/planning/updateProjectStatus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          status: "quotation_pending",
+        }),
+      });
+      if (!statusResponse.ok) {
+        const data = await statusResponse.json().catch(() => null);
+        toast.error(data?.error || "Failed to update project status.");
+        setIsNavigating(null);
+        return;
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to update project status.");
       setIsNavigating(null);
       return;
     }
@@ -891,6 +925,32 @@ export default function OverviewPage() {
           scrollbar-color: ${ACCENT} #0f172a;
         }
       `}</style>
+
+      {/* Generating-quotation overlay. Shown while handleGenerateQuotation
+          is in flight (state === "quote") so the user gets visible
+          feedback during the multi-second PDF render. backdrop-blur-sm
+          on a tinted layer dims the page underneath. */}
+      {isNavigating === "quote" ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-sm rounded-md border border-gray-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex flex-col items-center text-center">
+              <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-md bg-emerald-50 dark:bg-emerald-500/10">
+                <Loader2
+                  className="h-7 w-7 animate-spin"
+                  style={{ color: ACCENT }}
+                />
+              </div>
+              <p className="text-base font-semibold text-gray-900 dark:text-slate-100">
+                Generating quotation...
+              </p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                Please wait while we render the PDF and stash it in
+                storage. This usually takes a few seconds.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

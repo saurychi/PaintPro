@@ -19,6 +19,14 @@ import type {
 } from "@fullcalendar/core";
 import type { EventResizeDoneArg } from "@fullcalendar/interaction";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
+// Sunday + lunch (12-13 LOCAL) + work-hour (09-17) rules shared with the
+// schedule generator and the staff-completion cascade so a span never
+// changes shape based on which call path produced it.
+import {
+  computeWorkSegments,
+  isNonWorkingDay,
+  placeWorkSpan,
+} from "@/lib/schedule/workHours";
 
 type StepStatus = "done" | "active" | "pending";
 
@@ -67,10 +75,27 @@ function addHoursToIso(startIso: string | null, hours: number | null) {
   return end.toISOString();
 }
 
+// Computes the envelope end (last segment's end) for a task that
+// occupies `hours` of work starting at `startIso`. Mirrors the segment
+// model used by `snapToAvailableSpan` so start + computed end reflect
+// the same lunch / unavailable-day pauses the renderer paints.
+function endIsoWithLunch(
+  startIso: string | null,
+  hours: number | null,
+  unavailable?: Set<string>,
+) {
+  if (!startIso || typeof hours !== "number" || hours <= 0) {
+    return addHoursToIso(startIso, hours);
+  }
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) return null;
+  return placeWorkSpan(start, hours, unavailable).end.toISOString();
+}
+
 function localDateKey(date: Date) {
-  // Match the YYYY-MM-DD shape stored in unavailable_days.blocked_date,
-  // computed from the LOCAL day so a 23:00 timestamp doesn't accidentally
-  // match the next UTC date.
+  // Match the YYYY-MM-DD slice the cascade compares against (derived from
+  // unavailable_days.blocked_start_datetime), computed from the LOCAL day so a
+  // 23:00 timestamp doesn't accidentally match the next UTC date.
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
@@ -87,7 +112,9 @@ function snapToAvailableDay(
 
   let skipped = 0;
   // Bound the loop so a misconfigured set can't spin forever.
-  while (unavailable.has(localDateKey(date)) && skipped < 365) {
+  // isNonWorkingDay treats Sunday as blocked too — no need to seed the
+  // set with every Sunday.
+  while (isNonWorkingDay(date, unavailable) && skipped < 365) {
     date.setDate(date.getDate() + 1);
     skipped += 1;
   }
@@ -95,18 +122,17 @@ function snapToAvailableDay(
   return { iso: date.toISOString(), skippedDays: skipped };
 }
 
-// Span-aware variant: pushes the start forward until the FULL [start, end)
-// span (where end = start + hours) clears every blocked day. This handles
-// the long-event case where a subtask starts on a clean day but its
-// duration runs through one — without this, the event renders chunks on
-// red columns because FullCalendar splits multi-day events per-day.
+// Snap a requested start to the first valid working moment that can
+// host a task of `hours` work. With segments, the placement helper
+// itself walks past lunch / non-working days, so all we need to return
+// is the first segment's start. `skippedDays` counts whole days the
+// snap moved past so callers can show "shifted N days" toasts.
 function snapToAvailableSpan(
   startIso: string | null,
   hours: number | null,
   unavailable: Set<string>,
 ): { iso: string | null; skippedDays: number } {
   if (!startIso) return { iso: startIso, skippedDays: 0 };
-  if (unavailable.size === 0) return { iso: startIso, skippedDays: 0 };
   if (hours === null || hours <= 0) {
     return snapToAvailableDay(startIso, unavailable);
   }
@@ -114,43 +140,23 @@ function snapToAvailableSpan(
   const date = new Date(startIso);
   if (Number.isNaN(date.getTime())) return { iso: startIso, skippedDays: 0 };
 
-  let skipped = 0;
-  for (let guard = 0; guard < 365; guard++) {
-    const end = new Date(date.getTime() + hours * 60 * 60 * 1000);
-
-    // Walk every calendar day the event touches: from the start's local
-    // day through the day before `end` (an event ending exactly at
-    // midnight doesn't occupy the next day).
-    const cursor = new Date(date);
-    cursor.setHours(0, 0, 0, 0);
-    let firstBlocked: Date | null = null;
-    while (cursor < end) {
-      if (unavailable.has(localDateKey(cursor))) {
-        firstBlocked = new Date(cursor);
-        break;
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-
-    if (!firstBlocked) {
-      return { iso: date.toISOString(), skippedDays: skipped };
-    }
-
-    // Move start to the day after the blocked one, preserving time-of-day
-    // so the user's chosen hour isn't lost across the snap.
-    const moved = new Date(firstBlocked);
-    moved.setHours(
-      date.getHours(),
-      date.getMinutes(),
-      date.getSeconds(),
-      date.getMilliseconds(),
-    );
-    moved.setDate(moved.getDate() + 1);
-    date.setTime(moved.getTime());
-    skipped += 1;
+  const placed = placeWorkSpan(date, hours, unavailable);
+  if (placed.segments.length === 0) {
+    return { iso: startIso, skippedDays: 0 };
   }
 
-  return { iso: date.toISOString(), skippedDays: skipped };
+  const originalDay = new Date(date);
+  originalDay.setHours(0, 0, 0, 0);
+  const snappedDay = new Date(placed.start);
+  snappedDay.setHours(0, 0, 0, 0);
+  const skippedDays = Math.max(
+    0,
+    Math.round(
+      (snappedDay.getTime() - originalDay.getTime()) / (24 * 60 * 60 * 1000),
+    ),
+  );
+
+  return { iso: placed.start.toISOString(), skippedDays };
 }
 
 // Stable palette for the calendar event chips. Derived per main task index
@@ -268,7 +274,7 @@ function compactScheduleFromIndex(
       unavailable,
     );
     const newStart = snapped.iso;
-    const newEnd = addHoursToIso(newStart, step.estimatedHours);
+    const newEnd = endIsoWithLunch(newStart, step.estimatedHours, unavailable);
 
     // Compare by timestamp, not by string, since the DB returns ISO strings
     // with a "+00:00" offset while Date#toISOString() returns "Z" + ms — the
@@ -331,6 +337,19 @@ export default function ProjectSchedulePage() {
   const [unavailableDates, setUnavailableDates] = useState<Set<string>>(
     () => new Set(),
   );
+  // Full-fidelity blocks (start, end, isFullDay, reason) so partial-time
+  // blocks can render as background bands on the time grid even when the
+  // YYYY-MM-DD set above doesn't capture them. Whole-day rows still go
+  // through the day-cell painter; this is purely additive.
+  type UnavailableBlock = {
+    startIso: string;
+    endIso: string;
+    isFullDay: boolean;
+    reason: string | null;
+  };
+  const [unavailableBlocks, setUnavailableBlocks] = useState<
+    UnavailableBlock[]
+  >([]);
   // Tracks whether the unavailable-days fetch has finished, regardless of
   // whether it returned anything. The auto-normalize pass needs this signal
   // so it doesn't run before the blocked-day set is available (and end up
@@ -660,10 +679,34 @@ export default function ProjectSchedulePage() {
           ? data.unavailableDays
           : [];
         const set = new Set<string>();
+        const blocks: UnavailableBlock[] = [];
         for (const day of days) {
-          if (typeof day?.blockedDate === "string") set.add(day.blockedDate);
+          // Whole-day blocks go to the day-key set so isNonWorkingDay
+          // skips them during placement and the column paints red. We
+          // exclude partial blocks here because adding them would mark
+          // the WHOLE day blocked even though only a few hours are.
+          if (day?.isFullDay && typeof day?.blockedDate === "string") {
+            set.add(day.blockedDate);
+          }
+          // Every block (full or partial) is captured here so the time
+          // grid can paint a visible cue for the actual time range.
+          if (
+            typeof day?.blockedStartDatetime === "string" &&
+            typeof day?.blockedEndDatetime === "string"
+          ) {
+            blocks.push({
+              startIso: day.blockedStartDatetime,
+              endIso: day.blockedEndDatetime,
+              isFullDay: Boolean(day.isFullDay),
+              reason:
+                typeof day?.reason === "string" && day.reason.trim()
+                  ? day.reason.trim()
+                  : null,
+            });
+          }
         }
         setUnavailableDates(set);
+        setUnavailableBlocks(blocks);
       } catch {
         // Non-fatal: scheduling still works, we just won't auto-skip blocks.
       } finally {
@@ -681,11 +724,19 @@ export default function ProjectSchedulePage() {
     normalizeDoneRef.current = false;
   }, [projectId]);
 
-  // Auto-fix on load: snap any subtask whose time span overlaps an
-  // unavailable day forward to the next clear window. Does NOT force
-  // sequential ordering — subtasks under different main tasks can run in
-  // parallel. Runs exactly once per project load (after both the schedule
-  // and the unavailable-days set have finished loading).
+  // Auto-normalize on load: walk the schedule once sequentially via
+  // compactScheduleFromIndex(0) so legacy data gets cleaned up under
+  // the segment model. This:
+  //   - Re-snaps starts past unavailable / Sunday days
+  //   - Re-computes ends from the segment-aware helper (so chips stored
+  //     under the old slide model get correct end-times)
+  //   - Pushes any subtask that overlaps the prior one forward,
+  //     eliminating cross-task overlap left over by older generator runs
+  //
+  // When anything moves, we also fire a silent POST to
+  // /api/planning/saveProjectSchedule so the corrected times persist to
+  // the DB. Without this the same rows would re-normalize on every load
+  // and pop a toast each time.
   useEffect(() => {
     if (normalizeDoneRef.current) return;
     if (loading) return;
@@ -694,43 +745,38 @@ export default function ProjectSchedulePage() {
 
     normalizeDoneRef.current = true;
 
-    // Nothing to snap when there are no blocked days at all.
-    if (unavailableDates.size === 0) return;
+    const result = compactScheduleFromIndex(services, 0, unavailableDates);
+    if (result.movedCount === 0) return;
 
-    const next = services.map((group) => ({
-      ...group,
-      children: group.children.map((child) => ({ ...child })),
-    }));
+    setServices(result.services);
+    updateCacheFromServices(result.services);
 
-    let movedCount = 0;
-
-    for (const group of next) {
-      for (const step of group.children) {
-        if (!step.scheduledStartDatetime) continue;
-
-        const snapped = snapToAvailableSpan(
-          step.scheduledStartDatetime,
-          step.estimatedHours,
-          unavailableDates,
-        );
-
-        if (snapped.skippedDays > 0 && snapped.iso) {
-          const newEnd = addHoursToIso(snapped.iso, step.estimatedHours);
-          step.scheduledStartDatetime = snapped.iso;
-          step.scheduledEndDatetime = newEnd;
-          movedCount += 1;
-        }
-      }
-    }
-
-    if (movedCount > 0) {
-      setServices(next);
-      updateCacheFromServices(next);
-      toast.message(
-        `Moved ${movedCount} subtask${
-          movedCount === 1 ? "" : "s"
-        } off unavailable days.`,
+    // Persist the snapped values so subsequent loads see clean data
+    // and skip this branch entirely. Best-effort — a failure just
+    // means the next load will re-normalize, no user-visible damage.
+    if (projectId) {
+      const schedules = result.services.flatMap((group) =>
+        group.children
+          .filter((child) => child.scheduledStartDatetime)
+          .map((child) => ({
+            projectSubTaskId: child.id,
+            estimatedHours: child.estimatedHours,
+            scheduledStartDatetime: child.scheduledStartDatetime,
+            scheduledEndDatetime: child.scheduledEndDatetime,
+          })),
       );
+      if (schedules.length > 0) {
+        void fetch("/api/planning/saveProjectSchedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, schedules }),
+        }).catch((error) => {
+          console.warn(
+            "[project-schedule] auto-normalize save failed (will retry on next load):",
+            error,
+          );
+        });
+      }
     }
   }, [loading, unavailableDatesLoaded, services, unavailableDates, projectId]);
 
@@ -822,41 +868,113 @@ export default function ProjectSchedulePage() {
   }, [services]);
 
   // Build the FullCalendar event list from the same `services` state the
-  // list editor used. Each subtask becomes one event coloured by its main
-  // task, plus background events for unavailable days so blocked dates show
-  // up as a red wash.
+  // list editor used. Each subtask is fanned out into one chip per work
+  // segment (split by lunch / unavailable days / 17:00) so the lunch row
+  // and blocked columns stay visually empty even for multi-block tasks.
+  // Continuation chips share the subtask's id via `extendedProps.subTaskId`
+  // and are non-draggable; only the FIRST segment is editable so a drag
+  // moves the whole task.
   const calendarEvents = useMemo<EventInput[]>(() => {
     const out: EventInput[] = [];
 
     services.forEach((group, groupIndex) => {
       const color = colorForMainTask(groupIndex);
       for (const step of group.children) {
-        if (!step.scheduledStartDatetime || !step.scheduledEndDatetime) continue;
-        out.push({
-          id: step.id,
-          title: step.title,
-          start: step.scheduledStartDatetime,
-          end: step.scheduledEndDatetime,
-          backgroundColor: color.bg,
-          borderColor: color.border,
-          textColor: "#ffffff",
-          extendedProps: {
-            mainTaskTitle: group.title,
-            estimatedHours: step.estimatedHours,
-          },
+        if (!step.scheduledStartDatetime) continue;
+        const startDate = new Date(step.scheduledStartDatetime);
+        if (Number.isNaN(startDate.getTime())) continue;
+
+        // Prefer the subtask's known work-hours; fall back to the wall-
+        // clock duration of the stored span when hours are missing (e.g.
+        // legacy rows). Fallback uses the span as-is — without a known
+        // work-hour count we can't resegment.
+        const hours =
+          typeof step.estimatedHours === "number" && step.estimatedHours > 0
+            ? step.estimatedHours
+            : null;
+
+        if (hours === null) {
+          if (!step.scheduledEndDatetime) continue;
+          out.push({
+            id: step.id,
+            title: step.title,
+            start: step.scheduledStartDatetime,
+            end: step.scheduledEndDatetime,
+            backgroundColor: color.bg,
+            borderColor: color.border,
+            textColor: "#ffffff",
+            extendedProps: {
+              subTaskId: step.id,
+              segmentIndex: 0,
+              totalSegments: 1,
+              mainTaskTitle: group.title,
+              estimatedHours: step.estimatedHours,
+            },
+          });
+          continue;
+        }
+
+        const segments = computeWorkSegments(startDate, hours, unavailableDates);
+        if (segments.length === 0) continue;
+
+        segments.forEach((seg, segIndex) => {
+          out.push({
+            id: `${step.id}__seg${segIndex}`,
+            title: step.title,
+            start: seg.start.toISOString(),
+            end: seg.end.toISOString(),
+            backgroundColor: color.bg,
+            borderColor: color.border,
+            textColor: "#ffffff",
+            // Only the first segment is the drag handle for the whole
+            // task. Continuation chips render in place but ignore drags
+            // (and aren't resizable since duration is owned by the task,
+            // not a single segment).
+            startEditable: segIndex === 0,
+            durationEditable: segIndex === segments.length - 1,
+            extendedProps: {
+              subTaskId: step.id,
+              segmentIndex: segIndex,
+              totalSegments: segments.length,
+              mainTaskTitle: group.title,
+              estimatedHours: step.estimatedHours,
+            },
+          });
         });
       }
     });
 
+    // Partial-time unavailable blocks render as red striped background
+    // bands on the time grid for the exact hours they cover. Whole-day
+    // blocks are skipped here — those are already painted via
+    // dayCellClassNames + a red column wash.
+    for (const block of unavailableBlocks) {
+      if (block.isFullDay) continue;
+      out.push({
+        start: block.startIso,
+        end: block.endIso,
+        display: "background",
+        classNames: ["fc-partial-unavailable"],
+        title: block.reason ?? "Unavailable",
+        extendedProps: {
+          partialUnavailable: true,
+          reason: block.reason,
+        },
+      });
+    }
+
     return out;
-  }, [services, unavailableDates]);
+  }, [services, unavailableDates, unavailableBlocks]);
 
   // Tag unavailable days on both the column and header so the calendar
   // shows them red. We do this with class names instead of background
   // events because background events don't always render across the full
   // column height in timeGrid views, while a CSS-styled cell does.
+  // Paint a column red on the calendar if it's in the manual unavailable
+  // set OR a Sunday — the snap helpers refuse to land on either, so the
+  // visual must match.
   const isUnavailableDay = (date: Date) =>
-    unavailableDates.has(localDateKey(date));
+    isNonWorkingDay(date, unavailableDates);
 
   // Land the calendar on the first scheduled day so the user opens directly
   // onto their data instead of "today" (which often has nothing on it).
@@ -901,7 +1019,20 @@ export default function ProjectSchedulePage() {
   }
 
   function handleEventDrop(arg: EventDropArg) {
-    const eventId = arg.event.id;
+    // FullCalendar passes the segment-chip's id (e.g. `subId__seg2`); the
+    // real subtask id lives in extendedProps so continuation chips can
+    // map back to their owner. Drag is only enabled on segment 0, but
+    // guard anyway in case FC ever fires for a non-zero segment.
+    const subTaskId =
+      (arg.event.extendedProps?.subTaskId as string | undefined) ??
+      arg.event.id;
+    const segmentIndex =
+      (arg.event.extendedProps?.segmentIndex as number | undefined) ?? 0;
+    if (segmentIndex !== 0) {
+      arg.revert();
+      return;
+    }
+
     const newStartIso = arg.event.start ? arg.event.start.toISOString() : null;
     if (!newStartIso) {
       arg.revert();
@@ -913,7 +1044,7 @@ export default function ProjectSchedulePage() {
     // just one its start lands on.
     let droppedHours: number | null = null;
     for (const group of services) {
-      const found = group.children.find((s) => s.id === eventId);
+      const found = group.children.find((s) => s.id === subTaskId);
       if (found) {
         droppedHours = found.estimatedHours;
         break;
@@ -927,40 +1058,10 @@ export default function ProjectSchedulePage() {
     );
 
     pushHistory();
-
-    patchStep(eventId, (step) => ({
-      ...step,
-      scheduledStartDatetime: snapped.iso,
-      scheduledEndDatetime: addHoursToIso(snapped.iso, step.estimatedHours),
-    }));
-
-    if (snapped.skippedDays > 0) {
-      toast.message(
-        `Skipped ${snapped.skippedDays} unavailable day${
-          snapped.skippedDays === 1 ? "" : "s"
-        }.`,
-      );
-    }
-
-    setIsDirty(true); markWizardDirty(projectId);
-  }
-
-  function handleEventResize(arg: EventResizeDoneArg) {
-    const eventId = arg.event.id;
-    const newStartIso = arg.event.start ? arg.event.start.toISOString() : null;
-    const newEndIso = arg.event.end ? arg.event.end.toISOString() : null;
-    if (!newStartIso || !newEndIso) {
-      arg.revert();
-      return;
-    }
-
-    pushHistory();
     const blockedDates = unavailableDates;
-    let totalSkippedDays = 0;
+    let totalSkippedDays = snapped.skippedDays;
 
     setServices((prev) => {
-      // Deep-clone children so the cascade can mutate in place without
-      // tearing the previous state.
       const next = prev.map((group) => ({
         ...group,
         children: group.children.map((child) => ({ ...child })),
@@ -974,21 +1075,23 @@ export default function ProjectSchedulePage() {
       });
 
       const targetFlatIndex = flatRefs.findIndex(({ groupIndex, childIndex }) => {
-        return next[groupIndex].children[childIndex].id === eventId;
+        return next[groupIndex].children[childIndex].id === subTaskId;
       });
       if (targetFlatIndex === -1) return prev;
 
       const { groupIndex, childIndex } = flatRefs[targetFlatIndex];
       const target = next[groupIndex].children[childIndex];
-      target.scheduledStartDatetime = newStartIso;
-      target.scheduledEndDatetime = newEndIso;
-      target.estimatedHours = diffHours(newStartIso, newEndIso);
+      target.scheduledStartDatetime = snapped.iso;
+      target.scheduledEndDatetime = endIsoWithLunch(
+        snapped.iso,
+        target.estimatedHours,
+        blockedDates,
+      );
 
-      // Cascade: each subsequent subtask (in main-task → sort-order) starts
-      // where the previous one ended, snapping forward so the *whole*
-      // [start, end) span clears every blocked day. End is recomputed from
-      // the subtask's own estimatedHours so each task keeps its planned
-      // duration.
+      // Cascade ALL subsequent subtasks (across main tasks, in flat
+      // order) so dragging a task forward serialises everything after
+      // it. Matches the single-cursor model in projectScheduling.ts —
+      // no two subtasks ever share a time slot.
       for (let i = targetFlatIndex + 1; i < flatRefs.length; i++) {
         const prevRef = flatRefs[i - 1];
         const currRef = flatRefs[i];
@@ -1004,9 +1107,144 @@ export default function ProjectSchedulePage() {
         );
         totalSkippedDays += cascaded.skippedDays;
         currentStep.scheduledStartDatetime = cascaded.iso;
-        currentStep.scheduledEndDatetime = addHoursToIso(
+        currentStep.scheduledEndDatetime = endIsoWithLunch(
           currentStep.scheduledStartDatetime,
           currentStep.estimatedHours,
+          blockedDates,
+        );
+      }
+
+      return next;
+    });
+
+    if (totalSkippedDays > 0) {
+      toast.message(
+        `Skipped ${totalSkippedDays} unavailable day${
+          totalSkippedDays === 1 ? "" : "s"
+        }.`,
+      );
+    }
+
+    setIsDirty(true); markWizardDirty(projectId);
+  }
+
+  function handleEventResize(arg: EventResizeDoneArg) {
+    // Resize is enabled on the LAST segment only (see calendarEvents).
+    // The new end of that segment becomes the task's new envelope end;
+    // total work-hours = original work-hours of earlier segments + the
+    // duration of this final segment after resize.
+    const subTaskId =
+      (arg.event.extendedProps?.subTaskId as string | undefined) ??
+      arg.event.id;
+    const segmentIndex =
+      (arg.event.extendedProps?.segmentIndex as number | undefined) ?? 0;
+    const totalSegments =
+      (arg.event.extendedProps?.totalSegments as number | undefined) ?? 1;
+    const newSegStartIso = arg.event.start
+      ? arg.event.start.toISOString()
+      : null;
+    const newSegEndIso = arg.event.end ? arg.event.end.toISOString() : null;
+    if (!newSegEndIso) {
+      arg.revert();
+      return;
+    }
+    // Single-segment task: the whole task's start+end follow the resize.
+    // Multi-segment: reject a resize on anything other than the last chip.
+    if (totalSegments > 1 && segmentIndex !== totalSegments - 1) {
+      arg.revert();
+      return;
+    }
+
+    pushHistory();
+    const blockedDates = unavailableDates;
+    let totalSkippedDays = 0;
+
+    setServices((prev) => {
+      const next = prev.map((group) => ({
+        ...group,
+        children: group.children.map((child) => ({ ...child })),
+      }));
+
+      const flatRefs: Array<{ groupIndex: number; childIndex: number }> = [];
+      next.forEach((group, groupIndex) => {
+        group.children.forEach((_, childIndex) => {
+          flatRefs.push({ groupIndex, childIndex });
+        });
+      });
+
+      const targetFlatIndex = flatRefs.findIndex(({ groupIndex, childIndex }) => {
+        return next[groupIndex].children[childIndex].id === subTaskId;
+      });
+      if (targetFlatIndex === -1) return prev;
+
+      const { groupIndex, childIndex } = flatRefs[targetFlatIndex];
+      const target = next[groupIndex].children[childIndex];
+
+      // Recompute total work-hours from the resized segment + the
+      // earlier segments' work content. For single-segment tasks the
+      // start can also have moved, so trust the chip's start.
+      const taskStartIso =
+        totalSegments === 1 && newSegStartIso
+          ? newSegStartIso
+          : target.scheduledStartDatetime;
+
+      if (taskStartIso) {
+        const segments = computeWorkSegments(
+          new Date(taskStartIso),
+          target.estimatedHours ?? 0,
+          blockedDates,
+        );
+        const earlierHours = segments
+          .slice(0, totalSegments - 1)
+          .reduce(
+            (sum, seg) =>
+              sum + (seg.end.getTime() - seg.start.getTime()) / 3_600_000,
+            0,
+          );
+        const finalSegStartMs = arg.event.start
+          ? arg.event.start.getTime()
+          : segments[segments.length - 1]?.start.getTime();
+        const finalSegEndMs = new Date(newSegEndIso).getTime();
+        const finalSegHours = Math.max(
+          0,
+          (finalSegEndMs - (finalSegStartMs ?? finalSegEndMs)) / 3_600_000,
+        );
+        const newTotalHours = earlierHours + finalSegHours;
+
+        target.scheduledStartDatetime = taskStartIso;
+        target.estimatedHours = Number(newTotalHours.toFixed(2));
+        target.scheduledEndDatetime = endIsoWithLunch(
+          taskStartIso,
+          target.estimatedHours,
+          blockedDates,
+        );
+      } else {
+        target.scheduledStartDatetime = newSegStartIso;
+        target.scheduledEndDatetime = newSegEndIso;
+        target.estimatedHours = diffHours(newSegStartIso, newSegEndIso);
+      }
+
+      // Cascade ALL subsequent subtasks in flat order — see
+      // handleEventDrop's matching note. Single-cursor model.
+      for (let i = targetFlatIndex + 1; i < flatRefs.length; i++) {
+        const prevRef = flatRefs[i - 1];
+        const currRef = flatRefs[i];
+        const previousStep =
+          next[prevRef.groupIndex].children[prevRef.childIndex];
+        const currentStep =
+          next[currRef.groupIndex].children[currRef.childIndex];
+
+        const cascaded = snapToAvailableSpan(
+          previousStep.scheduledEndDatetime,
+          currentStep.estimatedHours,
+          blockedDates,
+        );
+        totalSkippedDays += cascaded.skippedDays;
+        currentStep.scheduledStartDatetime = cascaded.iso;
+        currentStep.scheduledEndDatetime = endIsoWithLunch(
+          currentStep.scheduledStartDatetime,
+          currentStep.estimatedHours,
+          blockedDates,
         );
       }
 
@@ -1423,6 +1661,15 @@ export default function ProjectSchedulePage() {
                   firstDay={1}
                   allDaySlot={false}
                   nowIndicator
+                  // Force every chip to take the full column width even
+                  // when two events technically overlap in time. Without
+                  // this FC splits the column into half-width / quarter-
+                  // width chips ("half-squares"). The scheduler now
+                  // produces strict-serial output, but legacy DB rows
+                  // generated under the older parallel logic can still
+                  // overlap until they're re-saved through the on-load
+                  // normalize.
+                  slotEventOverlap={false}
                   // Full 24-hour range so events at any hour are visible.
                   // The calendar auto-scrolls to morning on mount via
                   // scrollTime so the user doesn't open onto midnight.
@@ -1458,12 +1705,41 @@ export default function ProjectSchedulePage() {
                     const cursor = new Date(start);
                     cursor.setHours(0, 0, 0, 0);
                     while (cursor < end) {
-                      if (unavailableDates.has(localDateKey(cursor))) {
+                      // Sundays + the unavailable set are equally
+                      // off-limits (matches the snap helpers above).
+                      if (isNonWorkingDay(cursor, unavailableDates)) {
                         return false;
                       }
                       cursor.setDate(cursor.getDate() + 1);
                     }
                     return true;
+                  }}
+                  // Reject drops/resizes that would land on top of any
+                  // OTHER subtask's chip. The same subtask's continuation
+                  // segments are allowed to overlap during the gesture
+                  // because they'll get repositioned by the drop handler.
+                  eventOverlap={(stillEvent, movingEvent) => {
+                    const stillId = stillEvent.extendedProps?.subTaskId as
+                      | string
+                      | undefined;
+                    const movingId = movingEvent?.extendedProps?.subTaskId as
+                      | string
+                      | undefined;
+                    return Boolean(stillId && movingId && stillId === movingId);
+                  }}
+                  // Tag continuation chips so the CSS can de-emphasise
+                  // them (square corners, lighter, no left accent stripe)
+                  // and they read as visual continuations of the labeled
+                  // first chip rather than independent tasks.
+                  eventClassNames={(arg) => {
+                    const segIndex =
+                      (arg.event.extendedProps?.segmentIndex as number | undefined) ?? 0;
+                    const totalSegs =
+                      (arg.event.extendedProps?.totalSegments as number | undefined) ?? 1;
+                    if (totalSegs <= 1) return [];
+                    if (segIndex === 0) return ["seg-first"];
+                    if (segIndex === totalSegs - 1) return ["seg-last"];
+                    return ["seg-mid"];
                   }}
                   headerToolbar={{
                     left: "prev,next today",
@@ -1474,8 +1750,23 @@ export default function ProjectSchedulePage() {
                     const props = arg.event.extendedProps as {
                       mainTaskTitle?: string;
                       estimatedHours?: number | null;
+                      segmentIndex?: number;
+                      totalSegments?: number;
                     };
                     const hours = props?.estimatedHours;
+                    const segIndex = props?.segmentIndex ?? 0;
+                    const totalSegs = props?.totalSegments ?? 1;
+                    // Continuation chips skip the title/hours block and just
+                    // render an arrow so the pair (or trio) reads as one
+                    // labeled task + visual continuations rather than three
+                    // separate items the user has to mentally de-duplicate.
+                    if (totalSegs > 1 && segIndex > 0) {
+                      return (
+                        <div className="px-1.5 py-0.5 text-[10px] font-medium opacity-90 leading-tight truncate">
+                          ↳ continued
+                        </div>
+                      );
+                    }
                     return (
                       <div className="px-1.5 py-1 leading-tight">
                         <div className="text-[11px] font-semibold truncate">
@@ -1642,6 +1933,40 @@ export default function ProjectSchedulePage() {
         .schedule-calendar .fc .fc-event:active {
           cursor: grabbing;
         }
+        /* Force every event to fill its day column edge-to-edge. FC's
+           default layout splits the column into half/quarter widths
+           when events overlap in time; this overrides that so each
+           chip always takes the full width. */
+        .schedule-calendar .fc .fc-timegrid-event-harness {
+          left: 0 !important;
+          right: 0 !important;
+          width: auto !important;
+          margin-right: 0 !important;
+        }
+        .schedule-calendar .fc .fc-timegrid-event-harness-inset {
+          left: 0 !important;
+          right: 0 !important;
+        }
+        /* Segment chips: the first chip carries the title and accent
+           stripe like a normal event; continuation chips drop the left
+           accent stripe and round only their outer corner so the pair
+           visually reads as one task wrapping past lunch / off-day. */
+        .schedule-calendar .fc .fc-event.seg-first {
+          border-bottom-left-radius: 0 !important;
+          border-bottom-right-radius: 0 !important;
+        }
+        .schedule-calendar .fc .fc-event.seg-mid,
+        .schedule-calendar .fc .fc-event.seg-last {
+          border-width: 0 !important;
+          opacity: 0.78;
+        }
+        .schedule-calendar .fc .fc-event.seg-mid {
+          border-radius: 0 !important;
+        }
+        .schedule-calendar .fc .fc-event.seg-last {
+          border-top-left-radius: 0 !important;
+          border-top-right-radius: 0 !important;
+        }
         .schedule-calendar .fc-day-today {
           background-color: rgba(0, 192, 101, 0.06) !important;
         }
@@ -1668,6 +1993,30 @@ export default function ProjectSchedulePage() {
             rgba(239, 68, 68, 0.08) 8px,
             rgba(239, 68, 68, 0.08) 12px
           );
+        }
+        /* Partial-time unavailable blocks (specific time ranges, not
+           whole days). Red striped band on the time grid for the exact
+           hours covered, with a title overlay so the user can see why. */
+        .schedule-calendar .fc .fc-bg-event.fc-partial-unavailable {
+          background-color: rgba(239, 68, 68, 0.12) !important;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            transparent,
+            transparent 6px,
+            rgba(239, 68, 68, 0.22) 6px,
+            rgba(239, 68, 68, 0.22) 10px
+          );
+          opacity: 1 !important;
+          border-left: 3px solid rgb(239, 68, 68) !important;
+          border-radius: 0 !important;
+        }
+        .schedule-calendar .fc .fc-bg-event.fc-partial-unavailable .fc-event-title {
+          color: rgb(153, 27, 27);
+          font-size: 10px;
+          font-weight: 600;
+          padding: 2px 6px;
+          letter-spacing: 0.02em;
+          white-space: normal;
         }
       `}</style>
     </div>

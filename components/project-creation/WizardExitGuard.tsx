@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import {
   isWizardCacheDirty,
@@ -10,10 +10,18 @@ import {
 } from "@/lib/wizardCache";
 
 const WIZARD_PATH_PREFIX = "/admin/job-creation/";
+// The quotation-generation page is wrapped by the same job-creation layout
+// (so it gets the dirty-check exit guard) but it is POST-wizard — its
+// status is managed by Grant Access / Cancel Project actions on the page
+// itself, not by the wizard cache. Syncing the cached step here would
+// overwrite the actual DB status (e.g., revert grant_access_quotation back
+// to quotation_pending).
+const POST_WIZARD_PATHS = ["/admin/job-creation/quotation-generation"];
 
 export default function WizardExitGuard() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname();
   const projectId = searchParams.get("projectId") ?? "";
 
   const [showModal, setShowModal] = useState(false);
@@ -35,6 +43,10 @@ export default function WizardExitGuard() {
   // Fire-and-forget status update (no await needed — navigation proceeds
   // immediately). Used when leaving without unsaved data changes.
   function syncStatusToDb() {
+    // Skip on post-wizard pages whose status the cache no longer reflects.
+    if (pathname && POST_WIZARD_PATHS.some((p) => pathname.startsWith(p))) {
+      return;
+    }
     const cache = getWizardCache(projectId);
     if (!cache?.currentStep) return;
     fetch("/api/planning/updateProjectStatus", {

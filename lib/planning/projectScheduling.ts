@@ -1,4 +1,13 @@
 import type { ProjectDimensions } from "@/lib/planning/materialEstimator"
+// Sunday + lunch (12-13 LOCAL) + work-hour (09-17) rules shared with the
+// schedule wizard drag/resize and the staff-completion cascade so the
+// same span never changes shape depending on which call path produced it.
+import {
+  WORK_START_HOUR,
+  WORK_END_HOUR,
+  isNonWorkingDay,
+  placeWorkSpan,
+} from "@/lib/schedule/workHours"
 
 export type SchedulingGeneratedSubTask = {
   title: string
@@ -54,9 +63,6 @@ export type ProjectScheduleResult = {
   scheduledItems: ProjectSubTaskScheduleItem[]
   projectScheduledEndDatetime: string | null
 }
-
-const WORK_START_HOUR = 9
-const WORK_END_HOUR = 17
 
 function isValidDate(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return false
@@ -121,22 +127,13 @@ function moveToNextWorkdayStart(date: Date) {
   return next
 }
 
-function toDateKey(date: Date) {
-  // Compare against the LOCAL calendar day (matches how unavailable_days
-  // stores blocked_date — a DATE column, no timezone). Using
-  // date.toISOString().slice(0, 10) returns the UTC date, which lands on
-  // the wrong day whenever the server's local working hours straddle UTC
-  // midnight (e.g., NZ/AU early morning).
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, "0")
-  const dd = String(date.getDate()).padStart(2, "0")
-  return `${yyyy}-${mm}-${dd}`
-}
-
 function moveToNextAvailableWorkdayStart(date: Date, unavailableDateSet: Set<string>) {
   let next = cloneDate(date)
 
-  while (unavailableDateSet.has(toDateKey(next))) {
+  // isNonWorkingDay returns true for Sundays even when the set is empty,
+  // so a project whose start lands on Sunday gets nudged to Monday 9am
+  // without callers having to enumerate Sundays explicitly.
+  while (isNonWorkingDay(next, unavailableDateSet)) {
     next = moveToNextWorkdayStart(next)
   }
 
@@ -162,54 +159,25 @@ function clampToWorkingTime(date: Date, unavailableDateSet = new Set<string>()) 
   return next
 }
 
-// Subtasks are modelled as a CONTIGUOUS [start, start + hours) span — the same
-// shape the schedule UI's drag/resize logic uses (snapToAvailableSpan in
-// app/admin/job-creation/project-schedule/page.tsx). Earlier the lib chunked
-// long tasks across workdays, producing spans like [Fri 9am, Sun 5pm) for a
-// 16h task with Sat blocked, which FullCalendar renders as a single block
-// crossing the red Sat column. Pushing start past any blocked day inside the
-// window keeps the rendering in sync with the maths.
+// Subtasks are modelled as a SPAN of N work-hours that pauses for
+// lunch / unavailable days / Sunday / 17:00 work-end and resumes on the
+// next valid block. `placeWorkSpan` returns the envelope (first segment
+// start, last segment end) plus the segment list — callers store the
+// envelope in the DB and the renderer fans the segments out as adjacent
+// chips. This keeps the lunch row visually empty without sliding the
+// whole task past it.
 function placeContiguousSpan(
   start: Date,
   hours: number,
   unavailableDateSet: Set<string>
 ) {
   const safeHours = Math.max(0, hours)
-  let cursor = clampToWorkingTime(start, unavailableDateSet)
+  const cursor = clampToWorkingTime(start, unavailableDateSet)
 
   if (safeHours === 0) return { start: cloneDate(cursor), end: cloneDate(cursor) }
 
-  const durationMs = safeHours * 60 * 60 * 1000
-
-  for (let guard = 0; guard < 365; guard++) {
-    const end = new Date(cursor.getTime() + durationMs)
-    const probe = cloneDate(cursor)
-    probe.setHours(0, 0, 0, 0)
-
-    let firstBlocked: Date | null = null
-    while (probe < end) {
-      if (unavailableDateSet.has(toDateKey(probe))) {
-        firstBlocked = cloneDate(probe)
-        break
-      }
-      probe.setDate(probe.getDate() + 1)
-    }
-
-    if (!firstBlocked) {
-      return { start: cloneDate(cursor), end }
-    }
-
-    const moved = moveToNextAvailableWorkdayStart(
-      moveToNextWorkdayStart(firstBlocked),
-      unavailableDateSet
-    )
-    cursor = clampToWorkingTime(moved, unavailableDateSet)
-  }
-
-  return {
-    start: cloneDate(cursor),
-    end: new Date(cursor.getTime() + durationMs),
-  }
+  const placed = placeWorkSpan(cursor, safeHours, unavailableDateSet)
+  return { start: placed.start, end: placed.end }
 }
 
 function overlaps(
@@ -323,17 +291,58 @@ export function buildProjectSchedule(
     (input.unavailableDates ?? []).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
   )
 
-  let projectCursor = clampToWorkingTime(scheduledStart, unavailableDateSet)
+  // Earliest-start-first single-cursor scheduling. Each step we look
+  // at every still-unscheduled subtask and pick the one whose placement
+  // would START EARLIEST given the current cursor, then advance the
+  // cursor to that placement's end. Strictly serial output (no two
+  // subtasks share a time slot, no visual stacking on the calendar)
+  // AND no gaps — when the priority-next subtask's assigned employee
+  // is busy with another project, we defer it and run a free-employee
+  // subtask first to fill the slot.
+  //
+  // Trade-off: subtask priority order can be reordered when needed to
+  // close gaps. Within a single employee's queue, priority order is
+  // preserved (their subtasks naturally process in input order because
+  // they all have the same employee cursor and tie on placement time).
+  // O(N²) in subtask count — fine up to ~100 subtasks.
+  const projectStart = clampToWorkingTime(scheduledStart, unavailableDateSet)
+  const unscheduled = flattened.map((item, originalIndex) => ({
+    ...item,
+    originalIndex,
+  }))
+  let projectCursor = projectStart
   let latestEnd: Date | null = null
+  const scheduledItems: ProjectSubTaskScheduleItem[] = []
 
-  const scheduledItems: ProjectSubTaskScheduleItem[] = flattened.map((item) => {
-    const slot = findNextFreeSlot({
-      desiredStart: projectCursor,
-      durationHours: item.estimatedHours ?? 1,
-      assignedUserId: item.assignedUserId,
-      blocksByUser,
-      unavailableDateSet,
-    })
+  while (unscheduled.length > 0) {
+    let bestIdx = 0
+    let bestStartMs = Number.POSITIVE_INFINITY
+    let bestPlacement: { start: Date; end: Date } | null = null
+
+    for (let i = 0; i < unscheduled.length; i++) {
+      const item = unscheduled[i]
+      const placement = findNextFreeSlot({
+        desiredStart: projectCursor,
+        durationHours: item.estimatedHours ?? 1,
+        assignedUserId: item.assignedUserId,
+        blocksByUser,
+        unavailableDateSet,
+      })
+      const startMs = placement.start.getTime()
+      // Strict `<` so a tie keeps the earlier-by-original-index winner,
+      // preserving priority order between subtasks that could place at
+      // the same time.
+      if (startMs < bestStartMs) {
+        bestIdx = i
+        bestStartMs = startMs
+        bestPlacement = placement
+      }
+    }
+
+    if (!bestPlacement) break
+
+    const item = unscheduled[bestIdx]
+    const slot = bestPlacement
 
     if (item.assignedUserId) {
       const list = blocksByUser.get(item.assignedUserId) ?? []
@@ -343,12 +352,11 @@ export function buildProjectSchedule(
     }
 
     projectCursor = cloneDate(slot.end)
-
     if (!(latestEnd instanceof Date) || slot.end.getTime() > latestEnd.getTime()) {
       latestEnd = cloneDate(slot.end)
     }
 
-    return {
+    scheduledItems.push({
       taskName: item.taskName,
       subTaskTitle: item.subTaskTitle,
       assignedUserId: item.assignedUserId,
@@ -356,8 +364,10 @@ export function buildProjectSchedule(
       scheduledStartDatetime: slot.start.toISOString(),
       scheduledEndDatetime: slot.end.toISOString(),
       sortOrder: item.sortOrder,
-    }
-  })
+    })
+
+    unscheduled.splice(bestIdx, 1)
+  }
 
   const finalLatestEnd = latestEnd as Date | null
 

@@ -5,6 +5,14 @@ import {
   PROJECT_TIME_REFERENCE_COOKIE,
   resolveProjectTimeReferenceDate,
 } from "@/lib/time/projectTimeReference";
+import {
+  buildUnavailableDateSet,
+  snapStartPastUnavailableSpan,
+} from "@/lib/schedule/snapPastUnavailable";
+// Lunch (12-13 LOCAL), Sunday, and segment-aware placement live in
+// lib/schedule/workHours so projectScheduling, the schedule-wizard
+// drag/resize, and this cascade all enforce the same rules.
+import { placeWorkSpan } from "@/lib/schedule/workHours";
 
 type ProjectSubTaskRow = {
   project_sub_task_id: string;
@@ -74,9 +82,12 @@ async function cascadeShiftLaterSubtasks(args: {
   finishingSubTaskId: string;
   projectTaskId: string;
   originalScheduledEndMs: number;
-  deltaMs: number;
+  // Actual finish time. The shift is computed so the IMMEDIATE next
+  // subtask's start lines up with this value, then every later subtask
+  // moves by the same offset (preserving their relative spacing).
+  actualEndMs: number;
   timestampIso: string;
-}): Promise<{ shifted: number; error: string | null }> {
+}): Promise<{ shifted: number; deltaMs: number; error: string | null }> {
   const { data: projectTaskRows, error: projectTaskError } = await supabaseAdmin
     .from("project_task")
     .select("project_task_id, project_id")
@@ -84,11 +95,11 @@ async function cascadeShiftLaterSubtasks(args: {
     .returns<ProjectTaskRow[]>();
 
   if (projectTaskError) {
-    return { shifted: 0, error: projectTaskError.message };
+    return { shifted: 0, deltaMs: 0, error: projectTaskError.message };
   }
 
   const projectId = projectTaskRows?.[0]?.project_id;
-  if (!projectId) return { shifted: 0, error: null };
+  if (!projectId) return { shifted: 0, deltaMs: 0, error: null };
 
   const { data: allProjectTaskRows, error: allProjectTasksError } =
     await supabaseAdmin
@@ -98,14 +109,15 @@ async function cascadeShiftLaterSubtasks(args: {
       .returns<ProjectTaskRow[]>();
 
   if (allProjectTasksError) {
-    return { shifted: 0, error: allProjectTasksError.message };
+    return { shifted: 0, deltaMs: 0, error: allProjectTasksError.message };
   }
 
   const projectTaskIds = (allProjectTaskRows ?? []).map(
     (row) => row.project_task_id,
   );
 
-  if (projectTaskIds.length === 0) return { shifted: 0, error: null };
+  if (projectTaskIds.length === 0)
+    return { shifted: 0, deltaMs: 0, error: null };
 
   const { data: subTaskRows, error: subTaskError } = await supabaseAdmin
     .from("project_sub_task")
@@ -116,7 +128,7 @@ async function cascadeShiftLaterSubtasks(args: {
     .returns<ProjectSubTaskRow[]>();
 
   if (subTaskError) {
-    return { shifted: 0, error: subTaskError.message };
+    return { shifted: 0, deltaMs: 0, error: subTaskError.message };
   }
 
   const candidates = (subTaskRows ?? []).filter((row) => {
@@ -127,30 +139,128 @@ async function cascadeShiftLaterSubtasks(args: {
     return startDate.getTime() >= args.originalScheduledEndMs;
   });
 
-  if (candidates.length === 0) return { shifted: 0, error: null };
+  if (candidates.length === 0)
+    return { shifted: 0, deltaMs: 0, error: null };
 
-  const updates = await Promise.all(
-    candidates.map((row) => {
-      const newStart = shiftIso(row.scheduled_start_datetime, args.deltaMs);
-      const newEnd = shiftIso(row.scheduled_end_datetime, args.deltaMs);
+  // Find the immediate next subtask — the one with the earliest scheduled
+  // start among the candidates. The delta we apply is computed relative to
+  // THIS subtask, not to the finishing task's old end. That way:
+  //   - if there was a gap between the finishing task and the next one,
+  //     the gap closes (next task starts when previous actually ended);
+  //   - if there was no gap, the behavior matches the old "shift by
+  //     completion offset" exactly;
+  //   - subsequent subtasks shift by the same delta, preserving the
+  //     relative spacing between later subtasks.
+  let earliestStartMs = Infinity;
+  for (const row of candidates) {
+    const startDate = parseDate(row.scheduled_start_datetime);
+    if (!startDate) continue;
+    if (startDate.getTime() < earliestStartMs) {
+      earliestStartMs = startDate.getTime();
+    }
+  }
+  if (!Number.isFinite(earliestStartMs))
+    return { shifted: 0, deltaMs: 0, error: null };
 
-      const payload: Record<string, unknown> = { updated_at: args.timestampIso };
-      if (newStart) payload.scheduled_start_datetime = newStart;
-      if (newEnd) payload.scheduled_end_datetime = newEnd;
-
-      return supabaseAdmin
-        .from("project_sub_task")
-        .update(payload)
-        .eq("project_sub_task_id", row.project_sub_task_id);
-    }),
-  );
-
-  const failed = updates.find((result) => result.error);
-  if (failed?.error) {
-    return { shifted: 0, error: failed.error.message };
+  const deltaMs = args.actualEndMs - earliestStartMs;
+  if (Math.abs(deltaMs) < CASCADE_THRESHOLD_MS) {
+    // Already aligned within the threshold — nothing meaningful to shift.
+    return { shifted: 0, deltaMs: 0, error: null };
   }
 
-  return { shifted: candidates.length, error: null };
+  // Load active unavailable days (manual blocks; holiday/manual list lives
+  // in the same table) so the shifted times can be snapped past them.
+  const { data: blockedRows } = await supabaseAdmin
+    .from("unavailable_days")
+    .select("blocked_start_datetime")
+    .eq("is_active", true);
+  const unavailableSet = buildUnavailableDateSet(
+    (blockedRows ?? [])
+      .map((row) => row.blocked_start_datetime as string | null)
+      .filter((value): value is string => Boolean(value))
+      // Cascade still operates per-day; slice the date portion off the
+      // start datetime so buildUnavailableDateSet sees YYYY-MM-DD. Specific-
+      // time blocks are treated as full-day for cascade purposes (a future
+      // refinement could honor the time range).
+      .map((iso) => iso.slice(0, 10)),
+  );
+
+  // Chunk the updates so we don't open dozens of parallel Supabase
+  // connections at once. A single Promise.all over the full set produced
+  // intermittent "TypeError: fetch failed" for projects with many later
+  // subtasks (especially behind a VPN). Same pattern batchSaveProject uses.
+  const CHUNK_SIZE = 8;
+  for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+    const chunk = candidates.slice(i, i + CHUNK_SIZE);
+    const updates = await Promise.all(
+      chunk.map((row) => {
+        // Naive shift first.
+        const naiveStartIso = shiftIso(row.scheduled_start_datetime, deltaMs);
+        const naiveEndIso = shiftIso(row.scheduled_end_datetime, deltaMs);
+
+        // Preserve the original duration so end follows whatever start
+        // ends up being after snap+lunch adjustments.
+        const originalStart = parseDate(row.scheduled_start_datetime);
+        const originalEnd = parseDate(row.scheduled_end_datetime);
+        const originalDurationMs =
+          originalStart && originalEnd
+            ? originalEnd.getTime() - originalStart.getTime()
+            : 0;
+        const durationHours =
+          originalDurationMs > 0 ? originalDurationMs / (60 * 60 * 1000) : 0;
+
+        // Snap past unavailable days using the shared helper. If naive
+        // start lands on (or its [start, end] span crosses) a blocked day,
+        // start jumps forward to the first day where the whole span
+        // clears.
+        const snapped = snapStartPastUnavailableSpan(
+          naiveStartIso,
+          durationHours,
+          unavailableSet,
+        );
+
+        let finalStart = snapped.iso ? new Date(snapped.iso) : null;
+        let finalEnd =
+          finalStart && originalDurationMs > 0
+            ? new Date(finalStart.getTime() + originalDurationMs)
+            : naiveEndIso
+              ? new Date(naiveEndIso)
+              : null;
+
+        // Segment-aware placement: a span that crosses lunch / 17:00 /
+        // a non-working day continues in the next available block, and
+        // we store the envelope (first segment start, last segment end).
+        if (finalStart && durationHours > 0) {
+          const placed = placeWorkSpan(
+            finalStart,
+            durationHours,
+            unavailableSet,
+          );
+          finalStart = placed.start;
+          finalEnd = placed.end;
+        }
+
+        const payload: Record<string, unknown> = {
+          updated_at: args.timestampIso,
+        };
+        if (finalStart)
+          payload.scheduled_start_datetime = finalStart.toISOString();
+        if (finalEnd) payload.scheduled_end_datetime = finalEnd.toISOString();
+
+        return supabaseAdmin
+          .from("project_sub_task")
+          .update(payload)
+          .eq("project_sub_task_id", row.project_sub_task_id);
+      }),
+    );
+
+    const failed = updates.find((result) => result.error);
+    if (failed?.error) {
+      return { shifted: 0, deltaMs: 0, error: failed.error.message };
+    }
+  }
+
+  return { shifted: candidates.length, deltaMs, error: null };
 }
 
 export async function POST(request: Request) {
@@ -221,35 +331,37 @@ export async function POST(request: Request) {
 
     let cascadeShiftedCount = 0;
     let cascadeDeltaMs = 0;
+    let cascadeWarning: string | null = null;
 
     if (
       isCompleting &&
       originalScheduledEndDate &&
       existingSubTask.project_task_id
     ) {
-      const deltaMs = referenceNow.getTime() - originalScheduledEndDate.getTime();
-      cascadeDeltaMs = deltaMs;
+      // Always run the cascade when a subtask completes — the function
+      // itself decides whether to actually move anything based on whether
+      // the immediate-next subtask is already aligned (within 1 minute) or
+      // not. We don't gate here on (actualEnd - originalScheduledEnd) any
+      // more, because that misses the case where the previous task
+      // finished on time but there was originally a gap before the next
+      // subtask that should now be closed.
+      const result = await cascadeShiftLaterSubtasks({
+        finishingSubTaskId: projectSubTaskId,
+        projectTaskId: existingSubTask.project_task_id,
+        originalScheduledEndMs: originalScheduledEndDate.getTime(),
+        actualEndMs: referenceNow.getTime(),
+        timestampIso,
+      });
 
-      if (Math.abs(deltaMs) >= CASCADE_THRESHOLD_MS) {
-        const result = await cascadeShiftLaterSubtasks({
-          finishingSubTaskId: projectSubTaskId,
-          projectTaskId: existingSubTask.project_task_id,
-          originalScheduledEndMs: originalScheduledEndDate.getTime(),
-          deltaMs,
-          timestampIso,
-        });
-
-        if (result.error) {
-          return NextResponse.json(
-            {
-              error: "Failed to cascade scheduled times to later subtasks.",
-              details: result.error,
-            },
-            { status: 500 },
-          );
-        }
-
+      if (result.error) {
+        // Status update already succeeded — don't roll it back. Surface a
+        // soft warning so the UI can show "marked done, but follow-up
+        // schedule shift didn't apply" instead of an outright failure
+        // that hides the fact that the subtask is already marked done.
+        cascadeWarning = result.error;
+      } else {
         cascadeShiftedCount = result.shifted;
+        cascadeDeltaMs = result.deltaMs;
       }
     }
 
@@ -377,6 +489,7 @@ export async function POST(request: Request) {
       cascade: {
         shifted: cascadeShiftedCount,
         deltaMs: cascadeDeltaMs,
+        warning: cascadeWarning,
       },
     });
   } catch (error: unknown) {

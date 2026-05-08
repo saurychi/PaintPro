@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
-import { ensureWizardCacheHydrated } from "@/lib/wizardCache";
+import { ensureWizardCacheHydrated, setCachedStep } from "@/lib/wizardCache";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -81,6 +81,10 @@ export default function JobQuotation() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelInput, setCancelInput] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  // Two-stage confirmation: "form" collects the typed project code, then
+  // switches to "confirm" for an explicit are-you-sure step before the
+  // delete actually fires.
+  const [cancelStage, setCancelStage] = useState<"form" | "confirm">("form");
   // Cache-busting token appended to the iframe src to force a reload after
   // (re)generation without dropping focus / scroll.
   const [previewVersion, setPreviewVersion] = useState(0);
@@ -602,9 +606,12 @@ export default function JobQuotation() {
                     </div>
                   </div>
 
-              {/* Download PDF only after the client has signed — before that
-                  the only thing the admin can do is nudge the client. */}
-              {project && project.status !== "quotation_pending" ? (
+              {/* Download PDF only after the client has signed (status
+                  client_quotation_done or any later state). Before that the
+                  PDF is unsigned and not meant to be downloaded. */}
+              {project &&
+              project.status !== "quotation_pending" &&
+              project.status !== "grant_access_quotation" ? (
                 <button
                   type="button"
                   onClick={handleDownloadPdf}
@@ -762,35 +769,36 @@ export default function JobQuotation() {
                   Client can now sign this quotation
                 </div>
               ) : null}
+
+              {/* Cancel Project — destructive. Sits at the bottom of the
+                  action stack, below Grant Access / acknowledgment. Only
+                  available while the client hasn't signed yet
+                  (quotation_pending / grant_access_quotation); once they
+                  sign there's a downpayment / contract trail and this
+                  shouldn't be a one-click action anymore. */}
+              {project &&
+              (project.status === "quotation_pending" ||
+                project.status === "grant_access_quotation") ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancelInput("");
+                    setCancelStage("form");
+                    setCancelOpen(true);
+                  }}
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 text-[13px] font-semibold text-red-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-100 hover:shadow-sm active:translate-y-0 dark:border-red-500/35 dark:bg-red-500/15 dark:text-red-300 dark:hover:border-red-400/50 dark:hover:bg-red-500/25"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Cancel Project
+                </button>
+              ) : null}
                 </>
               )}
             </div>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-2">
-          {/* Cancel Project — destructive. Only available while the client
-              hasn't signed yet (quotation_pending / grant_access_quotation).
-              Once they sign there's a downpayment / contract trail and this
-              should not be a one-click action anymore. */}
-          {project &&
-          (project.status === "quotation_pending" ||
-            project.status === "grant_access_quotation") ? (
-            <button
-              type="button"
-              onClick={() => {
-                setCancelInput("");
-                setCancelOpen(true);
-              }}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 text-[13px] font-semibold text-red-700 transition duration-150 hover:border-red-300 hover:bg-red-100 active:scale-95 dark:border-red-500/35 dark:bg-red-500/15 dark:text-red-300 dark:hover:border-red-400/50 dark:hover:bg-red-500/25"
-            >
-              <Trash2 className="h-4 w-4" />
-              Cancel Project
-            </button>
-          ) : (
-            <span />
-          )}
-
+        <div className="flex shrink-0 items-center justify-end gap-2">
           <button
             type="button"
             onClick={async () => {
@@ -800,6 +808,13 @@ export default function JobQuotation() {
                 setIsGoingBack(true);
 
                 await updateProjectStatus("overview_pending");
+
+                // JobCreationStatusGuard checks the optimistic + wizard
+                // caches before falling back to the API; without these
+                // two writes it sees the stale "quotation_pending" we
+                // set on entry and bounces the user right back here.
+                setCachedStep(projectId, "overview_pending" as any);
+                setOptimisticProjectStatus(projectId, "overview_pending");
 
                 router.push(
                   `/admin/job-creation/overview?projectId=${projectId}`,
@@ -826,82 +841,143 @@ export default function JobQuotation() {
             // Block close while the delete request is in flight.
             if (cancelling) return;
             setCancelOpen(open);
-            if (!open) setCancelInput("");
+            if (!open) {
+              setCancelInput("");
+              setCancelStage("form");
+            }
           }}
         >
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-red-700 dark:text-red-400">
-                Cancel and delete this project?
-              </DialogTitle>
-            </DialogHeader>
+          <DialogContent className="max-w-md gap-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-0 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="h-1 w-full bg-red-500" aria-hidden />
 
-            <div className="space-y-3 text-[13px] text-slate-700 dark:text-slate-300">
-              <p>
-                This will{" "}
-                <span className="font-semibold text-red-700 dark:text-red-400">
-                  permanently delete the entire project
-                </span>{" "}
-                — wizard data, schedule, employee assignments, materials,
-                quotation PDF, and all uploaded documents in the storage
-                bucket. This cannot be undone.
-              </p>
-
-              <p>
-                To confirm, type the project code{" "}
-                <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">
-                  {project?.project_code ?? "—"}
-                </span>{" "}
-                below:
-              </p>
-
-              <input
-                type="text"
-                autoFocus
-                value={cancelInput}
-                onChange={(e) => setCancelInput(e.target.value)}
-                placeholder="Type project code"
-                disabled={cancelling}
-                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-[13px] text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-              />
+            <div className="px-5 pt-5 pb-3">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-[15px] font-semibold text-slate-900 dark:text-slate-100">
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+                    <Trash2 className="h-4 w-4" />
+                  </span>
+                  {cancelStage === "form"
+                    ? "Cancel and delete this project?"
+                    : "Are you absolutely sure?"}
+                </DialogTitle>
+              </DialogHeader>
             </div>
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (cancelling) return;
-                  setCancelOpen(false);
-                  setCancelInput("");
-                }}
-                disabled={cancelling}
-                className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Keep project
-              </button>
+            {cancelStage === "form" ? (
+              <div className="space-y-3 px-5 text-[13px] leading-5 text-slate-700 dark:text-slate-300">
+                <p>
+                  This will{" "}
+                  <span className="font-semibold text-red-700 dark:text-red-400">
+                    permanently delete the entire project
+                  </span>
+                  , including wizard data, schedule, employee assignments,
+                  materials, the quotation PDF, and all uploaded documents in
+                  the storage bucket. This action cannot be undone.
+                </p>
 
-              <button
-                type="button"
-                onClick={handleCancelProject}
-                disabled={
-                  cancelling ||
-                  !project?.project_code ||
-                  cancelInput.trim() !== project.project_code.trim()
-                }
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-red-600 px-4 text-[13px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {cancelling ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
+                <p>
+                  To confirm, type the project code{" "}
+                  <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    {project?.project_code ?? "(no code)"}
+                  </span>{" "}
+                  below:
+                </p>
+
+                <input
+                  type="text"
+                  autoFocus
+                  value={cancelInput}
+                  onChange={(e) => setCancelInput(e.target.value)}
+                  placeholder="Type project code"
+                  disabled={cancelling}
+                  className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-[13px] text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+            ) : (
+              <div className="space-y-3 px-5 text-[13px] leading-5 text-slate-700 dark:text-slate-300">
+                <p>
+                  You are about to delete{" "}
+                  <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    {project?.project_code ?? "(no code)"}
+                  </span>
+                  .
+                </p>
+                <p className="text-red-700 dark:text-red-400">
+                  Once you click &ldquo;Yes, delete project&rdquo; the project
+                  and all of its bucket files will be removed and cannot be
+                  recovered.
+                </p>
+              </div>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3 dark:border-slate-700 dark:bg-slate-900/60">
+              {cancelStage === "form" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cancelling) return;
+                      setCancelOpen(false);
+                      setCancelInput("");
+                      setCancelStage("form");
+                    }}
+                    disabled={cancelling}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Keep project
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCancelStage("confirm")}
+                    disabled={
+                      !project?.project_code ||
+                      cancelInput.trim() !== project.project_code.trim()
+                    }
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
                     <Trash2 className="h-4 w-4" />
-                    Delete project
-                  </>
-                )}
-              </button>
+                    Continue
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cancelling) return;
+                      setCancelStage("form");
+                    }}
+                    disabled={cancelling}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Go back
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCancelProject}
+                    disabled={
+                      cancelling ||
+                      !project?.project_code ||
+                      cancelInput.trim() !== project.project_code.trim()
+                    }
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cancelling ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4" />
+                        Yes, delete project
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           </DialogContent>
         </Dialog>
