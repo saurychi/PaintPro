@@ -221,7 +221,74 @@ export async function GET(request: NextRequest) {
   const currentProject =
     projects.find((p) => p.status === "current") ?? projects[0] ?? null;
 
-  return NextResponse.json({ projects, currentProject, unavailability });
+  // Pull only the subtasks this staff member is assigned to (we already
+  // resolved that subTaskIds list at step 1) so the timeline view can show
+  // each block at its real scheduled time instead of one slab per project.
+  type SubtaskOut = {
+    id: string;
+    projectId: string;
+    title: string;
+    scheduledStartDatetime: string | null;
+    scheduledEndDatetime: string | null;
+    status: string;
+  };
+  const subtasks: SubtaskOut[] = [];
+
+  if (subTaskIds.length > 0 && projects.length > 0) {
+    const visibleProjectIds = new Set(projects.map((p) => p.id));
+
+    const { data: subRows } = await supabaseAdmin
+      .from("project_sub_task")
+      .select(
+        "project_sub_task_id, project_task_id, scheduled_start_datetime, scheduled_end_datetime, status, sub_task(description)",
+      )
+      .in("project_sub_task_id", subTaskIds);
+
+    const taskIdsToFetch = Array.from(
+      new Set((subRows ?? []).map((s) => s.project_task_id as string)),
+    );
+    const taskToProject = new Map<string, string>();
+    if (taskIdsToFetch.length > 0) {
+      const { data: taskRows } = await supabaseAdmin
+        .from("project_task")
+        .select("project_task_id, project_id")
+        .in("project_task_id", taskIdsToFetch);
+      for (const row of taskRows ?? []) {
+        taskToProject.set(
+          row.project_task_id as string,
+          row.project_id as string,
+        );
+      }
+    }
+
+    for (const row of (subRows ?? []) as Array<{
+      project_sub_task_id: string;
+      project_task_id: string;
+      scheduled_start_datetime: string | null;
+      scheduled_end_datetime: string | null;
+      status: string | null;
+      sub_task:
+        | { description: string | null }
+        | { description: string | null }[]
+        | null;
+    }>) {
+      const projectId = taskToProject.get(row.project_task_id);
+      if (!projectId || !visibleProjectIds.has(projectId)) continue;
+      const subTask = Array.isArray(row.sub_task)
+        ? row.sub_task[0]
+        : row.sub_task;
+      subtasks.push({
+        id: row.project_sub_task_id,
+        projectId,
+        title: subTask?.description?.trim() || "Subtask",
+        scheduledStartDatetime: row.scheduled_start_datetime,
+        scheduledEndDatetime: row.scheduled_end_datetime,
+        status: String(row.status ?? "").trim().toLowerCase(),
+      });
+    }
+  }
+
+  return NextResponse.json({ projects, currentProject, unavailability, subtasks });
 }
 
 function buildProject(project: ProjectRow, activeDays: string[]) {

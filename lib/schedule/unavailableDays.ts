@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
+  detectFullDayBlock,
   type ScheduleUnavailableDay,
 } from "@/lib/schedule/unavailableDayTypes";
 import {
@@ -11,10 +12,10 @@ const ONE_DAY_SECONDS = 60 * 60 * 24;
 
 type UnavailableDayRow = {
   unavailable_day_id: string;
-  blocked_date: string;
+  blocked_start_datetime: string;
+  blocked_end_datetime: string;
   reason: string | null;
   block_type: string | null;
-  notes: string | null;
 };
 
 type HolidayResponse = {
@@ -26,6 +27,10 @@ type HolidayResponse = {
 function getHolidayYears() {
   const now = new Date();
   return Array.from(new Set([now.getFullYear(), now.getFullYear() + 1]));
+}
+
+function deriveDateKey(iso: string) {
+  return String(iso || "").slice(0, 10);
 }
 
 async function fetchHolidayUnavailableDays(
@@ -53,15 +58,24 @@ async function fetchHolidayUnavailableDays(
         | null;
       const holidays = Array.isArray(payload) ? payload : [];
 
-      return holidays.map((holiday) => ({
-        id: `holiday-${holiday.date}-${holiday.localName || holiday.name}`,
-        blockedDate: holiday.date,
-        reason: holiday.localName || holiday.name,
-        blockType: "holiday",
-        notes: null,
-        source: "holiday" as const,
-        isEditable: false,
-      }));
+      return holidays.map((holiday) => {
+        // Holidays are full-day blocks: midnight UTC → next midnight UTC.
+        const start = `${holiday.date}T00:00:00.000Z`;
+        const endDate = new Date(`${holiday.date}T00:00:00.000Z`);
+        endDate.setUTCDate(endDate.getUTCDate() + 1);
+        const end = endDate.toISOString();
+        return {
+          id: `holiday-${holiday.date}-${holiday.localName || holiday.name}`,
+          blockedStartDatetime: start,
+          blockedEndDatetime: end,
+          blockedDate: holiday.date,
+          isFullDay: true,
+          reason: holiday.localName || holiday.name,
+          blockType: "holiday",
+          source: "holiday" as const,
+          isEditable: false,
+        };
+      });
     }),
   );
 
@@ -71,9 +85,11 @@ async function fetchHolidayUnavailableDays(
 export async function listManualUnavailableDays() {
   const { data, error } = await supabaseAdmin
     .from("unavailable_days")
-    .select("unavailable_day_id, blocked_date, reason, block_type, notes")
+    .select(
+      "unavailable_day_id, blocked_start_datetime, blocked_end_datetime, reason, block_type",
+    )
     .eq("is_active", true)
-    .order("blocked_date", { ascending: true })
+    .order("blocked_start_datetime", { ascending: true })
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -82,17 +98,33 @@ export async function listManualUnavailableDays() {
 
   return ((data ?? []) as UnavailableDayRow[]).map((row) => {
     const blockType = String(row.block_type ?? "").trim() || "other";
+    const startIso = row.blocked_start_datetime;
+    const endIso = row.blocked_end_datetime;
 
     return {
       id: row.unavailable_day_id,
-      blockedDate: row.blocked_date,
+      blockedStartDatetime: startIso,
+      blockedEndDatetime: endIso,
+      blockedDate: deriveDateKey(startIso),
+      isFullDay: detectFullDayBlock(startIso, endIso),
       reason: String(row.reason ?? "").trim() || "Unavailable day",
       blockType,
-      notes: row.notes,
       source: blockType === "holiday" ? "holiday" as const : "manual" as const,
       isEditable: blockType !== "holiday",
     };
   });
+}
+
+// API holidays are built as `${date}T00:00:00.000Z`; DB rows come back
+// from Postgres timestamptz as `${date}T00:00:00+00:00`. Both represent
+// the same instant but compare as different strings, which made the
+// dedup Map below treat them as distinct keys — that's why a synced
+// holiday + the live API fetch showed up twice with the same name.
+// Normalizing through `new Date(...).toISOString()` collapses both to
+// the canonical "...Z" form so equivalent instants share one key.
+function canonicalInstantKey(iso: string): string {
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? iso : new Date(ms).toISOString();
 }
 
 export async function listScheduleUnavailableDays(cookieString?: string | null) {
@@ -105,14 +137,19 @@ export async function listScheduleUnavailableDays(cookieString?: string | null) 
 
   const dedupedDays = new Map<string, ScheduleUnavailableDay>();
 
+  // Iterate holidayDays first; manualDays are pushed second so a synced
+  // DB row (a previous Nager.at sync that was persisted) wins over the
+  // freshly-fetched API copy when their canonical instants match.
   for (const day of [...holidayDays, ...manualDays]) {
-    dedupedDays.set(`${day.blockedDate}::${day.blockType}`, day);
+    const startKey = canonicalInstantKey(day.blockedStartDatetime);
+    const endKey = canonicalInstantKey(day.blockedEndDatetime);
+    dedupedDays.set(`${startKey}::${endKey}::${day.blockType}`, day);
   }
 
   return Array.from(dedupedDays.values()).sort((left, right) => {
-    if (left.blockedDate !== right.blockedDate) {
-      return left.blockedDate.localeCompare(right.blockedDate);
-    }
+    const leftKey = canonicalInstantKey(left.blockedStartDatetime);
+    const rightKey = canonicalInstantKey(right.blockedStartDatetime);
+    if (leftKey !== rightKey) return leftKey.localeCompare(rightKey);
 
     if (left.source !== right.source) {
       return left.source === "holiday" ? -1 : 1;
