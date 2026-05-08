@@ -225,10 +225,14 @@ export async function POST(request: Request) {
 
     if (updateSizeError) throw updateSizeError;
 
+    // Client just signed the invoice but the admin still needs to
+    // confirm "Proceed to Payment" before money is owed — park the
+    // project at invoice_signed in between. The admin invoice page
+    // shows a button on this status that flips to payment_pending.
     const { error: statusError } = await supabaseAdmin
       .from("projects")
       .update({
-        status: "payment_pending",
+        status: "invoice_signed",
         updated_at: new Date().toISOString(),
       })
       .eq("project_id", projectId);
@@ -237,7 +241,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: "Invoice signed and saved.",
-      nextStatus: "payment_pending",
+      nextStatus: "invoice_signed",
       documentId,
       signedName,
       signedAt: now,

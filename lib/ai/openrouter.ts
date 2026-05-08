@@ -112,7 +112,13 @@ export async function openRouterChat(
   }
 
   const baseUrl = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1"
-  const model = options.model ?? process.env.OPENROUTER_MODEL ?? "openrouter/free"
+  // Default to a fast Haiku-tier model. The wizard's planning prompts
+  // are catalog-mapping work (no deep reasoning), so a small model is
+  // both significantly faster than the previous "openrouter/free" default
+  // and still produces correct task indices. Override per-call via
+  // `options.model` or globally via OPENROUTER_MODEL.
+  const model =
+    options.model ?? process.env.OPENROUTER_MODEL ?? "anthropic/claude-3.5-haiku"
   const retries = options.retries ?? 2
 
   let lastErr: unknown = null
