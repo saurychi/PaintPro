@@ -122,10 +122,10 @@ const sectionHeader =
   "border-b border-gray-100 px-4 py-3 dark:border-slate-700/70";
 
 const actionBtn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-800 shadow-sm transition-all duration-200 hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300";
+  "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-800 shadow-sm transition-all duration-200 hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00c065]/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300";
 
 const inputBase =
-  "h-9 min-w-[125px] appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 pr-8 text-sm font-semibold text-gray-900 transition-colors hover:border-[#00c065]/40 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:border-[#00c065]/40";
+  "h-9 min-w-[125px] appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 pr-8 text-xs font-semibold text-gray-900 transition-colors hover:border-[#00c065]/40 focus:outline-none focus:ring-2 focus:ring-[#00c065]/30 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:border-[#00c065]/40";
 
 const CHART_COLORS = {
   revenue: "#00c065",
@@ -537,7 +537,7 @@ function KpiCard({
           <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">
             {label}
           </div>
-          <div className="mt-1 truncate text-lg font-semibold text-gray-950 dark:text-slate-100">
+          <div className="mt-1 truncate text-base font-semibold text-gray-950 dark:text-slate-100">
             {loading ? "—" : value}
           </div>
           <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
@@ -567,7 +567,7 @@ function MiniMetric({
       <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold text-gray-950 dark:text-slate-100">
+      <div className="mt-1 text-base font-semibold text-gray-950 dark:text-slate-100">
         {value}
       </div>
       <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
@@ -584,10 +584,10 @@ function EmptyState({ message }: { message: string }) {
         <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-white text-gray-400 dark:bg-slate-800 dark:text-slate-500">
           <BarChart3 className="h-5 w-5" />
         </div>
-        <div className="mt-3 text-sm font-semibold text-gray-950 dark:text-slate-100">
+        <div className="mt-3 text-xs font-semibold text-gray-950 dark:text-slate-100">
           No chart data
         </div>
-        <div className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+        <div className="mt-1 text-xs text-gray-500 dark:text-slate-400">
           {message}
         </div>
       </div>
@@ -877,7 +877,7 @@ export default function ReportOverviewPage() {
     <div className="min-h-screen bg-[#f7f8fa] px-4 py-4 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-6">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold">
             <Link
               href="/admin/report"
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[#00a054] transition-colors hover:bg-[#00c065]/10 dark:text-emerald-300 dark:hover:bg-[#00c065]/15"
@@ -891,10 +891,10 @@ export default function ReportOverviewPage() {
             </span>
           </div>
 
-          <h1 className="text-[22px] font-semibold tracking-tight text-gray-950 dark:text-slate-100">
+          <h1 className="text-[20px] font-semibold tracking-tight text-gray-950 dark:text-slate-100">
             Dashboard Charts
           </h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-slate-300">
+          <p className="mt-1 text-xs text-gray-500 dark:text-slate-300">
             Visual report of financial trends, revenue mix, project status, and
             period performance.
           </p>
@@ -1004,11 +1004,11 @@ export default function ReportOverviewPage() {
 
         {loadError && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-400/25 dark:bg-red-500/15">
-            <div className="flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-300">
+            <div className="flex items-center gap-2 text-xs font-semibold text-red-700 dark:text-red-300">
               <AlertTriangle className="h-4 w-4" />
               Could not load dashboard chart data
             </div>
-            <div className="mt-1 text-sm text-red-600 dark:text-red-200">
+            <div className="mt-1 text-xs text-red-600 dark:text-red-200">
               {loadError}
             </div>
           </div>
@@ -1020,7 +1020,7 @@ export default function ReportOverviewPage() {
               <div className={sectionHeader}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                    <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                       Financial Trend
                     </div>
                     <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
@@ -1130,7 +1130,7 @@ export default function ReportOverviewPage() {
 
             <section className={`xl:col-span-4 ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                   Revenue Mix
                 </div>
                 <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
@@ -1192,7 +1192,7 @@ export default function ReportOverviewPage() {
                             <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                               {item.percent}%
                             </div>
-                            <div className="text-[11px] text-gray-500 dark:text-slate-400">
+                            <div className="text-[10px] text-gray-500 dark:text-slate-400">
                               {formatCurrencyPHP(item.value)}
                             </div>
                           </div>
@@ -1206,7 +1206,7 @@ export default function ReportOverviewPage() {
 
             <section className={`xl:col-span-5 ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                   Project Status Chart
                 </div>
                 <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
@@ -1300,7 +1300,7 @@ export default function ReportOverviewPage() {
                         >
                           <span
                             className={[
-                              "inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                              "inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold",
                               statusBadgeClass(status.key),
                             ].join(" ")}
                           >
@@ -1312,7 +1312,7 @@ export default function ReportOverviewPage() {
                               {status.count} project
                               {status.count === 1 ? "" : "s"}
                             </div>
-                            <div className="text-[11px] text-gray-500 dark:text-slate-400">
+                            <div className="text-[10px] text-gray-500 dark:text-slate-400">
                               {formatCurrencyPHP(status.revenue)}
                             </div>
                           </div>
@@ -1326,7 +1326,7 @@ export default function ReportOverviewPage() {
 
             <section className={`xl:col-span-7 ${cardShell} ${cardAccent}`}>
               <div className={sectionHeader}>
-                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                   Period Financial Breakdown
                 </div>
                 <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
@@ -1430,7 +1430,7 @@ export default function ReportOverviewPage() {
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <div className="text-sm font-semibold text-gray-950 dark:text-slate-100">
+                                <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                                   {period.label}
                                 </div>
                                 <div className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
@@ -1439,7 +1439,7 @@ export default function ReportOverviewPage() {
                                 </div>
                               </div>
 
-                              <span className="rounded-md border border-[#00c065]/20 bg-[#00c065]/10 px-2 py-0.5 text-[11px] font-semibold text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300">
+                              <span className="rounded-md border border-[#00c065]/20 bg-[#00c065]/10 px-2 py-0.5 text-[10px] font-semibold text-[#047857] dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300">
                                 {formatPercent(period.margin)} margin
                               </span>
                             </div>
