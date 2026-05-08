@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import CurrentJobCard, {
   CurrentJobOption,
 } from "../../components/dashboard/currentJobCard";
+import DashboardClock from "../../components/dashboard/dashboardClock";
 import EmployeesCard from "../../components/dashboard/employeesCard";
 import JobProgressCard, {
   type StepVisualStatus,
@@ -1131,7 +1132,7 @@ export default function DashboardPage() {
     }
 
     loadProjects();
-  }, []);
+  }, [detailsRefreshKey]);
 
   useEffect(() => {
     async function loadProjectOverview() {
@@ -1326,9 +1327,12 @@ export default function DashboardPage() {
 
   return (
     <div className="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-gray-50 px-[1.4%] py-[1.2%]">
-      <h1 className="shrink-0 text-2xl font-semibold leading-8 text-gray-900">
-        Dashboard
-      </h1>
+      <div className="flex shrink-0 items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold leading-8 text-gray-900">
+          Dashboard
+        </h1>
+        <DashboardClock />
+      </div>
 
       <div
         className="mt-[1.2%] grid min-h-0 overflow-hidden"

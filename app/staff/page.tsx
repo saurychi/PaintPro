@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 
 import CurrentJobCard, {
   CurrentJobOption,
 } from "../../components/dashboard/currentJobCard";
+import DashboardClock from "../../components/dashboard/dashboardClock";
 import EmployeesCard from "../../components/dashboard/employeesCard";
 import JobProgressCard from "../../components/dashboard/jobProgressCard";
 import DashboardInsightCard from "../../components/dashboard/dashboardInsightCard";
@@ -740,7 +742,7 @@ export default function DashboardPage() {
     }
 
     loadProjects();
-  }, []);
+  }, [refreshKey]);
 
   useEffect(() => {
     async function loadProjectOverview() {
@@ -919,6 +921,16 @@ export default function DashboardPage() {
       );
     }
 
+    // Soft warning: status update succeeded but the cascade follow-up
+    // (shifting later subtasks) didn't go through. Don't fail the action,
+    // just nudge the user.
+    if (data?.cascade?.warning) {
+      toast.warning("Subtask marked done, but follow-up schedule shift didn't apply", {
+        description:
+          "Network blip — the rest of the subtasks weren't shifted. Reload to see what happened.",
+      });
+    }
+
     const nextProjectStatus =
       typeof data?.projectStatus === "string" && data.projectStatus.trim()
         ? data.projectStatus.trim().toLowerCase()
@@ -962,9 +974,12 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 lg:grid lg:h-screen lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden lg:px-[1.4%] lg:py-[1.2%]">
-      <h1 className="shrink-0 text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
-        Dashboard
-      </h1>
+      <div className="flex shrink-0 items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
+          Dashboard
+        </h1>
+        <DashboardClock />
+      </div>
 
       <div className="mt-3 flex flex-col gap-3 sm:mt-4 sm:gap-4 lg:mt-[1.2%] lg:grid lg:min-h-0 lg:gap-0 lg:overflow-hidden lg:grid-rows-[12fr_minmax(0,88fr)] lg:gap-y-[2.2%]">
         {/* Top section */}
