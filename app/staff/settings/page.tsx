@@ -234,7 +234,7 @@ export default function AdminSettings() {
     return (
       <div className="min-h-svh flex items-center justify-center bg-white px-6 dark:bg-slate-950">
         <div className="flex flex-col items-center gap-4 text-center">
-          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-x-slate-700 dark:border-b-slate-700" />
+          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-slate-500 dark:border-t-[#00c065]" />
           <p className="text-sm text-gray-600 dark:text-slate-400">Loading settings…</p>
         </div>
       </div>

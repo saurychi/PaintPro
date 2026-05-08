@@ -9,6 +9,10 @@ import SignatureCanvas from "react-signature-canvas";
 import { Calculator, ChevronRight, Upload, Wrench } from "lucide-react";
 import ProjectTimeReferenceSettings from "@/components/settings/projectTimeReferenceSettings";
 import HolidaySettings from "@/components/settings/holidaySettings";
+import {
+  getAutoStartProjects,
+  setAutoStartProjects,
+} from "@/lib/settings/autoStartProjects";
 
 const ACCENT = "#00c065";
 
@@ -89,6 +93,60 @@ const btnBase =
 const btnNeutral = `${btnBase} border border-gray-200 bg-white px-2.5 h-8 text-gray-900 hover:bg-gray-50 hover:shadow-md`;
 const btnPrimary = `${btnBase} bg-[#00c065] px-2.5 h-8 text-white hover:bg-[#00a054] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60`;
 const btnDanger = `${btnBase} border border-red-200 bg-white px-3 h-8 text-red-600 hover:bg-red-50 hover:shadow-md`;
+
+// Admin-only toggle: when enabled, a `ready_to_start` project auto-fires
+// the kickoff confirmation flow the moment the (simulated or real) clock
+// reaches its scheduled start time. Persisted in localStorage per browser.
+function AutoStartProjectsToggle() {
+  const [enabled, setEnabledState] = useState<boolean>(false);
+
+  useEffect(() => {
+    setEnabledState(getAutoStartProjects());
+  }, []);
+
+  function handleChange(next: boolean) {
+    setEnabledState(next);
+    setAutoStartProjects(next);
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900">
+            Auto-start projects on schedule
+          </p>
+          <p className="mt-1 text-sm text-gray-600">
+            When on, a project sitting in &ldquo;ready to start&rdquo; will
+            automatically advance to &ldquo;in progress&rdquo; the moment
+            its scheduled start time arrives (using the simulated clock if
+            one is set). Schedule conflicts still block it.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          onClick={() => handleChange(!enabled)}
+          className={[
+            "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors",
+            enabled
+              ? "border-[#00c065] bg-[#00c065]"
+              : "border-gray-300 bg-gray-200",
+          ].join(" ")}
+        >
+          <span
+            className={[
+              "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
+              enabled ? "translate-x-6" : "translate-x-1",
+            ].join(" ")}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -410,7 +468,7 @@ export default function AdminSettings() {
     return (
       <div className="min-h-svh flex items-center justify-center bg-white px-6 dark:bg-slate-950">
         <div className="flex flex-col items-center gap-4 text-center">
-          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-x-slate-700 dark:border-b-slate-700" />
+          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-slate-500 dark:border-t-[#00c065]" />
           <p className="text-sm text-gray-600 dark:text-slate-400">Loading settings…</p>
         </div>
       </div>
@@ -705,6 +763,16 @@ export default function AdminSettings() {
                   <div className="settings-compact-scope">
                     <ProjectTimeReferenceSettings />
                   </div>
+
+                  {/* Admin-only auto-start toggle. Hidden for managers /
+                      staff / clients — they shouldn't be able to opt the
+                      whole org-flavoured browser into background status
+                      changes from this UI. */}
+                  {profile.role === "admin" ? (
+                    <div className="settings-compact-scope">
+                      <AutoStartProjectsToggle />
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
