@@ -22,6 +22,7 @@ type ProjectRow = {
   title: string | null;
   status: string | null;
   created_by: string | null;
+  client_id: string | null;
 };
 
 export async function POST(request: Request) {
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
 
     const { data: project, error: projectError } = await supabaseAdmin
       .from("projects")
-      .select("project_id, project_code, title, status, created_by")
+      .select("project_id, project_code, title, status, created_by, client_id")
       .eq("project_id", projectId)
       .maybeSingle<ProjectRow>();
 
@@ -162,13 +163,19 @@ export async function POST(request: Request) {
       `Please review and advance the project to the downpayment step when ready.`,
     ].join(" ");
 
-    // The message is attributed to the project manager so it shows up in
-    // their messages list. The "[System notification]" prefix makes it clear
-    // this is an automated alert rather than a self-authored message.
+    // Attribute the message to the client (via client_id, with sender_id
+    // null) instead of to the manager. The manager is already a
+    // conversation participant — they'll still see this thread in their
+    // messages list — but in their chat panel the message renders on the
+    // LEFT side with the client's avatar (because sender_id != currentUser),
+    // and it counts toward the manager's unread badge. Attributing to the
+    // manager would have made it look like a self-authored message and
+    // wouldn't bump the unread count.
     const { error: messageError } = await supabaseAdmin.from("messages").insert([
       {
         conversation_id: conversationId,
-        sender_id: project.created_by,
+        sender_id: null,
+        client_id: project.client_id,
         content: messageBody,
       },
     ]);

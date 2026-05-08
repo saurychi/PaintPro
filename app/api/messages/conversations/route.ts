@@ -113,49 +113,15 @@ async function buildClientProjectConversations(projectId: string) {
     return NextResponse.json({ error: existingConversationsError.message }, { status: 500 })
   }
 
-  let projectConversationIds = (existingConversations ?? []).map((c) => c.id as string)
+  const projectConversationIds = (existingConversations ?? []).map(
+    (c) => c.id as string,
+  )
 
-  // Make sure the project creator (manager / admin) is reachable, even on first visit.
-  if (projectData.created_by) {
-    const { data: creator } = await supabaseAdmin
-      .from("users")
-      .select("id, role, status")
-      .eq("id", projectData.created_by)
-      .maybeSingle()
-
-    const creatorRole = String((creator as { role?: string | null } | null)?.role ?? "").toLowerCase()
-    const creatorActive = String((creator as { status?: string | null } | null)?.status ?? "").toLowerCase() === "active"
-
-    if (creator && creatorActive && (creatorRole === "manager" || creatorRole === "admin")) {
-      let creatorHasConversation = false
-
-      if (projectConversationIds.length > 0) {
-        const { data: creatorParticipantRows } = await supabaseAdmin
-          .from("conversation_participants")
-          .select("conversation_id")
-          .eq("user_id", projectData.created_by)
-          .in("conversation_id", projectConversationIds)
-
-        creatorHasConversation = (creatorParticipantRows ?? []).length > 0
-      }
-
-      if (!creatorHasConversation) {
-        const { data: newConversation, error: newConversationError } = await supabaseAdmin
-          .from("conversations")
-          .insert([{ project_id: projectId, updated_at: new Date().toISOString() }])
-          .select("id")
-          .single()
-
-        if (!newConversationError && newConversation) {
-          await supabaseAdmin
-            .from("conversation_participants")
-            .insert([{ conversation_id: newConversation.id, user_id: projectData.created_by }])
-
-          projectConversationIds = [...projectConversationIds, newConversation.id as string]
-        }
-      }
-    }
-  }
+  // Note: we deliberately do NOT auto-create an empty project conversation
+  // here. A real conversation gets created the first time something
+  // happens — e.g. notify-client fires, or the client picks a recipient via
+  // the new-chat modal. Auto-creating one on every visit produced phantom
+  // "Say hello!" rows that survived even after deleting all conversations.
 
   if (projectConversationIds.length === 0) {
     return NextResponse.json([])
@@ -166,7 +132,11 @@ async function buildClientProjectConversations(projectId: string) {
     .select("conversation_id, user_id, users(id, username, role, profile_image_url)")
     .in("conversation_id", projectConversationIds)
 
-  const participantsByConversation = new Map<string, ProjectParticipantUser>()
+  // Index participants by (conversation_id, user_id) so we can pick one
+  // by sender id below. We also keep a "first seen" fallback per
+  // conversation in case nothing has been said yet.
+  const participantsByKey = new Map<string, ProjectParticipantUser>()
+  const fallbackParticipant = new Map<string, ProjectParticipantUser>()
   for (const row of (participantData ?? []) as Array<{
     conversation_id: string
     user_id: string
@@ -174,22 +144,46 @@ async function buildClientProjectConversations(projectId: string) {
   }>) {
     const user = Array.isArray(row.users) ? row.users[0] ?? null : row.users
     if (!user) continue
-    if (!participantsByConversation.has(row.conversation_id)) {
-      participantsByConversation.set(row.conversation_id, user)
+    participantsByKey.set(`${row.conversation_id}:${row.user_id}`, user)
+    if (!fallbackParticipant.has(row.conversation_id)) {
+      fallbackParticipant.set(row.conversation_id, user)
     }
   }
 
+  // Need the latest message's sender to pick the right participant for the
+  // header, so include sender_id in the projection.
   const { data: latestMessages } = await supabaseAdmin
     .from("messages")
-    .select("conversation_id, content, created_at")
+    .select("conversation_id, content, created_at, sender_id")
     .in("conversation_id", projectConversationIds)
     .order("created_at", { ascending: false })
 
-  const latestMessageMap = new Map<string, MessageRow>()
-  for (const message of (latestMessages ?? []) as MessageRow[]) {
+  const latestMessageMap = new Map<
+    string,
+    MessageRow & { sender_id: string | null }
+  >()
+  for (const message of (latestMessages ?? []) as Array<
+    MessageRow & { sender_id: string | null }
+  >) {
     if (!latestMessageMap.has(message.conversation_id)) {
       latestMessageMap.set(message.conversation_id, message)
     }
+  }
+
+  // Pick the representative participant per conversation: whoever sent the
+  // latest message wins, so a notify-client message sent from saya shows up
+  // as a saya conversation, while a thread that bundleofitems was active in
+  // shows bundleofitems. Falls back to the first known participant if there
+  // are no messages yet (or the sender isn't in the participants list).
+  const participantsByConversation = new Map<string, ProjectParticipantUser>()
+  for (const conversationId of projectConversationIds) {
+    const latestSenderId = latestMessageMap.get(conversationId)?.sender_id
+    const senderParticipant = latestSenderId
+      ? participantsByKey.get(`${conversationId}:${latestSenderId}`)
+      : null
+    const picked =
+      senderParticipant ?? fallbackParticipant.get(conversationId) ?? null
+    if (picked) participantsByConversation.set(conversationId, picked)
   }
 
   const payload = projectConversationIds.map((conversationId) => {
@@ -201,7 +195,8 @@ async function buildClientProjectConversations(projectId: string) {
       users: participant
         ? {
             id: participant.id,
-            username: participant.username || clientName || "Project Team",
+            username:
+              participant.username || clientName || "Project Team",
             role: participant.role || "manager",
             profile_image_url: participant.profile_image_url ?? null,
           }
@@ -356,7 +351,12 @@ export async function GET() {
             conversation_id: conversation.id,
             users: {
               id: client.client_id,
-              username: client.full_name || client.email || project.project_code || project.title || "Client",
+              username:
+                client.full_name ||
+                client.email ||
+                project.project_code ||
+                project.title ||
+                "Client",
               role: "client",
               profile_image_url: null,
             },
