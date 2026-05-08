@@ -5,7 +5,14 @@ import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
 import { SidebarBadgesProvider, useSidebarBadge } from "@/components/sidebar-badges"
 import { supabase } from "@/lib/supabaseClient"
+import { useMessagesUnread } from "@/lib/hooks/useMessagesUnread"
 import { cn } from "@/lib/utils"
+
+function MessagesBadgeFetcher() {
+  const total = useMessagesUnread("/admin/messages")
+  useSidebarBadge("messages", total, "danger")
+  return null
+}
 
 function InventoryBadgeFetcher() {
   const [count, setCount] = React.useState<number>(0)
@@ -62,6 +69,7 @@ function AdminShell({
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
       <InventoryBadgeFetcher />
+      <MessagesBadgeFetcher />
       <AppSidebar role={role} user={user} />
 
       <main

@@ -24,13 +24,24 @@ async function getAuthUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function buildQuotationReminderMessage(projectCode: string | null, title: string | null) {
+function buildQuotationReminderMessage(
+  projectCode: string | null,
+  title: string | null,
+  status: string,
+) {
   const label =
     typeof projectCode === "string" && projectCode.trim()
       ? `quotation ${projectCode.trim()}`
       : typeof title === "string" && title.trim()
         ? `quotation for ${title.trim()}`
         : "quotation";
+
+  // grant_access_quotation means the admin has explicitly released the
+  // quotation for client signature; the message should call that out so the
+  // client knows they can take action now (not just preview).
+  if (status === "grant_access_quotation") {
+    return `Your ${label} is ready to be signed. Please open the pending quotation in your documents and submit your signature when you're ready.`;
+  }
 
   return `Your ${label} is ready for review. Please check the pending quotation in your documents and let us know if you have any questions.`;
 }
@@ -51,7 +62,7 @@ export async function POST(request: NextRequest) {
 
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .select("project_id, project_code, title, status")
+    .select("project_id, project_code, title, status, client_id, created_by")
     .eq("project_id", projectId)
     .maybeSingle();
 
@@ -65,7 +76,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (project.status !== "quotation_pending") {
+  if (
+    project.status !== "quotation_pending" &&
+    project.status !== "grant_access_quotation"
+  ) {
     return NextResponse.json(
       { error: "This quotation is no longer pending client review." },
       { status: 400 },
@@ -113,12 +127,18 @@ export async function POST(request: NextRequest) {
     conversationId = newConversation.id;
   }
 
+  // The notification is always FROM the project's owning manager (the user
+  // who created the project), regardless of which staff or admin actually
+  // clicked the button. This keeps the conversation cleanly scoped to
+  // "manager <-> client" instead of leaking whoever was helping.
+  const projectOwnerId = (project as { created_by?: string | null }).created_by ?? userId;
+
   const { data: existingParticipant, error: participantLookupError } =
     await supabaseAdmin
       .from("conversation_participants")
       .select("conversation_id")
       .eq("conversation_id", conversationId)
-      .eq("user_id", userId)
+      .eq("user_id", projectOwnerId)
       .maybeSingle();
 
   if (participantLookupError) {
@@ -134,7 +154,7 @@ export async function POST(request: NextRequest) {
   if (!existingParticipant) {
     const { error: participantInsertError } = await supabaseAdmin
       .from("conversation_participants")
-      .insert([{ conversation_id: conversationId, user_id: userId }]);
+      .insert([{ conversation_id: conversationId, user_id: projectOwnerId }]);
 
     if (participantInsertError) {
       return NextResponse.json(
@@ -147,11 +167,53 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Also add the project's client as a participant if they have a matching
+  // auth user (clients linked by email). Without this, an auth-user client
+  // can't see the conversation via conversation_participants and would miss
+  // the notification entirely. Project-cookie clients are reached separately
+  // through the project_id-based fallback in /api/messages/conversations.
+  if (project.client_id) {
+    const { data: clientRow } = await supabaseAdmin
+      .from("clients")
+      .select("email")
+      .eq("client_id", project.client_id)
+      .maybeSingle();
+
+    const clientEmail = clientRow?.email?.trim();
+    if (clientEmail) {
+      const { data: clientAuthUser } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("email", clientEmail)
+        .maybeSingle();
+
+      const clientUserId = clientAuthUser?.id;
+      if (clientUserId && clientUserId !== projectOwnerId) {
+        const { data: clientParticipant } = await supabaseAdmin
+          .from("conversation_participants")
+          .select("conversation_id")
+          .eq("conversation_id", conversationId)
+          .eq("user_id", clientUserId)
+          .maybeSingle();
+
+        if (!clientParticipant) {
+          await supabaseAdmin
+            .from("conversation_participants")
+            .insert([{ conversation_id: conversationId, user_id: clientUserId }]);
+        }
+      }
+    }
+  }
+
   const { error: messageError } = await supabaseAdmin.from("messages").insert([
     {
       conversation_id: conversationId,
-      sender_id: userId,
-      content: buildQuotationReminderMessage(project.project_code, project.title),
+      sender_id: projectOwnerId,
+      content: buildQuotationReminderMessage(
+        project.project_code,
+        project.title,
+        project.status,
+      ),
     },
   ]);
 

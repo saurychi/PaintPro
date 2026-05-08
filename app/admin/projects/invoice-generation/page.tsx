@@ -1,7 +1,16 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, ChevronRight, Copy, Download, Loader2, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronRight,
+  Copy,
+  Download,
+  Loader2,
+  Send,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -42,6 +51,7 @@ export default function JobInvoice() {
   const [downloading, setDownloading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [sendingToClient, setSendingToClient] = useState(false);
+  const [proceedingToPayment, setProceedingToPayment] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [project, setProject] = useState<
     ProjectOverviewResponse["project"] | null
@@ -207,6 +217,28 @@ export default function JobInvoice() {
     }
   }
 
+  async function handleProceedToPayment() {
+    if (!projectId || proceedingToPayment) return;
+    if (project?.status !== "invoice_signed") return;
+
+    try {
+      setProceedingToPayment(true);
+
+      await updateProjectStatus("payment_pending");
+
+      setProject((prev) =>
+        prev ? { ...prev, status: "payment_pending" } : prev,
+      );
+      setStatus("Issued");
+
+      toast.success("Project moved to payment.");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to proceed to payment.");
+    } finally {
+      setProceedingToPayment(false);
+    }
+  }
+
   async function handleSendToClient() {
     if (!projectId || sendingToClient) return;
 
@@ -361,7 +393,7 @@ export default function JobInvoice() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex flex-1 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
               <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                 Invoice Details
               </div>
@@ -401,62 +433,132 @@ export default function JobInvoice() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleDownloadPdf}
-                disabled={
-                  downloading ||
-                  !projectId ||
-                  project?.status === "invoice_pending"
-                }
-                title={
-                  project?.status === "invoice_pending"
-                    ? "Issue the invoice before downloading the PDF."
-                    : undefined
-                }
-                className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
-                style={{ backgroundColor: "#00c065" }}>
-                {downloading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Downloading...
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4" />
-                    Download PDF
-                  </>
-                )}
-              </button>
+              {/* mt-auto pushes the action buttons to the bottom of the
+                  card. Combined with `flex-1` on the card itself, the
+                  card stretches to fill the remaining vertical space in
+                  the right column — so its bottom edge lines up with
+                  the bottom of the invoice preview on the left. */}
+              <div className="mt-auto pt-5">
+                {/* Download PDF only when the client has signed and the
+                    project is parked at invoice_signed. Hidden during
+                    invoice_pending (still being prepared), during
+                    invoice_agreement_pending (waiting for client
+                    signature), and after payment_pending (the signed
+                    PDF download window has closed for this view). */}
+                {project?.status === "invoice_signed" ? (
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={downloading || !projectId}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                    style={{ backgroundColor: "#00c065" }}>
+                    {downloading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Downloading...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4" />
+                        Download PDF
+                      </>
+                    )}
+                  </button>
+                ) : null}
 
-              <button
-                type="button"
-                onClick={handleSendToClient}
-                disabled={
-                  sendingToClient ||
-                  !projectId ||
-                  project?.status === "invoice_agreement_pending" ||
-                  project?.status === "payment_pending"
-                }
-                className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25">
-                {sendingToClient ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    {project?.status === "invoice_agreement_pending" ||
-                    project?.status === "payment_pending"
-                      ? "Sent to Client"
-                      : "Send to Client"}
-                  </>
-                )}
-              </button>
+                {/* Proceed to Payment shows only on invoice_signed —
+                    the client has signed and the admin still has to
+                    flip the project into payment_pending. */}
+                {project?.status === "invoice_signed" ? (
+                  <button
+                    type="button"
+                    onClick={handleProceedToPayment}
+                    disabled={proceedingToPayment || !projectId}
+                    className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[13px] font-semibold text-emerald-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:border-emerald-400/50 dark:hover:bg-emerald-500/25">
+                    {proceedingToPayment ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Proceeding...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        Proceed to Payment
+                      </>
+                    )}
+                  </button>
+                ) : null}
+
+                {/* Go to Payment — only shows on payment_pending.
+                    Sends the user to /admin with both projectId (so
+                    the dashboard pre-selects this project) and
+                    openPayment (a flag the JobProgressCard listens for
+                    to auto-open the FinalPaymentModal). The handler in
+                    jobProgressCard strips both query params after
+                    firing so a refresh doesn't re-pop the modal. */}
+                {project?.status === "payment_pending" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!projectId) return;
+                      router.push(
+                        `/admin?projectId=${encodeURIComponent(
+                          projectId,
+                        )}&openPayment=${encodeURIComponent(projectId)}`,
+                      );
+                    }}
+                    disabled={!projectId}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                    style={{ backgroundColor: "#00c065" }}>
+                    <ArrowRight className="h-4 w-4" />
+                    Go to Payment
+                  </button>
+                ) : null}
+
+                {/* Send to Client only renders during invoice_pending —
+                    the prep stage before the invoice has been sent.
+                    Once it advances (invoice_agreement_pending and
+                    beyond), this button disappears entirely. */}
+                {project?.status === "invoice_pending" ? (
+                <button
+                  type="button"
+                  onClick={handleSendToClient}
+                  disabled={sendingToClient || !projectId}
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25">
+                  {sendingToClient ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Send to Client
+                    </>
+                  )}
+                </button>
+                ) : null}
+
+                {/* Fallback for statuses outside the invoice flow (e.g.
+                    landed here from a stale link while the project is
+                    still in an earlier stage, or after employee_management
+                    /completed). None of the action buttons above apply,
+                    so we surface a single way out: back to the dashboard. */}
+                {project?.status &&
+                project.status !== "invoice_pending" &&
+                project.status !== "invoice_agreement_pending" &&
+                project.status !== "invoice_signed" &&
+                project.status !== "payment_pending" ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push("/admin")}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-[13px] font-semibold text-slate-700 transition-all duration-200 hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-sm active:translate-y-0 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
+                    <ArrowLeft className="h-4 w-4" />
+                    Go Back to Dashboard
+                  </button>
+                ) : null}
+              </div>
             </div>
-
-            <div className="hidden flex-1 lg:block" />
           </div>
         </div>
 

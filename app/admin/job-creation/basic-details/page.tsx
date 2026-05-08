@@ -11,6 +11,8 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import { initWizardCache, setCachedStep } from "@/lib/wizardCache";
 import { supabase } from "@/lib/supabaseClient";
 import CreateClientModal from "@/components/project-creation/CreateClientModal";
 import MeasurementModal, {
@@ -31,6 +33,7 @@ import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 import { useProjectNow } from "@/lib/time/useProjectNow";
+import { suppressNewMessageToast } from "@/lib/hooks/useMessagesUnread";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
@@ -164,6 +167,37 @@ type GetDurationApiResponse =
       mainTaskId: string;
       subTaskId: string;
       duration: DurationOut;
+    }
+  | { error: string; details?: string };
+
+type GetMaterialsBatchApiResponse =
+  | {
+      results: Array<{
+        taskName: string;
+        subTaskTitle: string | null;
+        materials: MaterialOut[];
+      }>;
+    }
+  | { error: string; details?: string };
+
+type GetEquipmentBatchApiResponse =
+  | {
+      results: Array<{
+        taskName: string;
+        subTaskTitle: string | null;
+        equipment: EquipmentOut[];
+      }>;
+    }
+  | { error: string; details?: string };
+
+type GetDurationBatchApiResponse =
+  | {
+      results: Array<{
+        taskName: string;
+        subTaskTitle: string;
+        duration: DurationOut | null;
+        error: string | null;
+      }>;
     }
   | { error: string; details?: string };
 
@@ -405,6 +439,10 @@ export default function BasicDetails() {
   const { settings: holidaySettings } = useHolidaySettings();
   const { now: projectNow } = useProjectNow();
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/main-task-assignment");
+  }, [router]);
+
   const [projectCode, setProjectCode] = useState(() => generateProjectCode());
   const [projectName, setProjectName] = useState("");
   const [scheduledStart, setScheduledStart] = useState("");
@@ -440,6 +478,12 @@ export default function BasicDetails() {
   const [assignmentDay, setAssignmentDay] = useState<WeekdayKey>("monday");
   const [loading, setLoading] = useState(false);
   const [generationStage, setGenerationStage] = useState("");
+  // Counter for the loading modal so the user sees discrete progress
+  // ("3 of 5 phases done") instead of just rotating stage labels.
+  const [generationProgress, setGenerationProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [generationError, setGenerationError] = useState("");
   const [generatedTasks, setGeneratedTasks] = useState<GeneratedMainTask[]>([]);
   const [isGeneratingProjectName, setIsGeneratingProjectName] = useState(false);
@@ -773,6 +817,24 @@ export default function BasicDetails() {
     );
     return real?.id ?? surfaceMsgEmployeeId;
   }, [surfaceMsgEmployeeId, surfaceMsgConversations]);
+
+  // Has any specs-target employee replied since the admin's last message?
+  // We compare against surfaceMsgSpecsEmployeeIds (employees the admin
+  // already sent specs to) and check whether the conversation's latest
+  // message is from the employee — meaning the staff has replied and the
+  // admin hasn't sent anything since. Drives the "new reply" badge on
+  // the "Message Employee" button. Clears naturally once the admin sends
+  // a follow-up message (latest flips back to senderType: "admin").
+  const hasUnreadSpecsReply = useMemo(() => {
+    if (surfaceMsgSpecsEmployeeIds.length === 0) return false;
+    const specsSet = new Set(surfaceMsgSpecsEmployeeIds);
+    return surfaceMsgConversations.some((conv) => {
+      if (!specsSet.has(conv.employeeId)) return false;
+      const messages = conv.messages;
+      if (!messages || messages.length === 0) return false;
+      return messages[messages.length - 1].senderType === "employee";
+    });
+  }, [surfaceMsgConversations, surfaceMsgSpecsEmployeeIds]);
 
   const [availableDateEvents, setAvailableDateEvents] = useState<
     Array<{
@@ -1220,128 +1282,124 @@ export default function BasicDetails() {
         materialCatalog: [],
       }));
 
-      setGenerationStage("Estimating materials");
+      // Materials, equipment, and duration are independent — fire all
+      // three batched lookups in parallel via a single round-trip each.
+      // Old code was 3N sequential per-subtask requests across three
+      // phases; new code is 3 parallel requests total. Phase counter
+      // fires as each batch resolves so the modal still ticks.
+      setGenerationStage("Estimating materials, equipment, and durations");
+      setGenerationProgress({ done: 0, total: 3 });
 
-      nextTasks = await Promise.all(
-        nextTasks.map(async (task) => {
-          const subTasks = await Promise.all(
-            task.sub_tasks.map(async (subTask) => {
-              const materialData = await postJson<GetMaterialsApiResponse>(
-                "/api/planning/getMaterials",
-                {
-                  taskName: task.name,
-                  subTaskTitle: subTask.title,
-                },
-              );
-
-              if ("error" in materialData) {
-                throw new Error(materialData.error);
-              }
-
-              return {
-                ...subTask,
-                materials: Array.isArray(materialData.materials)
-                  ? materialData.materials
-                  : [],
-              };
-            }),
-          );
-
-          const materialCatalog = uniqueByName(
-            subTasks.flatMap((subTask) => subTask.materials),
-          );
-
-          return {
-            ...task,
-            sub_tasks: subTasks,
-            materials: materialCatalog.map((item) => item.name),
-            materialCatalog,
-          };
-        }),
+      const flatPairs = nextTasks.flatMap((task) =>
+        task.sub_tasks.map((subTask) => ({
+          taskName: task.name,
+          subTaskTitle: subTask.title,
+        })),
       );
 
-      setGenerationStage("Preparing equipment");
+      const tickProgress = () =>
+        setGenerationProgress((prev) =>
+          prev ? { done: prev.done + 1, total: prev.total } : prev,
+        );
 
-      nextTasks = await Promise.all(
-        nextTasks.map(async (task) => {
-          const subTasks = await Promise.all(
-            task.sub_tasks.map(async (subTask) => {
-              // Equipment is a soft dependency — it can be filled in / fixed
-              // up later on the equipment-assignment page. A single bad
-              // catalog entry shouldn't kill the whole save flow, so log and
-              // continue with an empty list for that subtask.
-              try {
-                const equipmentData = await postJson<GetEquipmentApiResponse>(
-                  "/api/planning/getEquipment",
-                  {
-                    taskName: task.name,
-                    subTaskTitle: subTask.title,
-                  },
-                );
+      const materialsPromise = postJson<GetMaterialsBatchApiResponse>(
+        "/api/planning/getMaterialsBatch",
+        { items: flatPairs },
+      ).then((res) => {
+        tickProgress();
+        return res;
+      });
 
-                if ("error" in equipmentData) {
-                  console.warn(
-                    `Equipment lookup failed for "${task.name}" / "${subTask.title}":`,
-                    equipmentData.error,
-                  );
-                  return { ...subTask, equipment: [] };
-                }
+      const equipmentPromise = postJson<GetEquipmentBatchApiResponse>(
+        "/api/planning/getEquipmentBatch",
+        { items: flatPairs },
+      ).then((res) => {
+        tickProgress();
+        return res;
+      });
 
-                return {
-                  ...subTask,
-                  equipment: Array.isArray(equipmentData.equipment)
-                    ? equipmentData.equipment
-                    : [],
-                };
-              } catch (error) {
-                console.warn(
-                  `Equipment lookup threw for "${task.name}" / "${subTask.title}":`,
-                  error,
-                );
-                return { ...subTask, equipment: [] };
-              }
-            }),
+      const durationPromise = postJson<GetDurationBatchApiResponse>(
+        "/api/planning/getDurationBatch",
+        { items: flatPairs, dimensions: normalizedDimensions },
+      ).then((res) => {
+        tickProgress();
+        return res;
+      });
+
+      const [materialsData, equipmentData, durationData] = await Promise.all([
+        materialsPromise,
+        equipmentPromise,
+        durationPromise,
+      ]);
+
+      if ("error" in materialsData) throw new Error(materialsData.error);
+      if ("error" in durationData) throw new Error(durationData.error);
+      // Equipment failures are soft — fall back to empty arrays per
+      // subtask so a bad catalog entry doesn't abort the whole save.
+      const equipmentResults =
+        "error" in equipmentData
+          ? ([] as Array<{
+              taskName: string;
+              subTaskTitle: string | null;
+              equipment: EquipmentOut[];
+            }>)
+          : equipmentData.results;
+      if ("error" in equipmentData) {
+        console.warn("Equipment batch lookup failed:", equipmentData.error);
+      }
+
+      // Build per-pair lookup maps so we can stitch results back into
+      // the nested task/subtask structure in O(N) total.
+      const pairKey = (taskName: string, subTaskTitle: string | null) =>
+        `${taskName}::${(subTaskTitle ?? "").toLowerCase()}`;
+
+      const materialsByPair = new Map<string, MaterialOut[]>();
+      for (const row of materialsData.results) {
+        materialsByPair.set(
+          pairKey(row.taskName, row.subTaskTitle),
+          Array.isArray(row.materials) ? row.materials : [],
+        );
+      }
+      const equipmentByPair = new Map<string, EquipmentOut[]>();
+      for (const row of equipmentResults) {
+        equipmentByPair.set(
+          pairKey(row.taskName, row.subTaskTitle),
+          Array.isArray(row.equipment) ? row.equipment : [],
+        );
+      }
+      const durationByPair = new Map<string, DurationOut | null>();
+      for (const row of durationData.results) {
+        durationByPair.set(pairKey(row.taskName, row.subTaskTitle), row.duration);
+        if (row.error && !row.duration) {
+          console.warn(
+            `Duration lookup failed for "${row.taskName}" / "${row.subTaskTitle}":`,
+            row.error,
           );
+        }
+      }
 
+      nextTasks = nextTasks.map((task) => {
+        const subTasks = task.sub_tasks.map((subTask) => {
+          const key = pairKey(task.name, subTask.title);
           return {
-            ...task,
-            sub_tasks: subTasks,
+            ...subTask,
+            materials: materialsByPair.get(key) ?? [],
+            equipment: equipmentByPair.get(key) ?? [],
+            duration: durationByPair.get(key) ?? null,
           };
-        }),
-      );
+        });
+        const materialCatalog = uniqueByName(
+          subTasks.flatMap((s) => s.materials),
+        );
+        return {
+          ...task,
+          sub_tasks: subTasks,
+          materials: materialCatalog.map((item) => item.name),
+          materialCatalog,
+        };
+      });
 
-      setGenerationStage("Calculating durations");
-
-      nextTasks = await Promise.all(
-        nextTasks.map(async (task) => {
-          const subTasks = await Promise.all(
-            task.sub_tasks.map(async (subTask) => {
-              const durationData = await postJson<GetDurationApiResponse>(
-                "/api/planning/getDuration",
-                {
-                  taskName: task.name,
-                  subTaskTitle: subTask.title,
-                  dimensions: normalizedDimensions,
-                },
-              );
-
-              if ("error" in durationData) {
-                throw new Error(durationData.error);
-              }
-
-              return {
-                ...subTask,
-                duration: durationData.duration ?? null,
-              };
-            }),
-          );
-
-          return {
-            ...task,
-            sub_tasks: subTasks,
-          };
-        }),
-      );
+      setGenerationProgress(null);
 
       setGenerationStage("Assigning employees");
 
@@ -1505,6 +1563,7 @@ export default function BasicDetails() {
     } finally {
       setLoading(false);
       setGenerationStage("");
+      setGenerationProgress(null);
     }
   }
 
@@ -1706,6 +1765,28 @@ export default function BasicDetails() {
       );
 
       localStorage.removeItem(SESSION_DRAFT_KEY);
+
+      // Seed the wizard cache so subsequent pages can read from it instantly.
+      initWizardCache(projectRow.project_id, {
+        projectId: projectRow.project_id,
+        projectCode: projectRow.project_code,
+        projectTitle: title,
+        siteAddress,
+        description: description.trim() || null,
+        clientId: savedClientId,
+        currentStep: "main_task_pending",
+        mainTasks: nextTasks.map((task) => ({
+          id: "", // populated when main-task-assignment first loads from API
+          name: task.name,
+        })),
+        subTasks: [], // populated on first visit to each page
+        materials: [],
+        markupRate: 30,
+        refData: {},
+      });
+
+      setCachedStep(projectRow.project_id, "main_task_pending");
+      setOptimisticProjectStatus(projectRow.project_id, "main_task_pending");
       router.push(
         `/admin/job-creation/main-task-assignment?projectId=${projectRow.project_id}`,
       );
@@ -1715,34 +1796,36 @@ export default function BasicDetails() {
       setSaving(false);
       setLoading(false);
       setGenerationStage("");
+      setGenerationProgress(null);
+    }
+  }
+
+  async function loadClients() {
+    try {
+      setClientsLoading(true);
+
+      const response = await fetch("/api/client/getClients", {
+        method: "GET",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to load clients.");
+      }
+
+      setClients(Array.isArray(data.clients) ? data.clients : []);
+    } catch (error) {
+      console.error("Failed to load clients:", error);
+      setClients([]);
+    } finally {
+      setClientsLoading(false);
     }
   }
 
   useEffect(() => {
-    async function loadClients() {
-      try {
-        setClientsLoading(true);
-
-        const response = await fetch("/api/client/getClients", {
-          method: "GET",
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data?.error || "Failed to load clients.");
-        }
-
-        setClients(Array.isArray(data.clients) ? data.clients : []);
-      } catch (error) {
-        console.error("Failed to load clients:", error);
-        setClients([]);
-      } finally {
-        setClientsLoading(false);
-      }
-    }
-
     loadClients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1995,7 +2078,11 @@ export default function BasicDetails() {
     if (showLoading) setSurfaceMsgConversationsLoading(true);
     setSurfaceMsgConversationError(null);
     try {
-      const res = await fetch("/api/messages/staff-conversations");
+      const res = await fetch(
+        createdProjectId
+          ? `/api/messages/staff-conversations?projectId=${encodeURIComponent(createdProjectId)}`
+          : "/api/messages/staff-conversations",
+      );
       if (!res.ok) throw new Error("Failed to load conversations.");
       const json = await res.json();
       setSurfaceMsgConversations(json.conversations ?? []);
@@ -2012,6 +2099,46 @@ export default function BasicDetails() {
     }
   }
 
+  // Realtime: when a new message arrives while the staff message modal
+  // is open, refetch conversations so the reply lands instantly instead
+  // of only after the admin closes and reopens the modal. Mirrors the
+  // global-chat-listener pattern used by /admin/messages.
+  //
+  // `loadStaffConversations` is a plain function that closes over state
+  // setters and `createdProjectId` — putting it in the deps would force
+  // a resubscribe every render. The ref pattern keeps the subscription
+  // stable across renders while always invoking the latest closure.
+  const loadStaffConversationsRef = useRef(loadStaffConversations);
+  useEffect(() => {
+    loadStaffConversationsRef.current = loadStaffConversations;
+  });
+
+  useEffect(() => {
+    if (!surfaceMsgOpen) return;
+    const channel = supabase
+      .channel("basic-details-staff-msg-listener")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        () => {
+          void loadStaffConversationsRef.current(false);
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [surfaceMsgOpen]);
+
+  // While the StaffMessageModal is open the modal itself renders incoming
+  // messages inline via the realtime listener above, so the global "New
+  // message" toast from useMessagesUnread would just be noise. Suppress it
+  // for as long as the modal stays open.
+  useEffect(() => {
+    if (!surfaceMsgOpen) return;
+    return suppressNewMessageToast();
+  }, [surfaceMsgOpen]);
+
   async function handleSendSurfaceMsg() {
     if (!surfaceMsgEmployeeId || !surfaceMsgText.trim()) return;
     setSurfaceMsgSending(true);
@@ -2023,7 +2150,10 @@ export default function BasicDetails() {
       const convRes = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: surfaceMsgEmployeeId }),
+        body: JSON.stringify({
+          targetUserId: surfaceMsgEmployeeId,
+          ...(createdProjectId ? { projectId: createdProjectId } : {}),
+        }),
       });
       if (!convRes.ok) throw new Error("Failed to create conversation.");
       const convData = await convRes.json();
@@ -2295,15 +2425,29 @@ export default function BasicDetails() {
                 </div>
 
                 <div className="col-span-5 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
-                  <div className="mb-3 flex items-center gap-2">
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: ACCENT }}
-                      aria-hidden="true"
-                    />
-                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
-                      Client Details
-                    </p>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: ACCENT }}
+                        aria-hidden="true"
+                      />
+                      <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                        Client Details
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadClients()}
+                      disabled={clientsLoading}
+                      aria-label="Refresh client list"
+                      title="Refresh client list"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${clientsLoading ? "animate-spin" : ""}`}
+                      />
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-12 gap-2">
@@ -2479,10 +2623,16 @@ export default function BasicDetails() {
                             <button
                               type="button"
                               onClick={handleOpenSurfaceMsg}
-                              className="inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
+                              className="relative inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
                             >
                               <MessageSquare className="h-3 w-3" />
                               Message Employee
+                              {hasUnreadSpecsReply ? (
+                                <span
+                                  aria-label="New employee reply"
+                                  className="absolute -right-1 -top-1 inline-flex h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900"
+                                />
+                              ) : null}
                             </button>
                           ) : null}
                           <button
@@ -2707,6 +2857,11 @@ export default function BasicDetails() {
                 <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>{generationStage}</span>
+                  {generationProgress ? (
+                    <span className="ml-auto rounded-md bg-emerald-100/60 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+                      {generationProgress.done}/{generationProgress.total}
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
             </div>

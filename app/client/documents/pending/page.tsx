@@ -61,13 +61,18 @@ function readError(data: ProjectOverviewResponse | null, fallback: string) {
 function getDocumentType(status: string): DocumentType {
   if (
     status === "quotation_pending" ||
+    status === "grant_access_quotation" ||
     status === "client_quotation_done" ||
     status === "ready_to_start"
   ) {
     return "quotation";
   }
 
-  if (status === "invoice_agreement_pending" || status === "payment_pending") {
+  if (
+    status === "invoice_agreement_pending" ||
+    status === "invoice_signed" ||
+    status === "payment_pending"
+  ) {
     return "invoice";
   }
 
@@ -92,6 +97,9 @@ export default function ClientPendingDocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // Tracks whether the bucket PDF has finished loading inside the iframe so
+  // we can keep a spinner over it until the document is actually visible.
+  const [previewLoaded, setPreviewLoaded] = useState(false);
 
   const [signatureErr, setSignatureErr] = useState<string | null>(null);
 
@@ -105,11 +113,21 @@ export default function ClientPendingDocumentsPage() {
   const projectStatus = String(project?.status || "").trim();
   const documentType = getDocumentType(projectStatus);
 
-  const isPendingQuotation = projectStatus === "quotation_pending";
+  // Client can only sign once the manager has explicitly granted access
+  // (grant_access_quotation). Before that (quotation_pending) the client
+  // can preview the document but the signature controls are disabled.
+  const isPendingQuotation = projectStatus === "grant_access_quotation";
+  const isAwaitingAccess = projectStatus === "quotation_pending";
   const isPendingInvoiceAgreement = projectStatus === "invoice_agreement_pending";
   const isClientQuotationDone = projectStatus === "client_quotation_done";
   const isQuotationApproved = projectStatus === "ready_to_start";
-  const isInvoiceAccepted = projectStatus === "payment_pending";
+  // Client-signed invoice — kept distinct from payment_pending so the
+  // admin can hold the project at this state until they confirm
+  // "Proceed to Payment". The signed-PDF download is only offered to
+  // both client and admin while the project sits in invoice_signed.
+  const isInvoiceSigned = projectStatus === "invoice_signed";
+  const isInvoiceAccepted =
+    projectStatus === "invoice_signed" || projectStatus === "payment_pending";
 
   const documentLabel =
     documentType === "invoice"
@@ -119,7 +137,7 @@ export default function ClientPendingDocumentsPage() {
         : "Document";
 
   const pageTitle =
-    isPendingQuotation || isPendingInvoiceAgreement
+    isPendingQuotation || isPendingInvoiceAgreement || isAwaitingAccess
       ? `Pending ${documentLabel}`
       : documentType === "none"
         ? "Project Document"
@@ -129,7 +147,9 @@ export default function ClientPendingDocumentsPage() {
     ? "Review and sign your project invoice agreement."
     : isPendingQuotation
       ? "Review and sign your project quotation."
-      : isInvoiceAccepted
+      : isAwaitingAccess
+        ? "The project manager hasn't released this quotation for signing yet. You can preview it below."
+        : isInvoiceAccepted
         ? "Your signed invoice agreement has been recorded."
         : isQuotationApproved
           ? "Your signed quotation has been recorded."
@@ -142,8 +162,18 @@ export default function ClientPendingDocumentsPage() {
       return `/api/invoice/html?projectId=${encodeURIComponent(projectId)}`;
     }
 
-    return `/api/quotation/html?projectId=${encodeURIComponent(projectId)}`;
+    // Quotation: stream the PDF straight from the bucket (pre-generated when
+    // the admin clicked Generate Quotation on overview). The URL fragment
+    // collapses the PDF viewer's sidebar (`navpanes=0`) and opens at 95%
+    // zoom — same defaults the admin's quotation-generation page uses.
+    return `/api/quotation/from-bucket?projectId=${encodeURIComponent(projectId)}#navpanes=0&zoom=95`;
   }, [projectId, documentType]);
+
+  // Reset the iframe-loaded gate whenever the source changes, so the spinner
+  // shows again while the next document is fetched.
+  useEffect(() => {
+    setPreviewLoaded(false);
+  }, [previewSrc]);
 
   useEffect(() => {
     if (!projectId) {
@@ -352,6 +382,9 @@ export default function ClientPendingDocumentsPage() {
         description:
           "A message has been sent in the project conversation. They will review and update the project from their side.",
       });
+      // Auto-clear the "notified" confirmation after a short cooldown so the
+      // client can re-notify if the manager hasn't acted on it yet.
+      window.setTimeout(() => setPmNotified(false), 10_000);
     } catch (error) {
       toast.error("Couldn't notify project manager", {
         description:
@@ -406,15 +439,15 @@ export default function ClientPendingDocumentsPage() {
         prev
           ? {
               ...prev,
-              status: "payment_pending",
+              status: "invoice_signed",
             }
           : prev,
       );
 
       signatureRef.current.clear();
 
-      toast.success("Invoice accepted.", {
-        description: "The project is now pending payment.",
+      toast.success("Invoice signed.", {
+        description: "Your project manager will proceed to payment shortly.",
       });
     } catch (error) {
       const message =
@@ -524,44 +557,30 @@ export default function ClientPendingDocumentsPage() {
                 </span>
               )}
 
-              <button
-                type="button"
-                onClick={downloadDocumentPdf}
-                disabled={
-                  !projectId ||
-                  downloading ||
-                  loading ||
-                  documentType === "none"
-                }
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
-                {downloading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                Download PDF
-              </button>
-
-              {documentType === "quotation" &&
-              (justSignedQuotation || isClientQuotationDone) ? (
+              {/* Download PDF only appears once the invoice is signed
+                  (status: invoice_signed). Quotations follow their own
+                  rule and stay downloadable across their relevant
+                  statuses. */}
+              {documentType === "invoice" && !isInvoiceSigned ? null : (
                 <button
                   type="button"
-                  onClick={notifyProjectManager}
-                  disabled={!projectId || notifyingPM || pmNotified}
-                  className="inline-flex h-9 items-center gap-2 rounded-full bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {notifyingPM ? (
+                  onClick={downloadDocumentPdf}
+                  disabled={
+                    !projectId ||
+                    downloading ||
+                    loading ||
+                    documentType === "none"
+                  }
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  {downloading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : pmNotified ? (
-                    <Check className="h-3.5 w-3.5" />
                   ) : (
-                    <Send className="h-3.5 w-3.5" />
+                    <Download className="h-3.5 w-3.5" />
                   )}
-                  {pmNotified
-                    ? "Project Manager Notified"
-                    : "Notify Project Manager"}
+                  Download PDF
                 </button>
-              ) : null}
+              )}
+
             </div>
           </div>
         </div>
@@ -601,12 +620,25 @@ export default function ClientPendingDocumentsPage() {
                     No document is available for this project right now.
                   </div>
                 ) : (
-                  <iframe
-                    key={`${documentType}-${projectStatus}-${projectId}`}
-                    src={previewSrc}
-                    title={`${documentLabel} Preview`}
-                    className="h-full w-full rounded-lg border border-gray-200 bg-white min-h-[60vh] lg:min-h-0"
-                  />
+                  <div className="relative h-full min-h-[60vh] w-full lg:min-h-0">
+                    {!previewLoaded ? (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg border border-gray-200 bg-gray-50">
+                        <div className="text-center">
+                          <Loader2 className="mx-auto h-5 w-5 animate-spin text-gray-500" />
+                          <p className="mt-2 text-xs text-gray-500">
+                            Loading {documentLabel.toLowerCase()} preview...
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                    <iframe
+                      key={`${documentType}-${projectStatus}-${projectId}`}
+                      src={previewSrc}
+                      title={`${documentLabel} Preview`}
+                      onLoad={() => setPreviewLoaded(true)}
+                      className="h-full w-full rounded-lg border border-gray-200 bg-white min-h-[60vh] lg:min-h-0"
+                    />
+                  </div>
                 )}
               </div>
             </div>
@@ -655,44 +687,44 @@ export default function ClientPendingDocumentsPage() {
                       </p>
                     </div>
 
-                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                      <p className="text-[11px] font-medium text-gray-500">
-                        Site Address
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-gray-900">
-                        {project?.site_address || "No address provided"}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                        <p className="text-[11px] font-medium text-gray-500">
-                          {documentType === "quotation"
-                            ? "Estimated Payment"
-                            : "Estimated Budget"}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-gray-900">
-                          {formatCurrency(
-                            costSummary?.quotationTotal ??
-                              project?.estimated_budget,
-                          )}
-                        </p>
-                      </div>
-
-                      {documentType === "invoice" ? (
+                    {documentType === "invoice" ? (
+                      <>
                         <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
                           <p className="text-[11px] font-medium text-gray-500">
-                            Estimated Cost
+                            Site Address
                           </p>
-                          <p className="mt-1 text-sm font-semibold text-gray-900">
-                            {formatCurrency(
-                              costSummary?.totalCost ??
-                                project?.estimated_cost,
-                            )}
+                          <p className="mt-1 text-sm font-medium text-gray-900">
+                            {project?.site_address || "No address provided"}
                           </p>
                         </div>
-                      ) : null}
-                    </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                          <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                            <p className="text-[11px] font-medium text-gray-500">
+                              Estimated Budget
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {formatCurrency(
+                                costSummary?.quotationTotal ??
+                                  project?.estimated_budget,
+                              )}
+                            </p>
+                          </div>
+
+                          <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                            <p className="text-[11px] font-medium text-gray-500">
+                              Estimated Cost
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {formatCurrency(
+                                costSummary?.totalCost ??
+                                  project?.estimated_cost,
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
 
                     {isPendingQuotation || isPendingInvoiceAgreement ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
@@ -789,6 +821,35 @@ export default function ClientPendingDocumentsPage() {
                             {signatureErr}
                           </p>
                         ) : null}
+                      </div>
+                    ) : documentType === "quotation" &&
+                      (justSignedQuotation || isClientQuotationDone) ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-emerald-800">
+                          Quotation signed
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-emerald-700">
+                          Awaiting project manager review. Let them know your
+                          signature is in so they can advance the project.
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={notifyProjectManager}
+                          disabled={!projectId || notifyingPM || pmNotified}
+                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {notifyingPM ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : pmNotified ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Send className="h-3.5 w-3.5" />
+                          )}
+                          {pmNotified
+                            ? "Project Manager Notified"
+                            : "Notify Project Manager"}
+                        </button>
                       </div>
                     ) : isQuotationApproved ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">

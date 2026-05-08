@@ -37,11 +37,11 @@ async function getSignedQuotationFromBucket(projectId: string, projectCode?: str
   if (projectDocumentError) throw projectDocumentError
 
   const safeProjectCode = sanitizeFileName(projectCode || projectId)
-  // Signed quotations live in the dedicated "quotations" bucket. The path
-  // shape inside that bucket matches what /api/client/documents/quotation-
-  // signature uploads (no leading "quotations/" prefix anymore).
-  const fallbackBucket = "quotations"
-  const fallbackPath = `${projectId}/quotation-${safeProjectCode}.pdf`
+  // Signed quotations live under the "documents" bucket at
+  // "quotations/<projectId>/..." — same path shape used by
+  // /api/client/documents/quotation-signature.
+  const fallbackBucket = "documents"
+  const fallbackPath = `quotations/${projectId}/quotation-${safeProjectCode}.pdf`
 
   const bucket = projectDocument?.storage_bucket || fallbackBucket
   const path = projectDocument?.storage_path || fallbackPath

@@ -6,13 +6,24 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FilePlus2,
   FileText,
+  Key,
   Loader2,
   PlayCircle,
   Send,
+  Trash2,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import { ensureWizardCacheHydrated, setCachedStep } from "@/lib/wizardCache";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type StatusType = "Not yet Approved" | "Approved";
 
@@ -47,6 +58,11 @@ export default function JobQuotation() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/overview");
+    router.prefetch("/admin");
+  }, [router]);
+
   const [status, setStatus] = useState<StatusType>("Not yet Approved");
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -56,6 +72,22 @@ export default function JobQuotation() {
   const [startingProgress, setStartingProgress] = useState(false);
   const [project, setProject] = useState<ProjectOverviewResponse["project"] | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+  // True when the bucket has no quotation PDF for this project. Surfaces a
+  // "Generate Quotation" CTA in the right column so the admin can create one
+  // without going back to the overview page.
+  const [quotationMissing, setQuotationMissing] = useState(false);
+  const [generatingQuotation, setGeneratingQuotation] = useState(false);
+  const [grantingAccess, setGrantingAccess] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelInput, setCancelInput] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  // Two-stage confirmation: "form" collects the typed project code, then
+  // switches to "confirm" for an explicit are-you-sure step before the
+  // delete actually fires.
+  const [cancelStage, setCancelStage] = useState<"form" | "confirm">("form");
+  // Cache-busting token appended to the iframe src to force a reload after
+  // (re)generation without dropping focus / scroll.
+  const [previewVersion, setPreviewVersion] = useState(0);
 
   async function handleCopyProjectCode() {
     const code = project?.project_code;
@@ -93,6 +125,8 @@ export default function JobQuotation() {
 
   useEffect(() => {
     async function loadProject() {
+      await ensureWizardCacheHydrated(projectId);
+
       if (!projectId) {
         setLoading(false);
         return;
@@ -150,6 +184,58 @@ export default function JobQuotation() {
     loadProject();
   }, [projectId]);
 
+  // Probe the bucket endpoint to see whether a quotation PDF actually exists
+  // for this project. We do this with a HEAD request via fetch so we don't
+  // pull the whole PDF body just to find out it's missing. If from-bucket
+  // returns 404, surface the "Generate Quotation" CTA.
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/quotation/from-bucket?projectId=${encodeURIComponent(projectId)}`,
+          { method: "HEAD", cache: "no-store" },
+        );
+        if (cancelled) return;
+        setQuotationMissing(res.status === 404);
+      } catch {
+        if (!cancelled) setQuotationMissing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, previewVersion]);
+
+  async function handleGenerateQuotationFromPage() {
+    if (!projectId || generatingQuotation) return;
+    try {
+      setGeneratingQuotation(true);
+      const response = await fetch("/api/quotation/save-generated", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to generate quotation.",
+        );
+      }
+      toast.success("Quotation generated.");
+      setQuotationMissing(false);
+      // Bump the preview version so the iframe re-fetches the freshly-uploaded
+      // PDF from the bucket.
+      setPreviewVersion((v) => v + 1);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to generate quotation.");
+    } finally {
+      setGeneratingQuotation(false);
+    }
+  }
+
   async function handleSaveQuotationDocument() {
     if (!projectId || !project || savingDocument) return;
 
@@ -202,7 +288,7 @@ export default function JobQuotation() {
       setDownloading(true);
 
       const response = await fetch(
-        `/api/quotation/pdf?projectId=${encodeURIComponent(projectId)}&download=1`,
+        `/api/quotation/from-bucket?projectId=${encodeURIComponent(projectId)}&download=1`,
       );
 
       if (!response.ok) {
@@ -234,25 +320,87 @@ export default function JobQuotation() {
     }
   }
 
-  async function handleStartProgress() {
+  function handleStartProgress() {
     if (!projectId || startingProgress) return;
     if (project?.status !== "client_quotation_done") return;
 
+    setStartingProgress(true);
+    setOptimisticProjectStatus(projectId, "downpayment_pending");
+    toast.success("Project moved to downpayment.", {
+      description: "Heading back to your dashboard.",
+    });
+    router.push("/admin");
+    void updateProjectStatus("downpayment_pending").catch((error: any) => {
+      toast.error(error?.message || "Failed to update project status.");
+    });
+  }
+
+  async function handleCancelProject() {
+    if (!projectId || cancelling) return;
+    if ((project?.project_code ?? "").trim() !== cancelInput.trim()) return;
+
     try {
-      setStartingProgress(true);
-      await updateProjectStatus("downpayment_pending");
-      toast.success("Project moved to downpayment.", {
-        description: "Heading back to your dashboard.",
+      setCancelling(true);
+      const response = await fetch("/api/planning/deleteProject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          projectCode: cancelInput.trim(),
+        }),
       });
-      router.push("/admin");
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details, data?.hint]
+            .filter(Boolean)
+            .join(" — ") || "Failed to cancel project.",
+        );
+      }
+
+      toast.success("Project cancelled and deleted.");
+      router.push("/admin/projects");
     } catch (error: any) {
-      setStartingProgress(false);
-      toast.error(error?.message || "Failed to start progress.");
+      toast.error(error?.message || "Failed to cancel project.");
+      setCancelling(false);
+    }
+  }
+
+  async function handleGrantAccess() {
+    if (
+      !projectId ||
+      grantingAccess ||
+      project?.status !== "quotation_pending"
+    ) {
+      return;
+    }
+
+    try {
+      setGrantingAccess(true);
+      await updateProjectStatus("grant_access_quotation");
+      // Reflect immediately so the gating logic flips without a refetch.
+      setProject((prev) =>
+        prev ? { ...prev, status: "grant_access_quotation" } : prev,
+      );
+      toast.success("Access granted.", {
+        description: "The client can now sign this quotation.",
+      });
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to grant client access.");
+    } finally {
+      setGrantingAccess(false);
     }
   }
 
   async function handleNotifyClient() {
-    if (!projectId || notifyingClient || project?.status !== "quotation_pending") {
+    if (
+      !projectId ||
+      notifyingClient ||
+      (project?.status !== "quotation_pending" &&
+        project?.status !== "grant_access_quotation")
+    ) {
       return;
     }
 
@@ -288,8 +436,16 @@ export default function JobQuotation() {
     }
   }
 
+  // The quotation PDF was rendered + uploaded to the bucket back when the
+  // user clicked "Generate Quotation" on the overview page. The page now
+  // streams the file straight from storage instead of regenerating the HTML
+  // preview every visit.
+  // PDF viewer URL fragment — `navpanes=0` collapses the thumbnail/bookmark
+  // sidebar by default, and `zoom=95` opens the document at 95% so the page
+  // fits the iframe without horizontal scrolling. These are PDF Open
+  // Parameters honoured by Chrome / Edge / Adobe Reader.
   const previewSrc = projectId
-    ? `/api/quotation/html?projectId=${encodeURIComponent(projectId)}`
+    ? `/api/quotation/from-bucket?projectId=${encodeURIComponent(projectId)}&v=${previewVersion}#navpanes=0&zoom=95`
     : "";
 
   return (
@@ -405,59 +561,77 @@ export default function JobQuotation() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
               <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
                 Quotation Details
               </div>
 
-              <div className="mt-4 space-y-3 text-[12px] text-slate-600 dark:text-slate-300">
-                <div>
-                  <div className="text-slate-500 dark:text-slate-400">
-                    Project Code
-                  </div>
-                  <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
-                    {project?.project_code || "No Code"}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-slate-500 dark:text-slate-400">
-                    Project Title
-                  </div>
-                  <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
-                    {project?.title || "Untitled Project"}
+              {loading ? (
+                <div className="mt-4 flex flex-1 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/70">
+                  <div className="text-center">
+                    <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-500 dark:text-slate-400" />
+                    <div className="mt-2 text-[12px] text-slate-500 dark:text-slate-400">
+                      Loading quotation details...
+                    </div>
                   </div>
                 </div>
+              ) : (
+                <>
+                  <div className="mt-4 space-y-3 text-[12px] text-slate-600 dark:text-slate-300">
+                    <div>
+                      <div className="text-slate-500 dark:text-slate-400">
+                        Project Code
+                      </div>
+                      <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                        {project?.project_code || "No Code"}
+                      </div>
+                    </div>
 
-                <div>
-                  <div className="text-slate-500 dark:text-slate-400">
-                    Estimated Payment
-                  </div>
-                  <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
-                    {formatCurrency(project?.estimated_budget)}
-                  </div>
-                </div>
-              </div>
+                    <div>
+                      <div className="text-slate-500 dark:text-slate-400">
+                        Project Title
+                      </div>
+                      <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                        {project?.title || "Untitled Project"}
+                      </div>
+                    </div>
 
-              <button
-                type="button"
-                onClick={handleDownloadPdf}
-                disabled={downloading || !projectId}
-                className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:opacity-70"
-                style={{ backgroundColor: ACCENT }}
-              >
-                {downloading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Downloading...
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4" />
-                    Download PDF
-                  </>
-                )}
-              </button>
+                    <div>
+                      <div className="text-slate-500 dark:text-slate-400">
+                        Estimated Payment
+                      </div>
+                      <div className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                        {formatCurrency(project?.estimated_budget)}
+                      </div>
+                    </div>
+                  </div>
+
+              {/* Download PDF only after the client has signed (status
+                  client_quotation_done or any later state). Before that the
+                  PDF is unsigned and not meant to be downloaded. */}
+              {project &&
+              project.status !== "quotation_pending" &&
+              project.status !== "grant_access_quotation" ? (
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={downloading || !projectId}
+                  className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-sm active:translate-y-0 disabled:opacity-70"
+                  style={{ backgroundColor: ACCENT }}
+                >
+                  {downloading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Downloading...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4" />
+                      Download PDF
+                    </>
+                  )}
+                </button>
+              ) : null}
 
               {/* Once the client has signed (client_quotation_done) the admin
                   can advance the project to downpayment from here. Doing so
@@ -484,10 +658,12 @@ export default function JobQuotation() {
               ) : null}
 
               {/* Only surface "Save to Documents" once the client has signed
-                  the quotation (project moves past quotation_pending). Saving
-                  before that would persist the unsigned preview, which we
-                  don't want in the documents library. */}
-              {project && project.status !== "quotation_pending" ? (
+                  the quotation. Both quotation_pending and
+                  grant_access_quotation are pre-signature states — saving
+                  then would persist the unsigned preview. */}
+              {project &&
+              project.status !== "quotation_pending" &&
+              project.status !== "grant_access_quotation" ? (
                 <button
                   type="button"
                   onClick={handleSaveQuotationDocument}
@@ -508,15 +684,43 @@ export default function JobQuotation() {
                 </button>
               ) : null}
 
-              {/* Only show "Notify Client" while we're still waiting on the
-                  client to sign. Once they've signed (client_quotation_done)
-                  or the project has moved further, this button is no-op. */}
-              {project?.status === "quotation_pending" ? (
+              {/* If the bucket has no quotation PDF yet (e.g. the admin
+                  navigated here directly without going through overview's
+                  Generate Quotation), surface a CTA that runs the same
+                  save-generated flow from this page. */}
+              {quotationMissing ? (
+                <button
+                  type="button"
+                  onClick={handleGenerateQuotationFromPage}
+                  disabled={generatingQuotation || !projectId}
+                  className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                  style={{ backgroundColor: ACCENT }}
+                >
+                  {generatingQuotation ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <FilePlus2 className="h-4 w-4" />
+                      Generate Quotation
+                    </>
+                  )}
+                </button>
+              ) : null}
+
+              {/* Notify Client is available while we're still waiting on the
+                  client to sign — that includes both quotation_pending (admin
+                  is reviewing) and grant_access_quotation (client can now
+                  sign). Hidden once the client has signed. */}
+              {project?.status === "quotation_pending" ||
+              project?.status === "grant_access_quotation" ? (
                 <button
                   type="button"
                   onClick={handleNotifyClient}
                   disabled={notifyingClient || !projectId}
-                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25"
+                  className={`${quotationMissing ? "mt-2" : "mt-5"} inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25`}
                 >
                   {notifyingClient ? (
                     <>
@@ -531,9 +735,66 @@ export default function JobQuotation() {
                   )}
                 </button>
               ) : null}
-            </div>
 
-            <div className="hidden flex-1 lg:block" />
+              {/* Grant Access — sits below Notify Client. Only shown while
+                  the project is still in quotation_pending; clicking it
+                  advances status to grant_access_quotation and unlocks the
+                  client's sign-quotation flow. */}
+              {project?.status === "quotation_pending" ? (
+                <button
+                  type="button"
+                  onClick={handleGrantAccess}
+                  disabled={grantingAccess || !projectId}
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 text-[13px] font-semibold text-amber-800 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-500/35 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:border-amber-400/50 dark:hover:bg-amber-500/25"
+                >
+                  {grantingAccess ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Granting access...
+                    </>
+                  ) : (
+                    <>
+                      <Key className="h-4 w-4" />
+                      Grant Access to Sign
+                    </>
+                  )}
+                </button>
+              ) : null}
+
+              {/* Once access has been granted, surface a small acknowledgment
+                  so the manager knows the client can sign. */}
+              {project?.status === "grant_access_quotation" ? (
+                <div className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[12px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                  <Check className="h-4 w-4" />
+                  Client can now sign this quotation
+                </div>
+              ) : null}
+
+              {/* Cancel Project — destructive. Sits at the bottom of the
+                  action stack, below Grant Access / acknowledgment. Only
+                  available while the client hasn't signed yet
+                  (quotation_pending / grant_access_quotation); once they
+                  sign there's a downpayment / contract trail and this
+                  shouldn't be a one-click action anymore. */}
+              {project &&
+              (project.status === "quotation_pending" ||
+                project.status === "grant_access_quotation") ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancelInput("");
+                    setCancelStage("form");
+                    setCancelOpen(true);
+                  }}
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 text-[13px] font-semibold text-red-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-100 hover:shadow-sm active:translate-y-0 dark:border-red-500/35 dark:bg-red-500/15 dark:text-red-300 dark:hover:border-red-400/50 dark:hover:bg-red-500/25"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Cancel Project
+                </button>
+              ) : null}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -547,6 +808,13 @@ export default function JobQuotation() {
                 setIsGoingBack(true);
 
                 await updateProjectStatus("overview_pending");
+
+                // JobCreationStatusGuard checks the optimistic + wizard
+                // caches before falling back to the API; without these
+                // two writes it sees the stale "quotation_pending" we
+                // set on entry and bounces the user right back here.
+                setCachedStep(projectId, "overview_pending" as any);
+                setOptimisticProjectStatus(projectId, "overview_pending");
 
                 router.push(
                   `/admin/job-creation/overview?projectId=${projectId}`,
@@ -566,6 +834,153 @@ export default function JobQuotation() {
             )}
           </button>
         </div>
+
+        <Dialog
+          open={cancelOpen}
+          onOpenChange={(open) => {
+            // Block close while the delete request is in flight.
+            if (cancelling) return;
+            setCancelOpen(open);
+            if (!open) {
+              setCancelInput("");
+              setCancelStage("form");
+            }
+          }}
+        >
+          <DialogContent className="max-w-md gap-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-0 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="h-1 w-full bg-red-500" aria-hidden />
+
+            <div className="px-5 pt-5 pb-3">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-[15px] font-semibold text-slate-900 dark:text-slate-100">
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+                    <Trash2 className="h-4 w-4" />
+                  </span>
+                  {cancelStage === "form"
+                    ? "Cancel and delete this project?"
+                    : "Are you absolutely sure?"}
+                </DialogTitle>
+              </DialogHeader>
+            </div>
+
+            {cancelStage === "form" ? (
+              <div className="space-y-3 px-5 text-[13px] leading-5 text-slate-700 dark:text-slate-300">
+                <p>
+                  This will{" "}
+                  <span className="font-semibold text-red-700 dark:text-red-400">
+                    permanently delete the entire project
+                  </span>
+                  , including wizard data, schedule, employee assignments,
+                  materials, the quotation PDF, and all uploaded documents in
+                  the storage bucket. This action cannot be undone.
+                </p>
+
+                <p>
+                  To confirm, type the project code{" "}
+                  <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    {project?.project_code ?? "(no code)"}
+                  </span>{" "}
+                  below:
+                </p>
+
+                <input
+                  type="text"
+                  autoFocus
+                  value={cancelInput}
+                  onChange={(e) => setCancelInput(e.target.value)}
+                  placeholder="Type project code"
+                  disabled={cancelling}
+                  className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-[13px] text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+            ) : (
+              <div className="space-y-3 px-5 text-[13px] leading-5 text-slate-700 dark:text-slate-300">
+                <p>
+                  You are about to delete{" "}
+                  <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    {project?.project_code ?? "(no code)"}
+                  </span>
+                  .
+                </p>
+                <p className="text-red-700 dark:text-red-400">
+                  Once you click &ldquo;Yes, delete project&rdquo; the project
+                  and all of its bucket files will be removed and cannot be
+                  recovered.
+                </p>
+              </div>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3 dark:border-slate-700 dark:bg-slate-900/60">
+              {cancelStage === "form" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cancelling) return;
+                      setCancelOpen(false);
+                      setCancelInput("");
+                      setCancelStage("form");
+                    }}
+                    disabled={cancelling}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Keep project
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCancelStage("confirm")}
+                    disabled={
+                      !project?.project_code ||
+                      cancelInput.trim() !== project.project_code.trim()
+                    }
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Continue
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cancelling) return;
+                      setCancelStage("form");
+                    }}
+                    disabled={cancelling}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Go back
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCancelProject}
+                    disabled={
+                      cancelling ||
+                      !project?.project_code ||
+                      cancelInput.trim() !== project.project_code.trim()
+                    }
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cancelling ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4" />
+                        Yes, delete project
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <style jsx global>{`

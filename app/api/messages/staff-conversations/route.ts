@@ -14,11 +14,16 @@ async function getAuthUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-// GET /api/messages/staff-conversations
-// Returns all direct conversations for the current admin user with full message history.
-export async function GET() {
+// GET /api/messages/staff-conversations?projectId=<uuid>
+// Returns conversations for the current admin user with full message history.
+// When projectId is provided, results are scoped to that project's conversations
+// so the basic-details staff message modal only shows conversations relevant
+// to the project being edited.
+export async function GET(request: Request) {
   const userId = await getAuthUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+
+  const projectId = new URL(request.url).searchParams.get("projectId")?.trim() || "";
 
   // Find every conversation this admin belongs to
   const { data: myParticipations, error: partErr } = await supabaseAdmin
@@ -28,8 +33,21 @@ export async function GET() {
 
   if (partErr) return NextResponse.json({ error: partErr.message }, { status: 500 });
 
-  const convIds = (myParticipations ?? []).map((p: any) => p.conversation_id as string);
+  let convIds = (myParticipations ?? []).map((p: any) => p.conversation_id as string);
   if (convIds.length === 0) return NextResponse.json({ conversations: [] });
+
+  if (projectId) {
+    const { data: scoped, error: scopedErr } = await supabaseAdmin
+      .from("conversations")
+      .select("id")
+      .in("id", convIds)
+      .eq("project_id", projectId);
+
+    if (scopedErr) return NextResponse.json({ error: scopedErr.message }, { status: 500 });
+
+    convIds = (scoped ?? []).map((c: any) => c.id as string);
+    if (convIds.length === 0) return NextResponse.json({ conversations: [] });
+  }
 
   // Get the other participant (employee) for each conversation with their user info
   const { data: otherParticipants, error: otherErr } = await supabaseAdmin

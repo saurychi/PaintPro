@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { invalidatePlanningCatalog } from "@/lib/planning/catalogCache";
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,6 +104,8 @@ export async function POST(request: NextRequest) {
 
       if (subTask) subTasks.push(subTask);
     }
+
+    invalidatePlanningCatalog();
 
     return NextResponse.json({
       success: true,

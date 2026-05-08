@@ -13,7 +13,6 @@ import { cn } from "@/lib/utils";
 import type {
   ProjectReviewSummary,
   ReviewEmployeeSummary,
-  ReviewMaterialSummary,
   ReviewTimingStatus,
 } from "@/lib/planning/projectReviewSummary";
 
@@ -39,22 +38,6 @@ function formatDateTime(value?: string | null) {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function formatCurrency(value: number) {
-  return value.toLocaleString("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    minimumFractionDigits: 2,
-  });
-}
-
-function formatCountLabel(
-  count: number,
-  singular: string,
-  plural = `${singular}s`,
-) {
-  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function getTimingTone(status: ReviewTimingStatus) {
@@ -139,27 +122,6 @@ function SectionCard({
   );
 }
 
-function MaterialRow({ material }: { material: ReviewMaterialSummary }) {
-  return (
-    <div className="grid gap-2 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-[11px] sm:grid-cols-[minmax(0,2fr)_80px_120px] sm:items-center">
-      <div className="min-w-0">
-        <div className="truncate font-medium text-gray-900 dark:text-slate-100">
-          {material.name}
-        </div>
-        <div className="mt-0.5 text-[10px] text-gray-500 dark:text-slate-400">
-          {material.unit || "No unit specified"}
-        </div>
-      </div>
-      <div className="text-gray-500 dark:text-slate-400">
-        {material.totalQuantity.toLocaleString()}
-      </div>
-      <div className="text-left font-medium text-gray-900 dark:text-slate-100 sm:text-right">
-        {formatCurrency(material.totalCost)}
-      </div>
-    </div>
-  );
-}
-
 function getEmployeePerformance(employee: ReviewEmployeeSummary) {
   const totalTracked =
     employee.earlyCount + employee.onTimeCount + employee.lateCount;
@@ -217,9 +179,6 @@ export default function ProjectReviewModal({
 }: Props) {
   const employees = useMemo(() => summary?.employees ?? [], [summary]);
   const mainTasks = useMemo(() => summary?.mainTasks ?? [], [summary]);
-  const [resourceView, setResourceView] = useState<"materials" | "equipment">(
-    "materials",
-  );
   const [selectedEmployeeIdState, setSelectedEmployeeIdState] = useState("");
   const [openMainTaskIds, setOpenMainTaskIds] = useState<string[]>([]);
   const selectedEmployeeId = employees.some(
@@ -228,11 +187,11 @@ export default function ProjectReviewModal({
     ? selectedEmployeeIdState
     : (employees[0]?.id ?? "");
 
-  // Auto-open the first main task whenever a new summary is loaded; once the
-  // user toggles, their state takes over and is preserved (including closing
-  // every task).
+  // Reset to fully-collapsed whenever a new summary loads. The user
+  // expands main tasks they want to inspect; previously we auto-opened
+  // the first one which made the dialog feel busy on first paint.
   useEffect(() => {
-    setOpenMainTaskIds(mainTasks.length > 0 ? [mainTasks[0].id] : []);
+    setOpenMainTaskIds([]);
   }, [summary, mainTasks]);
 
   const selectedEmployeeIndex = Math.max(
@@ -351,59 +310,129 @@ export default function ProjectReviewModal({
                           </button>
 
                           {isOpen ? (
-                            <div className="space-y-2 border-t border-gray-200 dark:border-slate-700 px-3 pb-2.5 pt-2">
-                              {mainTask.subTasks.length > 0 ? (
-                                mainTask.subTasks.map((subTask) => (
-                                  <div
-                                    key={subTask.id}
-                                    className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5">
-                                    <div className="flex flex-wrap items-start justify-between gap-2">
-                                      <div className="min-w-0">
-                                        <div className="truncate text-[11px] font-medium text-gray-900 dark:text-slate-100">
-                                          {subTask.title}
-                                        </div>
-                                        <div className="mt-1 text-[10px] text-gray-500 dark:text-slate-400">
-                                          {subTask.estimatedHours > 0
-                                            ? `${subTask.estimatedHours} hrs planned`
-                                            : "No duration"}
-                                        </div>
-                                      </div>
-
-                                      <TimingPill
-                                        status={subTask.timingStatus}
-                                      />
-                                    </div>
-
-                                    <div className="mt-2 grid gap-x-3 gap-y-1 text-[10px] leading-4 text-gray-500 dark:text-slate-400 xl:grid-cols-2">
-                                      <div>
-                                        Planned:{" "}
-                                        {formatDateTime(subTask.scheduledStart)}
-                                      </div>
-                                      <div>
-                                        Finished:{" "}
-                                        {formatDateTime(subTask.completedAt)}
-                                      </div>
-                                      <div>
-                                        Equipment:{" "}
-                                        {subTask.equipmentNames.length > 0
-                                          ? subTask.equipmentNames.join(", ")
-                                          : "None recorded"}
-                                      </div>
-                                      <div>
-                                        Staff:{" "}
-                                        {subTask.employeeNames.length > 0
-                                          ? subTask.employeeNames.join(", ")
-                                          : "No assigned staff"}
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
-                                  No subtasks were recorded under this main
-                                  task.
+                            <div className="space-y-3 border-t border-gray-200 dark:border-slate-700 px-3 pb-2.5 pt-2">
+                              {/* Materials live at the main-task level
+                                  in the data (project_task_material is
+                                  keyed by project_task_id, not by
+                                  sub_task_id), so they ride here above
+                                  the subtask list rather than per-row. */}
+                              <div>
+                                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-slate-400">
+                                  Materials
                                 </div>
-                              )}
+                                {mainTask.materials.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {mainTask.materials.map((material) => (
+                                      <span
+                                        key={material.id}
+                                        className="inline-flex items-center gap-1 rounded-full border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-[10px] text-gray-700 dark:text-slate-200"
+                                      >
+                                        <span className="font-medium">
+                                          {material.name}
+                                        </span>
+                                        {material.totalQuantity > 0 ? (
+                                          <span className="text-gray-500 dark:text-slate-400">
+                                            ×{material.totalQuantity}
+                                            {material.unit ? ` ${material.unit}` : ""}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] text-gray-500 dark:text-slate-400">
+                                    No materials recorded.
+                                  </div>
+                                )}
+                              </div>
+
+                              <div>
+                                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-slate-400">
+                                  Subtasks
+                                </div>
+                                {mainTask.subTasks.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {mainTask.subTasks.map((subTask) => (
+                                      <div
+                                        key={subTask.id}
+                                        className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5"
+                                      >
+                                        <div className="flex flex-wrap items-start justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <div className="truncate text-[11px] font-medium text-gray-900 dark:text-slate-100">
+                                              {subTask.title}
+                                            </div>
+                                            <div className="mt-1 text-[10px] text-gray-500 dark:text-slate-400">
+                                              {subTask.estimatedHours > 0
+                                                ? `${subTask.estimatedHours} hrs planned`
+                                                : "No duration"}
+                                            </div>
+                                          </div>
+
+                                          <TimingPill status={subTask.timingStatus} />
+                                        </div>
+
+                                        <div className="mt-2 grid gap-x-3 gap-y-1 text-[10px] leading-4 text-gray-500 dark:text-slate-400 xl:grid-cols-2">
+                                          <div>
+                                            Planned:{" "}
+                                            {formatDateTime(subTask.scheduledStart)}
+                                          </div>
+                                          <div>
+                                            Finished:{" "}
+                                            {formatDateTime(subTask.completedAt)}
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-2 flex flex-col gap-1.5 text-[10px] text-gray-600 dark:text-slate-300">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="font-semibold uppercase tracking-[0.12em] text-gray-500 dark:text-slate-400">
+                                              Equipment:
+                                            </span>
+                                            {subTask.equipmentNames.length > 0 ? (
+                                              subTask.equipmentNames.map((name) => (
+                                                <span
+                                                  key={`${subTask.id}-eq-${name}`}
+                                                  className="inline-flex items-center rounded-full border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 px-2 py-0.5"
+                                                >
+                                                  {name}
+                                                </span>
+                                              ))
+                                            ) : (
+                                              <span className="text-gray-500 dark:text-slate-400">
+                                                None recorded
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="font-semibold uppercase tracking-[0.12em] text-gray-500 dark:text-slate-400">
+                                              Staff:
+                                            </span>
+                                            {subTask.employeeNames.length > 0 ? (
+                                              subTask.employeeNames.map((name) => (
+                                                <span
+                                                  key={`${subTask.id}-st-${name}`}
+                                                  className="inline-flex items-center rounded-full border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 px-2 py-0.5"
+                                                >
+                                                  {name}
+                                                </span>
+                                              ))
+                                            ) : (
+                                              <span className="text-gray-500 dark:text-slate-400">
+                                                No assigned staff
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
+                                    No subtasks were recorded under this main
+                                    task.
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ) : null}
                         </div>
@@ -412,7 +441,7 @@ export default function ProjectReviewModal({
                   </div>
                 </SectionCard>
 
-                <div className="grid min-h-0 overflow-hidden gap-3 lg:grid-rows-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                <div className="flex min-h-0 flex-col overflow-hidden">
                   <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
                     <div className="shrink-0 border-b border-gray-200 px-3.5 py-1.5 dark:border-slate-700">
                       <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-slate-400">
@@ -542,93 +571,6 @@ export default function ProjectReviewModal({
                     )}
                   </section>
 
-                  <SectionCard
-                    title={
-                      resourceView === "materials" ? "Materials" : "Equipment"
-                    }
-                    description={
-                      resourceView === "materials"
-                        ? `${formatCountLabel(summary.materials.length, "material")} aggregated across the project.`
-                        : `${formatCountLabel(summary.equipment.length, "equipment item")} logged in the project workflow.`
-                    }>
-                    <div className="mb-3 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setResourceView("materials")}
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition",
-                          resourceView === "materials"
-                            ? "border-emerald-300 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-300"
-                            : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:bg-gray-50 hover:text-gray-900 dark:hover:bg-slate-800/70 dark:hover:text-slate-100",
-                        )}>
-                        Materials
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setResourceView("equipment")}
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition",
-                          resourceView === "equipment"
-                            ? "border-sky-300 bg-sky-500/10 text-sky-700 dark:border-sky-500/35 dark:bg-sky-500/15 dark:text-sky-300"
-                            : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:bg-gray-50 hover:text-gray-900 dark:hover:bg-slate-800/70 dark:hover:text-slate-100",
-                        )}>
-                        Equipment
-                      </button>
-                    </div>
-
-                    {resourceView === "materials" ? (
-                      <div className="space-y-2">
-                        {summary.materials.length > 0 ? (
-                          summary.materials.map((material) => (
-                            <MaterialRow
-                              key={material.id}
-                              material={material}
-                            />
-                          ))
-                        ) : (
-                          <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
-                            No materials were recorded for this project.
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {summary.equipment.length > 0 ? (
-                          summary.equipment.map((equipment) => (
-                            <div
-                              key={equipment.name}
-                              className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="text-[11px] font-medium text-gray-900 dark:text-slate-100">
-                                  {equipment.name}
-                                </div>
-                                <div className="text-[10px] text-gray-500 dark:text-slate-400">
-                                  Used {equipment.usageCount} time
-                                  {equipment.usageCount === 1 ? "" : "s"}
-                                </div>
-                              </div>
-
-                              {equipment.notes.length > 0 ? (
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  {equipment.notes.map((note) => (
-                                    <span
-                                      key={`${equipment.name}-${note}`}
-                                      className="rounded-full border border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800/50 px-2 py-0.5 text-[10px] text-gray-500 dark:text-slate-400">
-                                      {note}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          ))
-                        ) : (
-                          <div className="rounded-lg border border-dashed border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-4 text-[11px] text-gray-500 dark:text-slate-400">
-                            No equipment usage was recorded for this project.
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </SectionCard>
                 </div>
               </section>
             </div>

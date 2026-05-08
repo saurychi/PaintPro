@@ -77,9 +77,14 @@ export async function POST(request: Request) {
       );
     }
 
-    if (project.status !== "quotation_pending") {
+    if (project.status !== "grant_access_quotation") {
       return NextResponse.json(
-        { error: "This quotation is not pending client signature." },
+        {
+          error:
+            project.status === "quotation_pending"
+              ? "The project manager has not yet granted access to sign this quotation."
+              : "This quotation is not pending client signature.",
+        },
         { status: 409 },
       );
     }
@@ -115,12 +120,11 @@ export async function POST(request: Request) {
     const safeProjectCode = sanitizeFileName(project.project_code || projectId);
 
     const clientSignaturePath = `project-documents/${projectId}/quotation-client-signature.png`;
-    // Signed quotation PDFs live in their own "quotations" storage bucket so
-    // they're easy to audit / restrict separately from the general documents
-    // library. The Save to Documents flow on the admin side now downloads
-    // from this bucket via project_documents.storage_bucket.
-    const quotationStorageBucket = "quotations";
-    const quotationPdfPath = `${projectId}/quotation-${safeProjectCode}.pdf`;
+    // Signed quotation PDFs live in the shared "documents" bucket alongside
+    // invoices, namespaced under "quotations/<projectId>/..." to mirror the
+    // "invoices/<projectId>/..." prefix used for invoice PDFs.
+    const quotationStorageBucket = "documents";
+    const quotationPdfPath = `quotations/${projectId}/quotation-${safeProjectCode}.pdf`;
     const quotationFileName = `quotation-${safeProjectCode}.pdf`;
 
     // Ensure both buckets exist before any upload, so a fresh Supabase
@@ -180,7 +184,7 @@ export async function POST(request: Request) {
             client_id: project.client_id,
             document_type: "quotation",
             document_status: "signed",
-            storage_bucket: "documents",
+            storage_bucket: quotationStorageBucket,
             storage_path: quotationPdfPath,
             file_name: quotationFileName,
             file_mime_type: "application/pdf",

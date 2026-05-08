@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useClientProject } from "./ClientShellClient";
+import DashboardClock from "@/components/dashboard/dashboardClock";
 import JobProgressCard, {
   type ProcessItem,
 } from "@/components/dashboard/jobProgressCard";
@@ -381,13 +382,9 @@ export default function ClientDashboardPage() {
         setProject(asRecord(data.project));
         setMainTasks(nextMainTasks);
 
-        const defaultOpen = new Set<string>();
-        const autoOpenMainTaskId = getAutoOpenMainTaskId(nextMainTasks);
-
-        if (autoOpenMainTaskId) {
-          defaultOpen.add(`task-${autoOpenMainTaskId}`);
-        }
-        setOpenProcessIds(defaultOpen);
+        // Seeding lives in JobProgressCard now — see admin page's
+        // matching note. Resetting openProcessIds here would fight
+        // its seededForProjectRef effect on every refreshKey bump.
         setOpenSubtaskIds(new Set());
       } catch (err: unknown) {
         const msg =
@@ -486,31 +483,34 @@ export default function ClientDashboardPage() {
     <div className="md:h-screen md:overflow-hidden">
       <div className="flex flex-col gap-4 p-3 sm:p-4 md:h-full md:p-6">
         {/* Header */}
-        <div className="shrink-0">
-          <h1
-            className="text-xl sm:text-2xl font-semibold"
-            style={{ color: "var(--cp-text)" }}>
-            {projectTitle}
-          </h1>
-          <div
-            className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm"
-            style={{ color: "var(--cp-text-muted)" }}>
-            <span
-              className="font-mono font-medium"
-              style={{ color: "var(--cp-text-2)" }}>
-              {projectCode}
-            </span>
-            {siteAddress ? <span>{siteAddress}</span> : null}
-            {fetchError ? (
-              <span style={{ color: "var(--cp-danger)" }}>{fetchError}</span>
-            ) : null}
-            {loadingDetails ? (
-              <Loader2
-                className="h-4 w-4 animate-spin"
-                style={{ color: "var(--cp-text-faint)" }}
-              />
-            ) : null}
+        <div className="flex shrink-0 items-start justify-between gap-4">
+          <div>
+            <h1
+              className="text-xl sm:text-2xl font-semibold"
+              style={{ color: "var(--cp-text)" }}>
+              {projectTitle}
+            </h1>
+            <div
+              className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm"
+              style={{ color: "var(--cp-text-muted)" }}>
+              <span
+                className="font-mono font-medium"
+                style={{ color: "var(--cp-text-2)" }}>
+                {projectCode}
+              </span>
+              {siteAddress ? <span>{siteAddress}</span> : null}
+              {fetchError ? (
+                <span style={{ color: "var(--cp-danger)" }}>{fetchError}</span>
+              ) : null}
+              {loadingDetails ? (
+                <Loader2
+                  className="h-4 w-4 animate-spin"
+                  style={{ color: "var(--cp-text-faint)" }}
+                />
+              ) : null}
+            </div>
           </div>
+          <DashboardClock />
         </div>
 
         {/* Body — stacks on mobile, switches to the 7/3 split on lg+. */}

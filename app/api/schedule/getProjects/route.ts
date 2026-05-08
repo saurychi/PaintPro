@@ -154,8 +154,85 @@ export async function GET(req: Request) {
   const currentProject =
     projects.find((project) => project.status === "current") ?? projects[0] ?? null
 
+  // Pull subtasks for the visible projects so the schedule page can render
+  // them individually in timeline view (instead of a single block per
+  // project). We only return the fields the calendar needs — start/end
+  // datetimes, the human-readable title, and which project they belong to.
+  const projectIds = projects.map((p) => p.id)
+  type SubtaskOut = {
+    id: string
+    projectId: string
+    title: string
+    scheduledStartDatetime: string | null
+    scheduledEndDatetime: string | null
+    status: string
+    // Work-hours of the subtask (excludes lunch + non-working day pauses).
+    // The schedule pages need this to render multi-segment chips that
+    // visually pause for lunch / blocked days, matching the wizard's
+    // project-schedule view.
+    estimatedHours: number | null
+  }
+  const subtasks: SubtaskOut[] = []
+
+  if (projectIds.length > 0) {
+    const { data: taskRows } = await supabaseAdmin
+      .from("project_task")
+      .select("project_task_id, project_id")
+      .in("project_id", projectIds)
+
+    const taskIdToProjectId = new Map<string, string>()
+    for (const row of taskRows ?? []) {
+      taskIdToProjectId.set(
+        row.project_task_id as string,
+        row.project_id as string,
+      )
+    }
+
+    const taskIds = Array.from(taskIdToProjectId.keys())
+
+    if (taskIds.length > 0) {
+      const { data: subRows } = await supabaseAdmin
+        .from("project_sub_task")
+        .select(
+          "project_sub_task_id, project_task_id, scheduled_start_datetime, scheduled_end_datetime, status, estimated_hours, sub_task(description)",
+        )
+        .in("project_task_id", taskIds)
+
+      for (const row of (subRows ?? []) as Array<{
+        project_sub_task_id: string
+        project_task_id: string
+        scheduled_start_datetime: string | null
+        scheduled_end_datetime: string | null
+        status: string | null
+        estimated_hours: number | null
+        sub_task:
+          | { description: string | null }
+          | { description: string | null }[]
+          | null
+      }>) {
+        const projectId = taskIdToProjectId.get(row.project_task_id)
+        if (!projectId) continue
+        const subTask = Array.isArray(row.sub_task)
+          ? row.sub_task[0]
+          : row.sub_task
+        const hoursRaw = Number(row.estimated_hours)
+        subtasks.push({
+          id: row.project_sub_task_id,
+          projectId,
+          title: subTask?.description?.trim() || "Subtask",
+          scheduledStartDatetime: row.scheduled_start_datetime,
+          scheduledEndDatetime: row.scheduled_end_datetime,
+          status: String(row.status ?? "").trim().toLowerCase(),
+          estimatedHours:
+            Number.isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : null,
+        })
+      }
+    }
+  }
+
   return NextResponse.json({
     projects,
     currentProject,
+    subtasks,
   })
 }

@@ -90,16 +90,41 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - priority
 - estimated_budget
 - estimated_cost
-- estimated_profit
+- estimated_profit (generated: estimated_budget - estimated_cost)
 - materials_cost
 - labor_cost
+- markup_rate
+- downpayment
+- dimensions (jsonb)
 - notes
-- dimension (jsonb)
-- mark_up
 - created_at
 - updated_at
-- client_id (user_id)
-- created_by (admin user_id)
+- client_id (clients.client_id)
+- created_by (users.id, admin)
+
+##Project Status Lifecycle
+- main_task_pending - Admin is assigning the main tasks for the project.
+- sub_task_pending - Admin is assigning sub tasks under the selected main tasks.
+- materials_pending - Admin is assigning estimated materials.
+- equipment_pending - Admin is assigning required equipment.
+- schedule_pending - Admin is setting the project and sub task schedule.
+- employee_assignment_pending - Admin is assigning employees to scheduled sub tasks.
+- cost_estimation_pending - Admin is reviewing labor, materials, markup, and total estimates.
+- overview_pending - Admin is reviewing the full generated project plan before quotation.
+- quotation_pending - Quotation has been generated and the admin is reviewing it before releasing to the client.
+- grant_access_quotation - Admin has granted the client permission to sign the quotation (client can now sign).
+- client_quotation_done - Client has signed the quotation; admin still needs to acknowledge and continue.
+- downpayment_pending - Project is waiting for the required downpayment.
+- ready_to_start - Downpayment is done and the project is ready to begin.
+- in_progress - Project work has started.
+- review_pending - Project work is done and awaiting review.
+- invoice_pending - Invoice generation is pending.
+- invoice_agreement_pending - Invoice has been sent and is awaiting client agreement/signature.
+- payment_pending - Final payment is pending.
+- employee_management_pending - Employee performance, payroll, or management wrap-up is pending.
+- conclude_job_pending - Final job conclusion step is pending.
+- completed - Project is fully completed.
+- cancelled - Project was cancelled.
 
 ##Clients
 - client_id
@@ -141,12 +166,15 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - project_sub_task_id
 - project_task_id
 - sub_task_id
-- assigned_user_id
 - estimated_hours
-- equipments_used
+- equipments_used (jsonb)
 - status
 - sort_order
 - notes
+- scheduled_start_datetime
+- scheduled_end_datetime
+- actual_start_datetime
+- actual_end_datetime
 - created_at
 - updated_at
 
@@ -212,10 +240,26 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - created_at
 - updated_at
 
-##Message
-- message_id
-- project_id
-- user_id
+##conversations
+- id
+- project_id (nullable; null for direct DM conversations)
+- direct_pair_key (nullable; identifies a direct DM pair)
+- created_at
+- updated_at
+
+##conversation_participants
+- conversation_id (PK part)
+- user_id (PK part)
+- joined_at
+- last_read_at
+
+##messages
+- id
+- conversation_id
+- sender_id (users.id, nullable)
+- client_id (clients.client_id, nullable)
+- content
+- created_at
 
 ##project_schedule
 - project_schedule_id
@@ -343,5 +387,42 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - block_type
 - notes
 - is_active
+- created_at
+- updated_at
+
+##invites
+- id
+- email (unique)
+- role (client/staff/manager)
+- status (pending/used/revoked)
+- created_at
+- used_at
+
+##location
+- location_id
+- name
+- address
+- parent_tag_id (tag.tag_id)
+- color
+- created_at
+- updated_at
+
+##document_folders
+- folder_id
+- name
+- is_archived
+- created_at
+- updated_at
+
+##documents
+- document_id
+- folder_id (document_folders.folder_id, nullable)
+- document_type (INV/PAY/RCP/QTE)
+- title
+- content
+- content_type (default 'text/plain')
+- original_filename
+- created_by
+- is_archived
 - created_at
 - updated_at

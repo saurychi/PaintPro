@@ -4,6 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Archive, Filter, Loader2, MessageSquare, MoreVertical, Search } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { supabase } from "@/lib/supabaseClient"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -153,9 +154,8 @@ export default function Staff() {
   const [archiveBlockedMsg, setArchiveBlockedMsg] = useState<string | null>(null)
   const [archiveCheckingId, setArchiveCheckingId] = useState<string | null>(null)
 
-  // Kebab + filter UI
+  // Kebab UI
   const [openKebabId, setOpenKebabId] = useState<string | null>(null)
-  const [filterOpen, setFilterOpen] = useState(false)
 
   // Search + filters
   const [searchQuery, setSearchQuery] = useState("")
@@ -209,7 +209,16 @@ export default function Staff() {
   // ── Derived filter options (from DB-fetched employees) ────────────────────
 
   const uniqueSpecialties = useMemo(
-    () => [...new Set(employees.map((e) => e.specialty).filter(Boolean) as string[])].sort(),
+    () =>
+      [
+        ...new Set(
+          employees.flatMap((e) =>
+            e.specialty
+              ? e.specialty.split(",").map((s) => s.trim()).filter(Boolean)
+              : []
+          )
+        ),
+      ].sort(),
     [employees],
   )
 
@@ -229,7 +238,9 @@ export default function Staff() {
       : employees.filter((e) => e.status !== "archived")
 
     if (statusFilter)   list = list.filter((e) => e.status === statusFilter)
-    if (specialtyFilter) list = list.filter((e) => e.specialty === specialtyFilter)
+    if (specialtyFilter) list = list.filter((e) =>
+      e.specialty?.split(",").map((s) => s.trim()).includes(specialtyFilter)
+    )
 
     const q = searchQuery.trim().toLowerCase()
     if (q) list = list.filter((e) => e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q))
@@ -405,86 +416,41 @@ export default function Staff() {
             />
           </div>
 
-          {/* Filter icon — compact, expandable panel */}
-          <div className="relative">
-            <button
-              onClick={() => setFilterOpen((p) => !p)}
-              title="Filter staff"
-              className={[
-                "relative inline-flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm transition-all duration-200",
-                activeFilterCount > 0
-                  ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065]"
-                  : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700",
-              ].join(" ")}
-            >
-              <Filter className="h-4 w-4" />
-              {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#00c065] text-[9px] font-bold text-white">
-                  {activeFilterCount}
-                </span>
+          {/* Filter dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors outline-none focus:outline-none focus:ring-0">
+                <Filter className="h-4 w-4" /> Filters
+                {activeFilterCount > 0 && (
+                  <span className="flex h-2 w-2 rounded-full bg-[#00c065]" />
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
+
+              {uniqueSpecialties.length > 0 && (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Specialty</div>
+                  <DropdownMenuCheckboxItem checked={specialtyFilter === null} onCheckedChange={() => setSpecialtyFilter(null)}>All Specialties</DropdownMenuCheckboxItem>
+                  {uniqueSpecialties.map((sp) => (
+                    <DropdownMenuCheckboxItem key={sp} checked={specialtyFilter === sp} onCheckedChange={() => setSpecialtyFilter(specialtyFilter === sp ? null : sp)}>
+                      {sp}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  <div className="h-px bg-gray-100 my-1" />
+                </>
               )}
-            </button>
 
-            {filterOpen && (
-              <>
-                {/* Click-outside overlay */}
-                <div className="fixed inset-0 z-10" onClick={() => setFilterOpen(false)} />
+              <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">Status</div>
+              <DropdownMenuCheckboxItem checked={statusFilter === null} onCheckedChange={() => setStatusFilter(null)}>All Statuses</DropdownMenuCheckboxItem>
+              {uniqueStatuses.map((st) => (
+                <DropdownMenuCheckboxItem key={st} checked={statusFilter === st} onCheckedChange={() => setStatusFilter(statusFilter === st ? null : st)} className="capitalize">
+                  {st}
+                </DropdownMenuCheckboxItem>
+              ))}
 
-                {/* Filter panel */}
-                <div className="absolute right-0 top-full z-20 mt-1.5 w-60 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
-                  <div className="p-3">
-                    {/* Specialty */}
-                    {uniqueSpecialties.length > 0 && (
-                      <div className="mb-3">
-                        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                          Specialty
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {uniqueSpecialties.map((sp) => (
-                            <button
-                              key={sp}
-                              onClick={() => setSpecialtyFilter(specialtyFilter === sp ? null : sp)}
-                              className={[
-                                "rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors",
-                                specialtyFilter === sp
-                                  ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065]"
-                                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
-                              ].join(" ")}
-                            >
-                              {sp}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Status */}
-                    <div>
-                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                        Status
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {uniqueStatuses.map((st) => (
-                          <button
-                            key={st}
-                            onClick={() => setStatusFilter(statusFilter === st ? null : st)}
-                            className={[
-                              "rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors capitalize",
-                              statusFilter === st
-                                ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065]"
-                                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
-                            ].join(" ")}
-                          >
-                            {st}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Show Archived — outside filter, in same row */}
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">

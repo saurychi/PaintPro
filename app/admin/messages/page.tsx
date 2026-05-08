@@ -7,6 +7,7 @@ import {
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
+  markAllConversationsAsRead,
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
@@ -70,6 +71,7 @@ export default function AdminMessages() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [chatHistory, setChatHistory] = useState<Message[]>([])
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false)
 
   // New Chat Modal State
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
@@ -92,8 +94,28 @@ export default function AdminMessages() {
 
   // Auto-Scroll Ref
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Per-conversation message cache so repeat visits don't refetch and the
+  // sidebar prefetch-on-hover has somewhere to drop its results.
+  const [messageCache, setMessageCache] = useState<Map<string, Message[]>>(new Map())
+  // Per-conversation "has older messages still on the server" flag so the
+  // scroll-to-top loader stops asking once we've reached the beginning.
+  const [hasMoreMap, setHasMoreMap] = useState<Map<string, boolean>>(new Map())
+  // Tracks an in-flight older-messages fetch to prevent duplicate requests
+  // when the user keeps scrolling at the top.
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  // When prepending older messages we want to keep the visually-anchored
+  // message in place. Capture the scroll height before the prepend so we can
+  // restore the visible position after.
+  const prependScrollAnchor = useRef<{ prevHeight: number; prevTop: number } | null>(null)
+  // Tracks in-flight prefetches per conversation so hovering twice doesn't
+  // fire two requests.
+  const prefetchingRef = useRef<Set<string>>(new Set())
+
+  const PAGE_SIZE = 7
 
   const showDots = (msgId: string) => {
     if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
@@ -102,6 +124,16 @@ export default function AdminMessages() {
   const startHideDots = () => {
     dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
   }
+
+  // Bulk-clear unread state across every one of the user's conversations
+  // the moment the messages page mounts. This makes the sidebar badge drop
+  // to zero on arrival rather than only after the user clicks each thread.
+  // The per-conversation unread pills in the sidebar still work — they
+  // track the same `last_read_at` field, so they reset together.
+  useEffect(() => {
+    if (!currentUserId) return
+    void markAllConversationsAsRead(currentUserId)
+  }, [currentUserId])
 
   // 1. Get current user
   useEffect(() => {
@@ -118,6 +150,9 @@ export default function AdminMessages() {
   }
 
   useEffect(() => {
+    // Don't auto-scroll to the bottom when the change came from prepending
+    // older messages — the prepend handler restores scroll position itself.
+    if (prependScrollAnchor.current) return
     scrollToBottom()
   }, [chatHistory])
 
@@ -174,26 +209,229 @@ export default function AdminMessages() {
     }
   }, [activeChatId, currentUserId])
 
-  // 6. Fetch Chat History
+  // 6. Fetch Chat History (with in-memory cache + pagination)
   useEffect(() => {
     if (!activeChatId) return
 
-    async function loadMessages() {
-      const msgs = await fetchMessages(activeChatId!)
-      setChatHistory(msgs)
+    let cancelled = false
+
+    // If we already have this conversation cached, render it instantly —
+    // no spinner, no flicker. The realtime listener keeps the cache fresh
+    // for any new messages that arrive while the conversation is open.
+    const cached = messageCache.get(activeChatId)
+    if (cached) {
+      setChatHistory(cached)
+      setIsLoadingMessages(false)
+      return () => {
+        cancelled = true
+      }
     }
-    loadMessages()
-  }, [activeChatId])
+
+    // First time opening this conversation in this session — clear stale
+    // messages from the previous one and show the loader.
+    setChatHistory([])
+    setIsLoadingMessages(true)
+
+    ;(async () => {
+      const result = await fetchMessages(activeChatId, { limit: PAGE_SIZE })
+      if (cancelled) return
+      setChatHistory(result.messages)
+      setMessageCache((prev) => new Map(prev).set(activeChatId, result.messages))
+      setHasMoreMap((prev) => new Map(prev).set(activeChatId, result.hasMore))
+      setIsLoadingMessages(false)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeChatId, messageCache])
+
+  // Prefetch the most recent page for a conversation in the background. Wired
+  // to onMouseEnter on each sidebar row so by the time the user clicks, the
+  // messages are already cached and the chat opens with no spinner.
+  const prefetchConversation = useCallback((conversationId: string) => {
+    if (messageCache.has(conversationId)) return
+    if (prefetchingRef.current.has(conversationId)) return
+    prefetchingRef.current.add(conversationId)
+    void (async () => {
+      try {
+        const result = await fetchMessages(conversationId, { limit: PAGE_SIZE })
+        // Skip overwriting if the user got there first and triggered the
+        // primary fetch — its result is fresher.
+        setMessageCache((prev) => {
+          if (prev.has(conversationId)) return prev
+          return new Map(prev).set(conversationId, result.messages)
+        })
+        setHasMoreMap((prev) => {
+          if (prev.has(conversationId)) return prev
+          return new Map(prev).set(conversationId, result.hasMore)
+        })
+      } finally {
+        prefetchingRef.current.delete(conversationId)
+      }
+    })()
+  }, [messageCache])
+
+  // Load the next page of older messages, prepending them while preserving
+  // the user's visible scroll position.
+  const loadOlderMessages = useCallback(async () => {
+    if (!activeChatId) return
+    if (isLoadingOlder) return
+    if (chatHistory.length === 0) return
+    if (hasMoreMap.get(activeChatId) === false) return
+
+    setIsLoadingOlder(true)
+
+    // Capture scroll metrics so we can restore the user's position after
+    // the new content is prepended.
+    const scrollEl = messagesScrollRef.current
+    if (scrollEl) {
+      prependScrollAnchor.current = {
+        prevHeight: scrollEl.scrollHeight,
+        prevTop: scrollEl.scrollTop,
+      }
+    }
+
+    const oldest = chatHistory[0]
+    const result = await fetchMessages(activeChatId, {
+      limit: PAGE_SIZE,
+      before: oldest.created_at,
+    })
+
+    setChatHistory((prev) => {
+      const merged = [...result.messages, ...prev]
+      setMessageCache((cache) => new Map(cache).set(activeChatId, merged))
+      return merged
+    })
+    setHasMoreMap((prev) => new Map(prev).set(activeChatId, result.hasMore))
+    setIsLoadingOlder(false)
+  }, [activeChatId, chatHistory, hasMoreMap, isLoadingOlder])
+
+  // Trigger loading the next older page when the user scrolls near the top.
+  useEffect(() => {
+    const scrollEl = messagesScrollRef.current
+    if (!scrollEl) return
+
+    const onScroll = () => {
+      if (scrollEl.scrollTop <= 40) {
+        void loadOlderMessages()
+      }
+    }
+    scrollEl.addEventListener("scroll", onScroll)
+    return () => scrollEl.removeEventListener("scroll", onScroll)
+  }, [loadOlderMessages])
+
+  // Helper: apply a chatHistory update AND mirror it into the cache for the
+  // active conversation so the cache doesn't go stale on send/edit/delete.
+  // Always dedupes by id at the end — realtime + polling + send-handler can
+  // each independently try to add the same message in tight races (worst
+  // case StrictMode double-invokes everything in dev), and React errors
+  // hard on duplicate keys.
+  const applyChatUpdate = useCallback(
+    (updater: (prev: Message[]) => Message[]) => {
+      setChatHistory((prev) => {
+        const next = updater(prev)
+        const seen = new Set<string>()
+        const deduped = next.filter((msg) => {
+          if (seen.has(msg.id)) return false
+          seen.add(msg.id)
+          return true
+        })
+        if (activeChatId) {
+          setMessageCache((cache) => new Map(cache).set(activeChatId, deduped))
+        }
+        return deduped
+      })
+    },
+    [activeChatId],
+  )
+
+  // After older messages are prepended, restore scroll so the message the
+  // user was looking at stays put instead of jumping to the top.
+  useEffect(() => {
+    const anchor = prependScrollAnchor.current
+    if (!anchor) return
+    const scrollEl = messagesScrollRef.current
+    if (!scrollEl) return
+    const heightDelta = scrollEl.scrollHeight - anchor.prevHeight
+    scrollEl.scrollTop = anchor.prevTop + heightDelta
+    prependScrollAnchor.current = null
+  }, [chatHistory])
 
   // Focus input whenever a conversation is opened
   useEffect(() => {
     if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
-  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  // Polling fallback for the chat panel: every 5s, refetch the active
+  // conversation and merge any new messages in. Realtime alone isn't
+  // reliable because the browser Supabase client is subject to RLS — if
+  // the user can't SELECT a new message row directly the realtime push
+  // is filtered out and the chat panel goes stale even though the sidebar
+  // badge (which uses the server-side admin client) correctly shows the
+  // new count. Pauses when the tab isn't visible.
   useEffect(() => {
-    if (!currentUserId) return
+    if (!activeChatId) return
 
+    let cancelled = false
+
+    async function pollActiveChat() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      const result = await fetchMessages(activeChatId!)
+      if (cancelled) return
+      setChatHistory((prev) => {
+        // Build the dedup set incrementally so a fetch that itself contains
+        // duplicate rows (rare API race) can't slip a second copy through.
+        const seen = new Set(prev.map((m) => m.id))
+        const merged = [...prev]
+        for (const msg of result.messages) {
+          if (seen.has(msg.id)) continue
+          seen.add(msg.id)
+          merged.push(msg)
+        }
+        merged.sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+        return merged
+      })
+    }
+
+    const interval = window.setInterval(() => {
+      void pollActiveChat()
+    }, 5_000)
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void pollActiveChat()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [activeChatId])
+
+  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates)
+  //
+  // Subscription mounts ONCE per page life. Earlier we had `activeChatId`
+  // in the deps array, which forced an unsubscribe + resubscribe every
+  // time the user clicked a different conversation — and messages that
+  // arrived during that window were dropped, which is why new messages
+  // only appeared after navigating away and back. The handler now reads
+  // `activeChatId` and `currentUserId` through refs so we can keep the
+  // channel stable.
+  const activeChatIdRef = useRef(activeChatId)
+  const currentUserIdRef = useRef(currentUserId)
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId
+  }, [activeChatId])
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId
+  }, [currentUserId])
+
+  useEffect(() => {
     const channel = supabase
       .channel(`global-chat-listener`)
       .on(
@@ -201,36 +439,67 @@ export default function AdminMessages() {
         { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
         (payload) => {
           const newMessage = payload.new as Message
+          const activeChat = activeChatIdRef.current
+          const me = currentUserIdRef.current
 
-          if (newMessage.conversation_id === activeChatId) {
+          // Skip the realtime echo for our own outgoing messages —
+          // handleSendMessage already updated chatHistory + the
+          // sidebar optimistically, so processing it again would
+          // re-mark the conversation as unread (line further down)
+          // even though we're the one who just sent it.
+          if (me && newMessage.sender_id === me) return
+
+          if (newMessage.conversation_id === activeChat) {
             // It's the chat we are currently looking at
-            if (newMessage.sender_id !== currentUserId) {
-              setChatHistory((prev) => [...prev, newMessage])
-              markConversationAsRead(activeChatId, currentUserId) // We read it instantly
+            if (newMessage.sender_id !== me) {
+              setChatHistory((prev) => {
+                if (prev.some((m) => m.id === newMessage.id)) return prev
+                return [...prev, newMessage]
+              })
+              if (me) markConversationAsRead(activeChat, me) // We read it instantly
             }
           }
 
-          // <-- NEW: Update the sidebar for ALL incoming messages and bump to top
+          // Keep the cache in sync so a later switch back to this conversation
+          // shows the freshly-arrived message instead of a stale snapshot.
+          setMessageCache((prev) => {
+            const cached = prev.get(newMessage.conversation_id)
+            if (!cached) return prev
+            if (cached.some((m) => m.id === newMessage.id)) return prev
+            return new Map(prev).set(newMessage.conversation_id, [...cached, newMessage])
+          })
+
+          // Update the sidebar for ALL incoming messages and bump to top.
+          // If the message is for a conversation NOT currently in the sidebar
+          // (e.g., a brand-new project conversation just created by a server
+          // route like /api/planning/notifyQuotationClient), refetch the
+          // conversations list so it appears instead of being silently dropped.
+          let conversationKnown = false
           setConversations(prev => {
+            conversationKnown = prev.some(c => c.id === newMessage.conversation_id)
+            if (!conversationKnown) return prev
             const updated = prev.map(c =>
               c.id === newMessage.conversation_id
                 ? {
                     ...c,
-                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
+                    unread: c.id !== activeChat, // Red dot only if we aren't looking at it
                     lastMessage: newMessage.content,
                     lastActivity: new Date(newMessage.created_at).getTime()
                   }
                 : c
             )
-            // Re-sort the array so this chat jumps to the top
             return updated.sort((a, b) => b.lastActivity - a.lastActivity)
           })
+
+          if (!conversationKnown && me) {
+            void loadConversations(me)
+          }
         }
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeChatId, currentUserId])
+  }, [loadConversations])
 
   // 8. Handle Sending a Message
   const handleSendMessage = async () => {
@@ -238,7 +507,7 @@ export default function AdminMessages() {
     setIsSending(true)
     try {
       const sentMsg = await postMessage(activeChatId, currentUserId, inputMessage)
-      setChatHistory((prev) => [...prev, sentMsg])
+      applyChatUpdate((prev) => [...prev, sentMsg])
 
       // <-- NEW: Update sidebar instantly for ourselves and bump to top
       setConversations(prev => {
@@ -270,7 +539,7 @@ export default function AdminMessages() {
     try {
       const res = await fetch(`/api/messages/manage?messageId=${messageId}`, { method: "DELETE" })
       if (!res.ok) throw new Error("Failed to delete")
-      setChatHistory((prev) => prev.filter((m) => m.id !== messageId))
+      applyChatUpdate((prev) => prev.filter((m) => m.id !== messageId))
     } catch (error) {
       console.error("Error deleting message:", error)
     }
@@ -286,7 +555,7 @@ export default function AdminMessages() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || "Failed to update")
-      setChatHistory((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
+      applyChatUpdate((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
       setEditingId(null)
       startHideDots()
     } catch (error) {
@@ -446,6 +715,8 @@ export default function AdminMessages() {
                   <button
                     key={chat.id}
                     onClick={() => { setActiveChatId(chat.id); setMobileView("chat") }}
+                    onMouseEnter={() => prefetchConversation(chat.id)}
+                    onFocus={() => prefetchConversation(chat.id)}
                     className={[
                       "group relative w-full text-left border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 dark:border-slate-800",
                       isActive
@@ -517,10 +788,21 @@ export default function AdminMessages() {
               </div>
 
               {/* Messages List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
-                {chatHistory.length === 0 && (
+              <div ref={messagesScrollRef} className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
+                {isLoadingMessages ? (
+                  <div className="m-auto flex items-center gap-2 text-gray-500 text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading messages...
+                  </div>
+                ) : chatHistory.length === 0 ? (
                   <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
-                )}
+                ) : null}
+                {isLoadingOlder ? (
+                  <div className="flex justify-center py-2 text-xs text-gray-500">
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    Loading older messages...
+                  </div>
+                ) : null}
                 {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
                 {chatHistory.map((msg) => {
                   const isMe = msg.sender_id === currentUserId

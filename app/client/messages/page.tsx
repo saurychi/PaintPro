@@ -1,70 +1,90 @@
-"use client"
+"use client";
 
-import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
+import React, {
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import {
   fetchConversations,
   fetchMessages,
   postMessage,
   fetchAvailableUsers,
   markConversationAsRead,
-  type Message
-} from "@/lib/messages"
-import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus } from "lucide-react"
-import { toast } from "sonner"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { useClientProject } from "../ClientShellClient"
+  markAllConversationsAsRead,
+  type Message,
+} from "@/lib/messages";
+import { supabase } from "@/lib/supabaseClient";
+import {
+  Search,
+  MessageSquare,
+  Loader2,
+  MoreHorizontal,
+  UserPlus,
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useClientProject } from "../ClientShellClient";
 
-const ACCENT = "#00c065"
+const ACCENT = "#00c065";
 
 function roleKey(role: string | null | undefined) {
-  const raw = String(role || "").trim().toLowerCase()
+  const raw = String(role || "")
+    .trim()
+    .toLowerCase();
   // The project creator is always shown as "Project Manager" to the client,
   // whether they're a manager or an admin.
-  if (raw === "admin" || raw === "manager") return "manager"
-  return raw
+  if (raw === "admin" || raw === "manager") return "manager";
+  return raw;
 }
 
 function roleLabel(role: string) {
-  if (!role || role === "all") return "All"
-  if (role === "manager") return "Project Manager"
-  return role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+  if (!role || role === "all") return "All";
+  if (role === "manager") return "Project Manager";
+  return role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 type ConversationSummary = {
-  id: string
-  name: string
-  role: string
-  profile_image_url: string | null
-  lastMessage: string
-  unread: boolean
-  lastActivity: number
-}
+  id: string;
+  name: string;
+  role: string;
+  profile_image_url: string | null;
+  lastMessage: string;
+  unread: boolean;
+  lastActivity: number;
+};
 
 type AvailableUser = {
-  id: string
-  username: string
-  role: string
-  profile_image_url: string | null
-  kind?: "user" | "client"
-  clientId?: string
-  projectId?: string
-  assignedTasks?: string
-}
+  id: string;
+  username: string;
+  role: string;
+  profile_image_url: string | null;
+  kind?: "user" | "client";
+  clientId?: string;
+  projectId?: string;
+  assignedTasks?: string;
+};
 
 type ConversationPayload = {
-  conversation_id: string
+  conversation_id: string;
   users?: {
-    username?: string | null
-    role?: string | null
-    profile_image_url?: string | null
-  } | null
+    username?: string | null;
+    role?: string | null;
+    profile_image_url?: string | null;
+  } | null;
   latest_message?: {
-    content?: string | null
-    created_at: string
-  } | null
-  last_read_at?: string | null
-}
+    content?: string | null;
+    created_at: string;
+  } | null;
+  last_read_at?: string | null;
+};
 
 export default function AdminMessages() {
   // The client portal supports two access modes:
@@ -74,336 +94,529 @@ export default function AdminMessages() {
   // The conversations API resolves both modes via cookies, so we just need to
   // know that we're in a valid client context to kick off the fetch. We treat
   // either an auth user OR a bound projectId as "ready to load".
-  const { projectId: clientProjectId } = useClientProject()
+  const { projectId: clientProjectId } = useClientProject();
 
   // UI State
-  const [activeChatId, setActiveChatId] = useState<string | null>(null)
-  const [inputMessage, setInputMessage] = useState("")
-  const [isSending, setIsSending] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [inputMessage, setInputMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Data State
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [conversations, setConversations] = useState<ConversationSummary[]>([])
-  const [chatHistory, setChatHistory] = useState<Message[]>([])
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [chatHistory, setChatHistory] = useState<Message[]>([]);
 
   // New Chat Modal State
-  const [isNewChatOpen, setIsNewChatOpen] = useState(false)
-  const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([])
-  const [userSearchQuery, setUserSearchQuery] = useState("")
-  const [selectedRoleFilter, setSelectedRoleFilter] = useState("all")
-  const [isCreatingChat, setIsCreatingChat] = useState(false)
-  const [isLoadingRecipients, setIsLoadingRecipients] = useState(false)
-  const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false)
-  const [recipientLoadError, setRecipientLoadError] = useState<string | null>(null)
+  const [isNewChatOpen, setIsNewChatOpen] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState("all");
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState(false);
+  const [hasLoadedRecipients, setHasLoadedRecipients] = useState(false);
+  const [recipientLoadError, setRecipientLoadError] = useState<string | null>(
+    null,
+  );
 
   // Message actions state
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editText, setEditText] = useState("")
-  const [visibleDotsId, setVisibleDotsId] = useState<string | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [visibleDotsId, setVisibleDotsId] = useState<string | null>(null);
 
   // Auto-Scroll Ref
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dotsHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showDots = (msgId: string) => {
-    if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current)
-    setVisibleDotsId(msgId)
-  }
+    if (dotsHideTimer.current) clearTimeout(dotsHideTimer.current);
+    setVisibleDotsId(msgId);
+  };
   const startHideDots = () => {
-    dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000)
-  }
+    dotsHideTimer.current = setTimeout(() => setVisibleDotsId(null), 1000);
+  };
 
   // 1. Get current user
   useEffect(() => {
     const getUser = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (user) {
-          setCurrentUserId(user.id)
-          return
+          setCurrentUserId(user.id);
+          return;
         }
       } catch (error) {
-        console.error("Error fetching auth user:", error)
+        console.error("Error fetching auth user:", error);
       }
       // No Supabase session. If we *also* don't have a project cookie there's
       // nothing to load — drop the spinner. Otherwise leave it running and let
       // loadConversations clear it once the cookie-mode fetch lands.
       if (!clientProjectId) {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
-    getUser()
-  }, [clientProjectId])
+    };
+    getUser();
+  }, [clientProjectId]);
 
   // 2. Auto-Scroll to bottom function
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    scrollToBottom()
-  }, [chatHistory])
+    scrollToBottom();
+  }, [chatHistory]);
 
   // 3. Helper function to load/refresh conversations
-  const loadConversations = useCallback(async (userId: string, selectChatId?: string) => {
-    try {
-      const data = await fetchConversations(userId) as ConversationPayload[]
-      const mappedConvos = data.map((cp) => {
-        // Calculate unread status by comparing timestamps
-        const lastMsg = cp.latest_message
-        const lastReadAt = cp.last_read_at ? new Date(cp.last_read_at).getTime() : 0
-        const lastMsgTime = lastMsg ? new Date(lastMsg.created_at).getTime() : 0
-        const isUnread = lastMsgTime > lastReadAt
+  const loadConversations = useCallback(
+    async (userId: string, selectChatId?: string) => {
+      try {
+        const data = (await fetchConversations(
+          userId,
+        )) as ConversationPayload[];
+        const mappedConvos = data.map((cp) => {
+          // Calculate unread status by comparing timestamps
+          const lastMsg = cp.latest_message;
+          const lastReadAt = cp.last_read_at
+            ? new Date(cp.last_read_at).getTime()
+            : 0;
+          const lastMsgTime = lastMsg
+            ? new Date(lastMsg.created_at).getTime()
+            : 0;
+          const isUnread = lastMsgTime > lastReadAt;
 
-        return {
-          id: cp.conversation_id,
-          name: cp.users?.username || "Unknown User",
-          role: "Project Manager",
-          profile_image_url: cp.users?.profile_image_url || null,
-          lastMessage: lastMsg?.content || "Say hello!",
-          unread: isUnread,
-          lastActivity: lastMsgTime
+          // Use the actual role of the other participant rather than always
+          // labeling them "Project Manager". A staff member acting on a
+          // project should still show as Staff to the client, etc.
+          return {
+            id: cp.conversation_id,
+            name: cp.users?.username || "Unknown User",
+            role: roleLabel(roleKey(cp.users?.role)),
+            profile_image_url: cp.users?.profile_image_url || null,
+            lastMessage: lastMsg?.content || "Say hello!",
+            unread: isUnread,
+            lastActivity: lastMsgTime,
+          };
+        });
+
+        mappedConvos.sort((a, b) => b.lastActivity - a.lastActivity);
+
+        setConversations(mappedConvos);
+
+        if (selectChatId) {
+          setActiveChatId(selectChatId);
+        } else if (mappedConvos.length > 0) {
+          setActiveChatId(
+            (currentChatId) => currentChatId || mappedConvos[0].id,
+          );
         }
-      })
-
-      mappedConvos.sort((a, b) => b.lastActivity - a.lastActivity)
-
-      setConversations(mappedConvos)
-
-      if (selectChatId) {
-        setActiveChatId(selectChatId)
-      } else if (mappedConvos.length > 0) {
-        setActiveChatId((currentChatId) => currentChatId || mappedConvos[0].id)
+      } catch (error) {
+        console.error("Error loading conversations:", error);
+        setConversations([]);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error("Error loading conversations:", error)
-      setConversations([])
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
+    },
+    [],
+  );
 
   // 4. Initial Load — pick up pendingConvId from staff Message button if present.
   // We fire as long as we know who the client is (via auth OR project cookie).
   // The conversations API uses the cookies to resolve project-scoped chats for
   // guest clients that don't have a Supabase auth user.
   useEffect(() => {
-    if (!currentUserId && !clientProjectId) return
-    const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined
-    if (pendingConvId) localStorage.removeItem("pendingConvId")
-    loadConversations(currentUserId ?? "", pendingConvId)
-  }, [currentUserId, clientProjectId, loadConversations])
+    if (!currentUserId && !clientProjectId) return;
+    const pendingConvId = localStorage.getItem("pendingConvId") ?? undefined;
+    if (pendingConvId) localStorage.removeItem("pendingConvId");
+    loadConversations(currentUserId ?? "", pendingConvId);
+  }, [currentUserId, clientProjectId, loadConversations]);
 
-  // 5. When user CLICKS a chat, Mark as Read in DB
+  // 5. When user CLICKS a chat, mark it read so the unread badges drop
+  // immediately. Two paths:
+  //
+  //   - Auth clients: `markConversationAsRead` updates the participant
+  //     row's last_read_at + dispatches paintpro:messages-read, which
+  //     useMessagesUnread listens for and refetches.
+  //
+  //   - Cookie-mode clients (no auth user): they have no participant
+  //     row, so the unread API counts messages newer than the
+  //     localStorage anchor `paintpro_messages_last_seen`. Bump the
+  //     anchor here and fire the same event so the sidebar badge
+  //     refetches and drops to zero.
   useEffect(() => {
-    if (activeChatId && currentUserId) {
-      markConversationAsRead(activeChatId, currentUserId)
-      setConversations(prev => prev.map(c =>
-        c.id === activeChatId ? { ...c, unread: false } : c
-      ))
+    if (!activeChatId) return;
+
+    if (currentUserId) {
+      markConversationAsRead(activeChatId, currentUserId);
+    } else {
+      try {
+        window.localStorage.setItem(
+          "paintpro_messages_last_seen",
+          new Date().toISOString(),
+        );
+        window.dispatchEvent(new CustomEvent("paintpro:messages-read"));
+      } catch {}
     }
-  }, [activeChatId, currentUserId])
+
+    setConversations((prev) =>
+      prev.map((c) => (c.id === activeChatId ? { ...c, unread: false } : c)),
+    );
+  }, [activeChatId, currentUserId]);
+
+  // Bulk-clear unread state on mount so the sidebar badge drops to
+  // zero immediately instead of decrementing one conversation at a
+  // time. Auth clients hit `markAllConversationsAsRead` (updates every
+  // participant row's last_read_at + dispatches the read event so the
+  // sidebar badge refetches). Cookie clients have no participant row,
+  // so their equivalent is bumping the localStorage anchor + dispatching
+  // the same event. Either way we ALSO clear the local `unread` flag
+  // on every loaded conversation — without this the per-row red dots
+  // stay visible because `loadConversations` initialises them from
+  // last_read_at, which lags the DB update on first paint and never
+  // exists at all for cookie clients.
+  useEffect(() => {
+    if (!currentUserId && !clientProjectId) return;
+
+    if (currentUserId) {
+      void markAllConversationsAsRead(currentUserId);
+    } else {
+      try {
+        window.localStorage.setItem(
+          "paintpro_messages_last_seen",
+          new Date().toISOString(),
+        );
+        window.dispatchEvent(new CustomEvent("paintpro:messages-read"));
+      } catch {}
+    }
+
+    setConversations((prev) =>
+      prev.some((c) => c.unread)
+        ? prev.map((c) => ({ ...c, unread: false }))
+        : prev,
+    );
+  }, [currentUserId, clientProjectId]);
 
   // 6. Fetch Chat History
   useEffect(() => {
-    if (!activeChatId) return
+    if (!activeChatId) return;
 
     async function loadMessages() {
-      const msgs = await fetchMessages(activeChatId!)
-      setChatHistory(msgs)
+      const result = await fetchMessages(activeChatId!);
+      setChatHistory(result.messages);
     }
-    loadMessages()
-  }, [activeChatId])
+    loadMessages();
+  }, [activeChatId]);
 
   // Focus input whenever a conversation is opened
   useEffect(() => {
-    if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
-  }, [activeChatId])
+    if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0);
+  }, [activeChatId]);
 
-  // 7. Global Realtime Listener (Listens to ALL messages so sidebar updates).
-  // Subscribes for both auth users and cookie-mode guest clients — guest
-  // clients still benefit from live updates on the conversation they have
-  // open. We need *either* a logged-in user or a project cookie to bother.
+  // Polling fallback for the chat panel: every 5s, refetch the active
+  // conversation's messages and merge any new ones in. Realtime alone
+  // isn't reliable here because the browser Supabase client is subject to
+  // RLS — if the user can't SELECT a message row directly, the realtime
+  // push is filtered out and the chat panel goes stale even though the
+  // sidebar badge (which uses the server-side admin client) correctly
+  // shows the new count. Pauses when the tab isn't visible.
   useEffect(() => {
-    if (!currentUserId && !clientProjectId) return
+    if (!activeChatId) return;
 
+    let cancelled = false;
+
+    async function pollActiveChat() {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      )
+        return;
+      const result = await fetchMessages(activeChatId!);
+      if (cancelled) return;
+      setChatHistory((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const merged = [...prev];
+        for (const msg of result.messages) {
+          if (seen.has(msg.id)) continue;
+          seen.add(msg.id);
+          merged.push(msg);
+        }
+        merged.sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
+        return merged;
+      });
+    }
+
+    const interval = window.setInterval(() => {
+      void pollActiveChat();
+    }, 5_000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void pollActiveChat();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [activeChatId]);
+
+  // 7. Global Realtime Listener — mounts ONCE; reads activeChatId/currentUserId
+  // through refs so switching conversations doesn't tear down and rebind the
+  // channel (which was dropping messages between unsubscribe + resubscribe).
+  const activeChatIdRef = useRef(activeChatId);
+  const currentUserIdRef = useRef(currentUserId);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+
+  useEffect(() => {
     const channel = supabase
       .channel(`global-chat-listener`)
       .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' }, // No filter, listen to all
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" }, // No filter, listen to all
         (payload) => {
-          const newMessage = payload.new as Message
+          console.log("[realtime] message INSERT received:", payload.new);
+          const newMessage = payload.new as Message;
+          const activeChat = activeChatIdRef.current;
+          const me = currentUserIdRef.current;
 
-          if (newMessage.conversation_id === activeChatId) {
+          // Skip the realtime echo for our own outgoing messages —
+          // handleSendMessage already updated chatHistory + the
+          // sidebar optimistically, and processing this echo would
+          // re-mark the conversation as unread for ourselves further
+          // down. Two paths:
+          //   - Auth client: own messages carry sender_id === me.
+          //   - Cookie client (me is null): own messages carry
+          //     sender_id === null. Other roles always send with a
+          //     non-null sender_id, so this is a reliable proxy.
+          const isOwnMessage = me
+            ? newMessage.sender_id === me
+            : newMessage.sender_id === null ||
+              newMessage.sender_id === undefined;
+          if (isOwnMessage) return;
+
+          if (newMessage.conversation_id === activeChat) {
             // It's the chat we are currently looking at. In cookie mode
             // currentUserId is null, so the sender comparison still works
             // (guest's own outgoing messages have sender_id === null too,
             // but they're rendered optimistically by handleSendMessage and
             // not duplicated here because the realtime row won't match the
             // already-appended one's id).
-            if (newMessage.sender_id !== currentUserId) {
+            if (newMessage.sender_id !== me) {
               setChatHistory((prev) => {
-                if (prev.some((m) => m.id === newMessage.id)) return prev
-                return [...prev, newMessage]
-              })
-              if (currentUserId) {
-                markConversationAsRead(activeChatId, currentUserId)
+                if (prev.some((m) => m.id === newMessage.id)) return prev;
+                return [...prev, newMessage];
+              });
+              // Auto-mark as read when the message arrived in the chat
+              // we're already looking at — same auth/cookie split as
+              // the activeChatId effect above. Without this, the
+              // sidebar badge would tick up to 1 the moment a new
+              // message landed in the open conversation.
+              if (me) {
+                markConversationAsRead(activeChat, me);
+              } else {
+                try {
+                  window.localStorage.setItem(
+                    "paintpro_messages_last_seen",
+                    new Date().toISOString(),
+                  );
+                  window.dispatchEvent(
+                    new CustomEvent("paintpro:messages-read"),
+                  );
+                } catch {}
               }
             }
           }
 
           // <-- NEW: Update the sidebar for ALL incoming messages and bump to top
-          setConversations(prev => {
-            const updated = prev.map(c =>
+          setConversations((prev) => {
+            const updated = prev.map((c) =>
               c.id === newMessage.conversation_id
                 ? {
                     ...c,
-                    unread: c.id !== activeChatId, // Red dot only if we aren't looking at it
+                    unread: c.id !== activeChat, // Red dot only if we aren't looking at it
                     lastMessage: newMessage.content,
-                    lastActivity: new Date(newMessage.created_at).getTime()
+                    lastActivity: new Date(newMessage.created_at).getTime(),
                   }
-                : c
-            )
+                : c,
+            );
             // Re-sort the array so this chat jumps to the top
-            return updated.sort((a, b) => b.lastActivity - a.lastActivity)
-          })
-        }
+            return updated.sort((a, b) => b.lastActivity - a.lastActivity);
+          });
+        },
       )
-      .subscribe()
+      .subscribe();
 
-    return () => { supabase.removeChannel(channel) }
-  }, [activeChatId, currentUserId, clientProjectId])
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // 8. Handle Sending a Message
   const handleSendMessage = async () => {
     // Cookie-mode clients have no auth user, so we only require an active
     // chat plus a non-empty input. The /api/messages/send route resolves the
     // sender (auth user or guest client) from cookies on the server.
-    if (!inputMessage.trim() || !activeChatId) return
-    if (!currentUserId && !clientProjectId) return
-    setIsSending(true)
+    if (!inputMessage.trim() || !activeChatId) return;
+    if (!currentUserId && !clientProjectId) return;
+    setIsSending(true);
     try {
-      const sentMsg = await postMessage(activeChatId, currentUserId ?? "", inputMessage)
-      setChatHistory((prev) => [...prev, sentMsg])
+      const sentMsg = await postMessage(
+        activeChatId,
+        currentUserId ?? "",
+        inputMessage,
+      );
+      setChatHistory((prev) => [...prev, sentMsg]);
 
       // <-- NEW: Update sidebar instantly for ourselves and bump to top
-      setConversations(prev => {
-        const updated = prev.map(c =>
+      setConversations((prev) => {
+        const updated = prev.map((c) =>
           c.id === activeChatId
-            ? { ...c, lastMessage: inputMessage, unread: false, lastActivity: Date.now() }
-            : c
-        )
-        return updated.sort((a, b) => b.lastActivity - a.lastActivity)
-      })
+            ? {
+                ...c,
+                lastMessage: inputMessage,
+                unread: false,
+                lastActivity: Date.now(),
+              }
+            : c,
+        );
+        return updated.sort((a, b) => b.lastActivity - a.lastActivity);
+      });
 
-      setInputMessage("")
+      setInputMessage("");
     } catch (error) {
-      console.error("Error sending message:", error)
-      toast.error(error instanceof Error ? error.message : "Failed to send message.")
+      console.error("Error sending message:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send message.",
+      );
     } finally {
-      setIsSending(false)
+      setIsSending(false);
       // Focus after isSending clears so the input is no longer disabled
-      setTimeout(() => inputRef.current?.focus(), 0)
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') handleSendMessage()
-  }
+    if (e.key === "Enter") handleSendMessage();
+  };
 
   const handleDelete = async (messageId: string) => {
-    setOpenMenuId(null)
-    startHideDots()
+    setOpenMenuId(null);
+    startHideDots();
     try {
-      const res = await fetch(`/api/messages/manage?messageId=${messageId}`, { method: "DELETE" })
-      if (!res.ok) throw new Error("Failed to delete")
-      setChatHistory((prev) => prev.filter((m) => m.id !== messageId))
+      const res = await fetch(`/api/messages/manage?messageId=${messageId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete");
+      setChatHistory((prev) => prev.filter((m) => m.id !== messageId));
     } catch (error) {
-      console.error("Error deleting message:", error)
+      console.error("Error deleting message:", error);
     }
-  }
+  };
 
   const handleSaveEdit = async (messageId: string) => {
-    if (!editText.trim()) return
+    if (!editText.trim()) return;
     try {
       const res = await fetch("/api/messages/manage", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId, content: editText.trim() }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Failed to update")
-      setChatHistory((prev) => prev.map((m) => m.id === messageId ? { ...m, content: data.content } : m))
-      setEditingId(null)
-      startHideDots()
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to update");
+      setChatHistory((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, content: data.content } : m,
+        ),
+      );
+      setEditingId(null);
+      startHideDots();
     } catch (error) {
-      console.error("Error updating message:", error)
+      console.error("Error updating message:", error);
     }
-  }
+  };
 
   // Modal Handlers
-  const loadAvailableRecipients = useCallback(async (force = false) => {
-    if (hasLoadedRecipients && !force) return
+  const loadAvailableRecipients = useCallback(
+    async (force = false) => {
+      if (hasLoadedRecipients && !force) return;
 
-    setIsLoadingRecipients(true)
-    setRecipientLoadError(null)
+      setIsLoadingRecipients(true);
+      setRecipientLoadError(null);
 
-    try {
-      const users = await fetchAvailableUsers(currentUserId ?? "") as AvailableUser[]
-      setAvailableUsers(users)
-      setHasLoadedRecipients(true)
-    } catch (error: unknown) {
-      console.error("Error loading recipients:", error)
-      setAvailableUsers([])
-      setHasLoadedRecipients(false)
-      setRecipientLoadError(
-        error instanceof Error ? error.message : "Failed to load recipients."
-      )
-    } finally {
-      setIsLoadingRecipients(false)
-    }
-  }, [currentUserId, hasLoadedRecipients])
+      try {
+        const users = (await fetchAvailableUsers(
+          currentUserId ?? "",
+        )) as AvailableUser[];
+        setAvailableUsers(users);
+        setHasLoadedRecipients(true);
+      } catch (error: unknown) {
+        console.error("Error loading recipients:", error);
+        setAvailableUsers([]);
+        setHasLoadedRecipients(false);
+        setRecipientLoadError(
+          error instanceof Error ? error.message : "Failed to load recipients.",
+        );
+      } finally {
+        setIsLoadingRecipients(false);
+      }
+    },
+    [currentUserId, hasLoadedRecipients],
+  );
 
   const handleOpenNewChat = () => {
-    setIsNewChatOpen(true)
-    setUserSearchQuery("")
-    setSelectedRoleFilter("all")
+    setIsNewChatOpen(true);
+    setUserSearchQuery("");
+    setSelectedRoleFilter("all");
 
     if (!isLoadingRecipients && (!hasLoadedRecipients || recipientLoadError)) {
-      void loadAvailableRecipients(Boolean(recipientLoadError))
+      void loadAvailableRecipients(Boolean(recipientLoadError));
     }
-  }
+  };
 
   const handleStartConversation = async (recipient: AvailableUser) => {
     if (!currentUserId && !clientProjectId) {
-      toast.error("Can't start a conversation — not signed in and no project link active.")
-      return
+      toast.error(
+        "Can't start a conversation — not signed in and no project link active.",
+      );
+      return;
     }
-    setIsCreatingChat(true)
+    setIsCreatingChat(true);
     try {
       const payload =
         recipient.kind === "client"
-          ? { targetClientId: recipient.clientId, projectId: recipient.projectId }
-          : { targetUserId: recipient.id }
+          ? {
+              targetClientId: recipient.clientId,
+              projectId: recipient.projectId,
+            }
+          : { targetUserId: recipient.id };
       const res = await fetch("/api/messages/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify(payload),
-      })
-      const data = await res.json().catch(() => null)
+      });
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
         const message =
           [data?.error, data?.details].filter(Boolean).join(": ") ||
-          `Failed to start conversation (status ${res.status}).`
-        throw new Error(message)
+          `Failed to start conversation (status ${res.status}).`;
+        throw new Error(message);
       }
       if (!data?.conversationId) {
-        throw new Error("Server didn't return a conversation id.")
+        throw new Error("Server didn't return a conversation id.");
       }
 
       // Optimistically inject (or update) the row in the sidebar so the user
@@ -419,17 +632,17 @@ export default function AdminMessages() {
         lastMessage: "Say hello!",
         unread: false,
         lastActivity: Date.now(),
-      }
+      };
       setConversations((prev) => {
-        const withoutDup = prev.filter((c) => c.id !== optimisticEntry.id)
+        const withoutDup = prev.filter((c) => c.id !== optimisticEntry.id);
         return [optimisticEntry, ...withoutDup].sort(
           (a, b) => b.lastActivity - a.lastActivity,
-        )
-      })
-      setActiveChatId(data.conversationId)
-      setIsNewChatOpen(false)
-      setUserSearchQuery("")
-      setSelectedRoleFilter("all")
+        );
+      });
+      setActiveChatId(data.conversationId);
+      setIsNewChatOpen(false);
+      setUserSearchQuery("");
+      setSelectedRoleFilter("all");
       // Intentionally NOT calling loadConversations here. The optimistic
       // entry above is correct (we know the server returned a real
       // conversation id), and a refetch could clobber it if the server's
@@ -437,58 +650,61 @@ export default function AdminMessages() {
       // realtime listener bumps lastActivity / lastMessage for incoming
       // messages, and any future page reload reconciles authoritatively.
     } catch (error) {
-      console.error("[start-conversation] error", error)
+      console.error("[start-conversation] error", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to start conversation.",
-      )
+        error instanceof Error
+          ? error.message
+          : "Failed to start conversation.",
+      );
     } finally {
-      setIsCreatingChat(false)
+      setIsCreatingChat(false);
     }
-  }
+  };
 
   const availableRoleFilters = useMemo(
     () => [
       "all",
       ...Array.from(
-        new Set(
-          availableUsers
-            .map((u) => roleKey(u.role))
-            .filter(Boolean)
-        )
+        new Set(availableUsers.map((u) => roleKey(u.role)).filter(Boolean)),
       ).sort(),
     ],
-    [availableUsers]
-  )
+    [availableUsers],
+  );
 
   const filteredUsers = useMemo(() => {
-    const query = userSearchQuery.toLowerCase()
+    const query = userSearchQuery.toLowerCase();
 
     return availableUsers.filter((u) => {
-      const normalizedRole = roleKey(u.role)
+      const normalizedRole = roleKey(u.role);
       const matchesSearch =
         u.username.toLowerCase().includes(query) ||
         normalizedRole.includes(query) ||
-        (u.assignedTasks ?? "").toLowerCase().includes(query)
-      const matchesRole = selectedRoleFilter === "all" || normalizedRole === selectedRoleFilter
+        (u.assignedTasks ?? "").toLowerCase().includes(query);
+      const matchesRole =
+        selectedRoleFilter === "all" || normalizedRole === selectedRoleFilter;
 
-      return matchesSearch && matchesRole
-    })
-  }, [availableUsers, selectedRoleFilter, userSearchQuery])
+      return matchesSearch && matchesRole;
+    });
+  }, [availableUsers, selectedRoleFilter, userSearchQuery]);
 
   const activeChat = useMemo(
     () => conversations.find((c) => c.id === activeChatId) || null,
-    [activeChatId, conversations]
-  )
+    [activeChatId, conversations],
+  );
 
   if (isLoading) {
     return (
       <div className="p-3 sm:p-4 md:p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Messages</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
+          Messages
+        </h1>
         <div className="mt-4 sm:mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
           <div className="flex flex-col gap-3 lg:flex-row lg:gap-6 h-full overflow-hidden">
             <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[40vh] lg:max-h-none lg:min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
               <div className="border-b border-gray-200 px-4 py-3 dark:border-slate-700">
-                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                  Conversations
+                </p>
               </div>
               <div className="flex-1 flex items-center justify-center">
                 <Loader2 className="h-5 w-5 text-gray-300 animate-spin dark:text-slate-500" />
@@ -500,39 +716,43 @@ export default function AdminMessages() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="p-3 sm:p-4 md:p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden">
-      <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Messages</h1>
+      <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
+        Messages
+      </h1>
 
       <div className="mt-4 sm:mt-6 h-[calc(100%-3.25rem)] overflow-hidden">
         {/* Stacks on mobile (list on top with capped height, chat below)
             and goes side-by-side at lg+. Keeps `min-w-[260px]` desktop-only
             so the list doesn't overflow phone widths. */}
         <div className="flex flex-col gap-3 lg:flex-row lg:gap-6 h-full overflow-hidden">
-
           {/* Conversation Sidebar */}
           <aside className="w-full lg:w-1/4 xl:w-1/5 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[40vh] lg:max-h-none lg:min-w-[260px] dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0 dark:border-slate-700">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Conversations</p>
-                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">Recent message threads</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                  Conversations
+                </p>
+                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">
+                  Recent message threads
+                </p>
               </div>
               <button
                 onClick={handleOpenNewChat}
                 aria-label="Start new message"
                 title="Start new message"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00c065] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-[#00c065]/50 dark:hover:bg-[#00c065]/10 dark:hover:text-[#00c065]"
-              >
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00c065] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-[#00c065]/50 dark:hover:bg-[#00c065]/10 dark:hover:text-[#00c065]">
                 <UserPlus className="h-4 w-4" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
               {conversations.map((chat) => {
-                const isActive = activeChatId === chat.id
+                const isActive = activeChatId === chat.id;
 
                 return (
                   <button
@@ -543,38 +763,50 @@ export default function AdminMessages() {
                       isActive
                         ? "bg-emerald-50/70 dark:bg-[#00c065]/10"
                         : "bg-white hover:bg-gray-50 dark:bg-slate-900 dark:hover:bg-slate-800/70",
-                    ].join(" ")}
-                  >
+                    ].join(" ")}>
                     <span
                       className={[
                         "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-opacity",
-                        isActive ? "opacity-100 bg-[#00c065]" : "opacity-0 bg-transparent",
+                        isActive
+                          ? "opacity-100 bg-[#00c065]"
+                          : "opacity-0 bg-transparent",
                       ].join(" ")}
                     />
                     <div className="flex items-start gap-3 pl-1">
                       <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-[11px] font-semibold text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {chat.profile_image_url ? (
-                          <img src={chat.profile_image_url} alt={chat.name} className="h-full w-full rounded-full object-cover" />
+                          <img
+                            src={chat.profile_image_url}
+                            alt={chat.name}
+                            className="h-full w-full rounded-full object-cover"
+                          />
                         ) : (
                           <span>{chat.name.slice(0, 2).toUpperCase()}</span>
                         )}
-                        {chat.unread ? <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900" /> : null}
+                        {chat.unread ? (
+                          <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900" />
+                        ) : null}
                       </div>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{chat.name}</p>
+                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">
+                            {chat.name}
+                          </p>
                         </div>
-                        <p className={`mt-1 line-clamp-1 text-xs leading-5 ${chat.unread ? 'font-semibold text-gray-900 dark:text-slate-100' : 'text-gray-500 dark:text-slate-400'}`}>
+                        <p
+                          className={`mt-1 line-clamp-1 text-xs leading-5 ${chat.unread ? "font-semibold text-gray-900 dark:text-slate-100" : "text-gray-500 dark:text-slate-400"}`}>
                           {chat.lastMessage}
                         </p>
                       </div>
                     </div>
                   </button>
-                )
+                );
               })}
               {conversations.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-slate-500">No active chats</div>
+                <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-slate-500">
+                  No active chats
+                </div>
               )}
             </div>
           </aside>
@@ -586,14 +818,21 @@ export default function AdminMessages() {
               <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-9 w-9 rounded-md border border-gray-200 bg-white flex items-center justify-center relative shrink-0">
-                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ACCENT }} />
+                    <span
+                      className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-white"
+                      style={{ backgroundColor: ACCENT }}
+                    />
                     <span className="text-xs font-semibold text-gray-700">
                       {activeChat.name.slice(0, 1).toUpperCase()}
                     </span>
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{activeChat.name}</p>
-                    <p className="text-xs text-gray-600 capitalize">{activeChat.role}</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {activeChat.name}
+                    </p>
+                    <p className="text-xs text-gray-600 capitalize">
+                      {activeChat.role}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -601,45 +840,63 @@ export default function AdminMessages() {
               {/* Messages List */}
               <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0 flex flex-col custom-scrollbar">
                 {chatHistory.length === 0 && (
-                  <div className="m-auto text-gray-400 text-sm">Say hello to start the conversation!</div>
+                  <div className="m-auto text-gray-400 text-sm">
+                    Say hello to start the conversation!
+                  </div>
                 )}
-                {openMenuId && <div className="fixed inset-0 z-10" onClick={() => { setOpenMenuId(null); startHideDots() }} />}
+                {openMenuId && (
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => {
+                      setOpenMenuId(null);
+                      startHideDots();
+                    }}
+                  />
+                )}
                 {chatHistory.map((msg) => {
-                  const isMe = msg.sender_id === currentUserId
-                  const timeString = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                  const isEditing = editingId === msg.id
-                  const menuOpen = openMenuId === msg.id
-                  const dotsVisible = visibleDotsId === msg.id || menuOpen
+                  const isMe = msg.sender_id === currentUserId;
+                  const timeString = new Date(
+                    msg.created_at,
+                  ).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                  const isEditing = editingId === msg.id;
+                  const menuOpen = openMenuId === msg.id;
+                  const dotsVisible = visibleDotsId === msg.id || menuOpen;
 
                   return (
                     <div
                       key={msg.id}
                       className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}
                       onMouseEnter={() => isMe && showDots(msg.id)}
-                      onMouseLeave={() => isMe && startHideDots()}
-                    >
+                      onMouseLeave={() => isMe && startHideDots()}>
                       {/* Dots button — left of bubble for sent messages */}
                       {isMe && (
                         <div className="relative shrink-0 mb-0.5">
                           <button
                             onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
-                            className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-                          >
+                            onClick={() =>
+                              setOpenMenuId(menuOpen ? null : msg.id)
+                            }
+                            className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </button>
                           {menuOpen && (
                             <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[110px]">
                               <button
-                                onClick={() => { setEditingId(msg.id); setEditText(msg.content); setOpenMenuId(null); startHideDots() }}
-                                className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-                              >
+                                onClick={() => {
+                                  setEditingId(msg.id);
+                                  setEditText(msg.content);
+                                  setOpenMenuId(null);
+                                  startHideDots();
+                                }}
+                                className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
                                 Edit
                               </button>
                               <button
                                 onClick={() => handleDelete(msg.id)}
-                                className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                              >
+                                className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
                                 Delete
                               </button>
                             </div>
@@ -648,7 +905,8 @@ export default function AdminMessages() {
                       )}
 
                       {/* Bubble + timestamp */}
-                      <div className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
+                      <div
+                        className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
                         {isEditing ? (
                           <div className="w-full flex flex-col gap-1">
                             <input
@@ -656,32 +914,48 @@ export default function AdminMessages() {
                               value={editText}
                               onChange={(e) => setEditText(e.target.value)}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveEdit(msg.id)
-                                if (e.key === 'Escape') setEditingId(null)
+                                if (e.key === "Enter") handleSaveEdit(msg.id);
+                                if (e.key === "Escape") setEditingId(null);
                               }}
                               className="px-3 py-2 text-sm rounded-lg border-2 outline-none"
                               style={{ borderColor: ACCENT }}
                             />
                             <div className="flex gap-2 justify-end">
-                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                              <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveEdit(msg.id)} className="text-xs font-semibold" style={{ color: ACCENT }}>Save</button>
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setEditingId(null)}
+                                className="text-xs text-gray-400 hover:text-gray-600">
+                                Cancel
+                              </button>
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleSaveEdit(msg.id)}
+                                className="text-xs font-semibold"
+                                style={{ color: ACCENT }}>
+                                Save
+                              </button>
                             </div>
                           </div>
                         ) : (
                           <div
                             className={[
                               "px-4 py-2.5 text-sm shadow-sm rounded-lg",
-                              isMe ? "text-white" : "border border-gray-200 bg-white text-gray-900",
+                              isMe
+                                ? "text-white"
+                                : "border border-gray-200 bg-white text-gray-900",
                             ].join(" ")}
-                            style={isMe ? { backgroundColor: ACCENT } : undefined}
-                          >
+                            style={
+                              isMe ? { backgroundColor: ACCENT } : undefined
+                            }>
                             {msg.content}
                           </div>
                         )}
-                        <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
+                        <span className="mt-1 text-[10px] text-gray-500">
+                          {timeString}
+                        </span>
                       </div>
                     </div>
-                  )
+                  );
                 })}
                 {/* Auto-scroll target */}
                 <div ref={messagesEndRef} />
@@ -704,8 +978,7 @@ export default function AdminMessages() {
                     onClick={handleSendMessage}
                     disabled={isSending || !inputMessage.trim()}
                     className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors hover:bg-green-600"
-                    style={{ backgroundColor: ACCENT }}
-                  >
+                    style={{ backgroundColor: ACCENT }}>
                     {isSending ? "..." : "Send"}
                   </button>
                 </div>
@@ -714,8 +987,12 @@ export default function AdminMessages() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm min-w-0">
               <MessageSquare className="h-12 w-12 text-gray-200 mb-3" />
-              <p className="text-sm font-semibold text-gray-500">No conversation selected</p>
-              <p className="mt-1 text-xs text-gray-400">Pick one from the list or start a new one.</p>
+              <p className="text-sm font-semibold text-gray-500">
+                No conversation selected
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Pick one from the list or start a new one.
+              </p>
             </div>
           )}
         </div>
@@ -725,7 +1002,9 @@ export default function AdminMessages() {
       <Dialog open={isNewChatOpen} onOpenChange={setIsNewChatOpen}>
         <DialogContent className="max-w-md border-0 border-t-[6px] border-t-[#00c065] bg-white p-0 shadow-xl overflow-hidden flex flex-col max-h-[80vh] dark:bg-slate-900 dark:border-slate-700 dark:border-t-[#00c065]">
           <DialogHeader className="border-b border-gray-200 bg-white px-6 py-5 dark:border-slate-700 dark:bg-slate-900">
-            <DialogTitle className="text-lg font-semibold text-gray-900 dark:text-slate-100">New Message</DialogTitle>
+            <DialogTitle className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+              New Message
+            </DialogTitle>
 
             <div className="relative mt-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-slate-500" />
@@ -751,8 +1030,7 @@ export default function AdminMessages() {
                     selectedRoleFilter === role
                       ? "border-[#00c065]/40 bg-emerald-50 text-[#00c065] dark:border-[#00c065]/50 dark:bg-[#00c065]/10 dark:text-[#00c065]"
                       : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/70",
-                  ].join(" ")}
-                >
+                  ].join(" ")}>
                   {roleLabel(role)}
                 </button>
               ))}
@@ -766,17 +1044,20 @@ export default function AdminMessages() {
               </div>
             ) : recipientLoadError ? (
               <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 px-6 text-center">
-                <p className="text-sm text-red-600 dark:text-red-400">{recipientLoadError}</p>
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  {recipientLoadError}
+                </p>
                 <button
                   type="button"
                   onClick={() => void loadAvailableRecipients(true)}
-                  className="rounded-lg border border-[#00c065]/30 bg-emerald-50 px-3 py-2 text-xs font-semibold text-[#00c065] transition-colors hover:bg-emerald-100 dark:border-[#00c065]/40 dark:bg-[#00c065]/10 dark:hover:bg-[#00c065]/15"
-                >
+                  className="rounded-lg border border-[#00c065]/30 bg-emerald-50 px-3 py-2 text-xs font-semibold text-[#00c065] transition-colors hover:bg-emerald-100 dark:border-[#00c065]/40 dark:bg-[#00c065]/10 dark:hover:bg-[#00c065]/15">
                   Try Again
                 </button>
               </div>
             ) : filteredUsers.length === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-400 dark:text-slate-500">No users found.</p>
+              <p className="py-8 text-center text-sm text-gray-400 dark:text-slate-500">
+                No users found.
+              </p>
             ) : (
               <div className="space-y-1">
                 {filteredUsers.map((user) => (
@@ -784,11 +1065,14 @@ export default function AdminMessages() {
                     key={user.id}
                     onClick={() => handleStartConversation(user)}
                     disabled={isCreatingChat}
-                    className="w-full flex items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-gray-50 disabled:opacity-50 dark:hover:bg-slate-800/80"
-                  >
+                    className="w-full flex items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-gray-50 disabled:opacity-50 dark:hover:bg-slate-800/80">
                     <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200 dark:border-slate-700 dark:bg-slate-800">
                       {user.profile_image_url ? (
-                        <img src={user.profile_image_url} alt={user.username} className="h-full w-full rounded-full object-cover" />
+                        <img
+                          src={user.profile_image_url}
+                          alt={user.username}
+                          className="h-full w-full rounded-full object-cover"
+                        />
                       ) : (
                         <span className="text-sm font-semibold text-gray-600 dark:text-slate-300">
                           {user.username.slice(0, 2).toUpperCase()}
@@ -796,10 +1080,16 @@ export default function AdminMessages() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">{user.username}</p>
-                      <p className="text-xs text-gray-500 dark:text-slate-400">{roleLabel(roleKey(user.role))}</p>
+                      <p className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">
+                        {user.username}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400">
+                        {roleLabel(roleKey(user.role))}
+                      </p>
                       {user.assignedTasks ? (
-                        <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-400 dark:text-slate-500">{user.assignedTasks}</p>
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-400 dark:text-slate-500">
+                          {user.assignedTasks}
+                        </p>
                       ) : null}
                     </div>
                   </button>
@@ -810,5 +1100,5 @@ export default function AdminMessages() {
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

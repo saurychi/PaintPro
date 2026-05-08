@@ -3,9 +3,9 @@ import { NextResponse, type NextRequest } from "next/server"
 
 // Refreshes Supabase auth cookies on every request so server components
 // (admin/staff layouts) read a valid session. Writing auth cookies from a
-// server component is a hard error in Next 16, so this middleware is the
+// server component is a hard error in Next 16, so this proxy is the
 // only place those cookies can be rotated.
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(

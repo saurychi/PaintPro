@@ -5,10 +5,22 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  RefreshCw,
   UserRound,
   Users,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import {
+  getCachedSubTasks,
+  setCachedSubTasks,
+  setCachedStep,
+  setCachedRefData,
+  getCachedRefData,
+  getCachedMainTasks,
+  ensureWizardCacheHydrated,
+  type CachedRefData,
+} from "@/lib/wizardCache";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import ChangeEmployeesModal, {
@@ -184,12 +196,100 @@ function buildGroupsFromDraft(draft: any): ServiceGroup[] {
   }));
 }
 
+/** Raw staff user shape from the cache (matches CachedRefData.staffUsers) */
+type RawCachedStaffUser = NonNullable<CachedRefData["staffUsers"]>[number];
+
+/** Convert raw cached staff users to the StaffUserOption shape needed by the component */
+function toStaffUserOptions(raw: RawCachedStaffUser[]): StaffUser[] {
+  return raw.map((u) => {
+    let specialties: string[] = [];
+    if (Array.isArray(u.specialty)) {
+      specialties = u.specialty.filter(Boolean).map(String);
+    } else if (typeof u.specialty === "string" && u.specialty.trim()) {
+      specialties = u.specialty.split(",").map((s: string) => s.trim()).filter(Boolean);
+    } else if (u.role && u.role !== "staff") {
+      specialties = [u.role];
+    }
+    return {
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      specialties,
+    };
+  });
+}
+
+/** Convert StaffUserOption[] back to the cache-friendly format */
+function toRawStaffUsers(users: StaffUser[]): RawCachedStaffUser[] {
+  return users.map((u) => ({
+    id: u.id,
+    username: u.username ?? "",
+    email: u.email ?? "",
+    hourly_wage: 0,
+    role: u.specialties?.[0] ?? "staff",
+  }));
+}
+
+/**
+ * Build ServiceGroup[] from cached subtasks and a staffUsers list (for name resolution).
+ */
+function buildGroupsFromCache(
+  projectId: string,
+  cachedSubTasks: NonNullable<ReturnType<typeof getCachedSubTasks>>,
+  staffUsersList: StaffUser[],
+): ServiceGroup[] {
+  const groupedMap = new Map<string, ServiceGroup>();
+
+  const mainTasks = getCachedMainTasks(projectId) ?? [];
+  const mainTaskNameMap = new Map(mainTasks.map((t) => [t.id, t.name]));
+
+  for (const st of cachedSubTasks) {
+    const mainTaskId = st.mainTaskId;
+
+    if (!groupedMap.has(mainTaskId)) {
+      groupedMap.set(mainTaskId, {
+        id: mainTaskId,
+        title: mainTaskNameMap.get(mainTaskId) ?? "Main Task",
+        status: "pending",
+        children: [],
+      });
+    }
+
+    const employees: AssignedEmployee[] = st.assignedEmployeeIds.map((empId) => {
+      const user = staffUsersList.find((u) => u.id === empId);
+      return {
+        id: empId,
+        name: user?.username || user?.email || "Staff",
+        role: user?.specialties?.[0] ?? "staff",
+        assignmentStatus: "assigned",
+      };
+    });
+
+    groupedMap.get(mainTaskId)!.children.push({
+      id: st.id,
+      subTaskId: st.subTaskId,
+      title: st.title,
+      status: "pending",
+      employees,
+    });
+  }
+
+  return Array.from(groupedMap.values());
+}
+
 export default function EmployeeAssignmentPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/project-schedule");
+    router.prefetch("/admin/job-creation/cost-estimation");
+  }, [router]);
+
   const [services, setServices] = useState<ServiceGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [isNavigating, setIsNavigating] = useState<"next" | "back" | null>(
     null,
@@ -208,17 +308,26 @@ export default function EmployeeAssignmentPage() {
   const [isSavingEmployees, setIsSavingEmployees] = useState(false);
   const [isGeneratingEmployees, setIsGeneratingEmployees] = useState(false);
 
-  useEffect(() => {
-    async function loadEmployeeAssignments() {
-      if (!projectId) {
-        toast.error("Missing project ID.");
-        setLoading(false);
-        return;
-      }
+  async function loadEmployeeAssignments(forceRefresh = false) {
+    if (!projectId) {
+      toast.error("Missing project ID.");
+      setLoading(false);
+      return;
+    }
 
-      try {
-        setLoading(true);
+    try {
+      if (forceRefresh) setRefreshing(true);
+      else setLoading(true);
 
+      await ensureWizardCacheHydrated(projectId);
+
+      // --- Load staff users (always fetch fresh on forceRefresh) ---
+      let loadedStaffUsers: StaffUser[] = [];
+      const cachedRef = getCachedRefData(projectId);
+
+      if (!forceRefresh && cachedRef?.staffUsers && cachedRef.staffUsers.length > 0) {
+        loadedStaffUsers = toStaffUserOptions(cachedRef.staffUsers);
+      } else {
         const staffResponse = await fetch("/api/planning/getStaffUsers");
         const staffData = await staffResponse.json();
 
@@ -229,98 +338,133 @@ export default function EmployeeAssignmentPage() {
           );
         }
 
-        setStaffUsers(
-          Array.isArray(staffData?.staffUsers) ? staffData.staffUsers : [],
+        loadedStaffUsers = Array.isArray(staffData?.staffUsers)
+          ? staffData.staffUsers
+          : [];
+
+        setCachedRefData(projectId, { staffUsers: toRawStaffUsers(loadedStaffUsers) });
+      }
+
+      setStaffUsers(loadedStaffUsers);
+
+      // --- Load subtask assignment data (cache-first) ---
+      const cachedSubTasks = getCachedSubTasks(projectId);
+
+      if (!forceRefresh && cachedSubTasks && cachedSubTasks.length > 0) {
+        const groupedServices = buildGroupsFromCache(projectId, cachedSubTasks, loadedStaffUsers);
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+        return;
+      }
+
+      // --- Fetch from API (on refresh or cache miss) ---
+      let loadedRows: any[] = [];
+      let loadedProject: any = null;
+
+      try {
+        const response = await fetch(
+          `/api/planning/getProjectSubTaskStaff?projectId=${projectId}`,
         );
 
-        let loadedRows: any[] = [];
-        let loadedProject: any = null;
+        if (response.ok) {
+          const data = await response.json();
+          loadedRows = Array.isArray(data?.projectSubTaskStaff)
+            ? data.projectSubTaskStaff
+            : [];
+          loadedProject = data?.project ?? null;
+        }
+      } catch {
+        // fallback below
+      }
 
+      if (loadedRows.length === 0) {
         try {
           const response = await fetch(
-            `/api/planning/getProjectSubTaskStaff?projectId=${projectId}`,
+            `/api/planning/getProjectSubTasks?projectId=${projectId}`,
           );
 
           if (response.ok) {
             const data = await response.json();
-            loadedRows = Array.isArray(data?.projectSubTaskStaff)
-              ? data.projectSubTaskStaff
-              : [];
-            loadedProject = data?.project ?? null;
+            loadedRows = Array.isArray(data?.projectSubTasks)
+              ? data.projectSubTasks
+              : Array.isArray(data?.subTasks)
+                ? data.subTasks
+                : Array.isArray(data?.rows)
+                  ? data.rows
+                  : [];
+            loadedProject = data?.project ?? loadedProject;
           }
         } catch {
           // fallback below
         }
-
-        if (loadedRows.length === 0) {
-          try {
-            const response = await fetch(
-              `/api/planning/getProjectSubTasks?projectId=${projectId}`,
-            );
-
-            if (response.ok) {
-              const data = await response.json();
-              loadedRows = Array.isArray(data?.projectSubTasks)
-                ? data.projectSubTasks
-                : Array.isArray(data?.subTasks)
-                  ? data.subTasks
-                  : Array.isArray(data?.rows)
-                    ? data.rows
-                    : [];
-              loadedProject = data?.project ?? loadedProject;
-            }
-          } catch {
-            // fallback below
-          }
-        }
-
-        if (loadedRows.length > 0) {
-          const groupedServices = buildGroupsFromRows(loadedRows);
-          setServices(groupedServices);
-          setExpanded(new Set(groupedServices.map((group) => group.id)));
-
-          if (loadedProject) {
-            const label =
-              loadedProject?.project_code ??
-              loadedProject?.title ??
-              "Employee Assignment";
-
-            const subLabel =
-              loadedProject?.title ??
-              loadedProject?.site_address ??
-              "Review assigned staff for each sub task before moving to overview.";
-
-            setCardTitle(label);
-            setCardSubtitle(subLabel);
-          }
-
-          return;
-        }
-
-        const draftRaw = sessionStorage.getItem(SESSION_DRAFT_KEY);
-        if (draftRaw) {
-          const draft = JSON.parse(draftRaw);
-          const groupedServices = buildGroupsFromDraft(draft);
-          setServices(groupedServices);
-          setExpanded(new Set(groupedServices.map((group) => group.id)));
-
-          setCardTitle(draft?.projectCode ?? "Employee Assignment");
-          setCardSubtitle(
-            draft?.basicDetails?.projectName ??
-              draft?.basicDetails?.address ??
-              "Review assigned staff for each sub task before moving to overview.",
-          );
-          return;
-        }
-
-        setServices([]);
-      } catch (error: any) {
-        toast.error(error?.message || "Failed to load employee assignment.");
-      } finally {
-        setLoading(false);
       }
-    }
 
+      if (loadedRows.length > 0) {
+        const groupedServices = buildGroupsFromRows(loadedRows);
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+
+        // Sync cache with DB data: update assignedEmployeeIds in cached subtasks
+        if (cachedSubTasks) {
+          const employeeMap = new Map<string, string[]>();
+          for (const group of groupedServices) {
+            for (const step of group.children) {
+              employeeMap.set(step.id, step.employees.map((e) => e.id));
+            }
+          }
+          const updatedSubTasks = cachedSubTasks.map((st) => {
+            const empIds = employeeMap.get(st.id);
+            return empIds !== undefined
+              ? { ...st, assignedEmployeeIds: empIds }
+              : st;
+          });
+          setCachedSubTasks(projectId, updatedSubTasks);
+        }
+
+        if (loadedProject) {
+          const label =
+            loadedProject?.project_code ??
+            loadedProject?.title ??
+            "Employee Assignment";
+
+          const subLabel =
+            loadedProject?.title ??
+            loadedProject?.site_address ??
+            "Review assigned staff for each sub task before moving to overview.";
+
+          setCardTitle(label);
+          setCardSubtitle(subLabel);
+        }
+
+        return;
+      }
+
+      const draftRaw = sessionStorage.getItem(SESSION_DRAFT_KEY);
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const groupedServices = buildGroupsFromDraft(draft);
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+
+        setCardTitle(draft?.projectCode ?? "Employee Assignment");
+        setCardSubtitle(
+          draft?.basicDetails?.projectName ??
+            draft?.basicDetails?.address ??
+            "Review assigned staff for each sub task before moving to overview.",
+        );
+        return;
+      }
+
+      setServices([]);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load employee assignment.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
     loadEmployeeAssignments();
   }, [projectId]);
 
@@ -354,24 +498,15 @@ export default function EmployeeAssignmentPage() {
     try {
       setIsSavingEmployees(true);
 
-      const response = await fetch("/api/planning/saveProjectSubTaskStaff", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          projectSubTaskId: activeStepId,
-          employeeIds: selectedEmployeeIds,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to save employee assignments.",
+      // Update the cached subtasks with new employee assignments
+      const cachedSubTasks = getCachedSubTasks(projectId);
+      if (cachedSubTasks) {
+        const updatedSubTasks = cachedSubTasks.map((st) =>
+          st.id === activeStepId
+            ? { ...st, assignedEmployeeIds: selectedEmployeeIds }
+            : st,
         );
+        setCachedSubTasks(projectId, updatedSubTasks);
       }
 
       const selectedEmployees: AssignedEmployee[] = staffUsers
@@ -450,48 +585,18 @@ export default function EmployeeAssignmentPage() {
     }
   }
 
-  async function updateProjectStatus(status: string) {
-    const response = await fetch("/api/planning/updateProjectStatus", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        projectId,
-        status,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        [data?.error, data?.details].filter(Boolean).join(": ") ||
-          "Failed to update project status.",
-      );
-    }
+  function handleGoBack() {
+    setIsNavigating("back");
+    setOptimisticProjectStatus(projectId, "schedule_pending");
+    setCachedStep(projectId, "schedule_pending");
+    router.push(`/admin/job-creation/project-schedule?projectId=${projectId}`);
   }
 
-  async function handleGoBack() {
-    try {
-      setIsNavigating("back");
-      await updateProjectStatus("schedule_pending");
-      window.location.href = `/admin/job-creation/project-schedule?projectId=${projectId}`;
-    } catch (error: any) {
-      setIsNavigating(null);
-      toast.error(error?.message || "Failed to go back to schedule.");
-    }
-  }
-
-  async function handleNext() {
-    try {
-      setIsNavigating("next");
-      await updateProjectStatus("cost_estimation_pending");
-      window.location.href = `/admin/job-creation/cost-estimation?projectId=${projectId}`;
-    } catch (error: any) {
-      setIsNavigating(null);
-      toast.error(error?.message || "Failed to continue to overview.");
-    }
+  function handleNext() {
+    setIsNavigating("next");
+    setOptimisticProjectStatus(projectId, "cost_estimation_pending");
+    setCachedStep(projectId, "cost_estimation_pending");
+    router.push(`/admin/job-creation/cost-estimation?projectId=${projectId}`);
   }
 
   async function handleGenerateAssignments() {
@@ -537,6 +642,26 @@ export default function EmployeeAssignmentPage() {
       const groupedServices = buildGroupsFromRows(rows);
       setServices(groupedServices);
       setExpanded(new Set(groupedServices.map((group) => group.id)));
+
+      // Update the cache with the newly generated assignments
+      const cachedSubTasks = getCachedSubTasks(projectId);
+      if (cachedSubTasks) {
+        const updatedSubTasks = cachedSubTasks.map((st) => {
+          // Find matching service step to get the new employee IDs
+          for (const group of groupedServices) {
+            for (const step of group.children) {
+              if (step.id === st.id) {
+                return {
+                  ...st,
+                  assignedEmployeeIds: step.employees.map((e) => e.id),
+                };
+              }
+            }
+          }
+          return st;
+        });
+        setCachedSubTasks(projectId, updatedSubTasks);
+      }
 
       toast.success("Employee assignments generated.");
     } catch (error: any) {
@@ -605,8 +730,18 @@ export default function EmployeeAssignmentPage() {
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
-                  Staff Review
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => loadEmployeeAssignments(true)}
+                    disabled={refreshing}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 transition-all hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                    title="Refresh">
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  </button>
+                  <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    Staff Review
+                  </div>
                 </div>
               </div>
             </div>

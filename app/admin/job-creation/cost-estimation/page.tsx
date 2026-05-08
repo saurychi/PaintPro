@@ -3,9 +3,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
-import { normalizeMarkupRate } from "@/lib/planning/costEstimation";
+import { normalizeMarkupRate, calculateProjectCostEstimation, type CostEstimationInput, type CostEstimationMainTask } from "@/lib/planning/costEstimation";
+import { getCachedSubTasks, getCachedMainTasks, getCachedMaterials, getCachedMarkupRate, setCachedMarkupRate, setCachedStep, getCachedRefData, getCachedProjectMeta, ensureWizardCacheHydrated, markWizardDirty } from "@/lib/wizardCache";
 
 type CostEstimationResponse = {
   project: {
@@ -104,10 +106,104 @@ function getSectionKey(
   return `${projectTaskId}:${section}`;
 }
 
+/**
+ * Build CostEstimationResponse from wizard cache data using the pure
+ * calculateProjectCostEstimation function.
+ */
+function buildCostFromCache(projectId: string): CostEstimationResponse | null {
+  const mainTasks = getCachedMainTasks(projectId);
+  const subTasks = getCachedSubTasks(projectId);
+  const materials = getCachedMaterials(projectId);
+  const refData = getCachedRefData(projectId);
+  const meta = getCachedProjectMeta(projectId);
+  const markupRate = getCachedMarkupRate(projectId) ?? 30;
+
+  if (!mainTasks || !subTasks || !materials || !meta) return null;
+
+  const staffUsers = refData?.staffUsers ?? [];
+
+  // Build staff lookup by id
+  const staffById = new Map(
+    staffUsers.map((s) => [s.id, { id: s.id, name: s.username, hourlyWage: s.hourly_wage }]),
+  );
+
+  // Build CostEstimationMainTask[] from cache
+  const costMainTasks: CostEstimationMainTask[] = mainTasks.map((mt) => {
+    const projectTaskId = mt.project_task_id ?? mt.id;
+
+    // Materials for this main task
+    const taskMaterials = materials
+      .filter((m) => m.projectTaskId === projectTaskId)
+      .map((m) => ({
+        projectTaskMaterialId: m.id,
+        materialId: m.materialId,
+        name: m.name,
+        unit: m.unit,
+        estimatedQuantity: m.quantity,
+        unitCost: m.unitCost,
+        estimatedCost: m.estimatedCost,
+      }));
+
+    // Subtasks for this main task
+    const taskSubTasks = subTasks
+      .filter((st) => st.projectTaskId === projectTaskId)
+      .map((st) => ({
+        projectSubTaskId: st.id,
+        subTaskId: st.subTaskId,
+        title: st.title,
+        estimatedHours: st.estimatedHours ?? 0,
+        assignedStaff: st.assignedEmployeeIds
+          .map((empId) => staffById.get(empId))
+          .filter((s): s is { id: string; name: string; hourlyWage: number } => !!s),
+        equipment: st.equipments.map((eq) => ({
+          id: eq.id,
+          equipmentId: eq.equipmentId,
+          name: eq.name,
+          quantity: eq.quantity,
+          unitCost: eq.unitCost,
+          notes: eq.notes,
+        })),
+        scheduledStartDatetime: st.scheduledStartDatetime,
+        scheduledEndDatetime: st.scheduledEndDatetime,
+      }));
+
+    return {
+      projectTaskId,
+      mainTaskId: mt.id,
+      title: mt.name,
+      sortOrder: 0,
+      materials: taskMaterials,
+      subtasks: taskSubTasks,
+    };
+  });
+
+  const input: CostEstimationInput = {
+    project: {
+      projectId,
+      projectCode: meta.projectCode,
+      title: meta.projectTitle,
+      description: meta.description,
+      siteAddress: meta.siteAddress,
+      status: null,
+    },
+    markupRate,
+    mainTasks: costMainTasks,
+  };
+
+  const result = calculateProjectCostEstimation(input);
+
+  return result as CostEstimationResponse;
+}
+
 export default function CostEstimationPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
+
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/employee-assignment");
+    router.prefetch("/admin/job-creation/overview");
+  }, [router]);
 
   const [loading, setLoading] = useState(true);
   const [isNavigating, setIsNavigating] = useState<"back" | "next" | null>(null);
@@ -117,9 +213,23 @@ export default function CostEstimationPage() {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
   const [isDirty, setIsDirty] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"back" | "next" | null>(null);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
-  const [isSavingFromModal, setIsSavingFromModal] = useState(false);
+
+  function applyData(result: CostEstimationResponse, resetDirty?: boolean) {
+    const nextExpandedTasks = new Set(result.mainTasks.map((task) => task.projectTaskId));
+    const nextExpandedSections = new Set<string>();
+    result.mainTasks.forEach((task) => {
+      nextExpandedSections.add(getSectionKey(task.projectTaskId, "materials"));
+      nextExpandedSections.add(getSectionKey(task.projectTaskId, "equipment"));
+      nextExpandedSections.add(getSectionKey(task.projectTaskId, "subtasks"));
+    });
+
+    setData(result);
+    setExpanded(nextExpandedTasks);
+    setExpandedSections(nextExpandedSections);
+    setMarkupInput(String((result.markupRate ?? 0) * 100));
+
+    if (resetDirty) setIsDirty(false);
+  }
 
   async function loadCostEstimation(
     markupValue?: string,
@@ -133,6 +243,16 @@ export default function CostEstimationPage() {
     try {
       setLoading(true);
 
+      await ensureWizardCacheHydrated(projectId);
+
+      // Try building from wizard cache first
+      const cached = buildCostFromCache(projectId);
+      if (cached) {
+        applyData(cached, options?.resetDirty);
+        return;
+      }
+
+      // Fallback: fetch from API
       const params = new URLSearchParams({ projectId });
       if (markupValue !== undefined && markupValue !== null && markupValue !== "") {
         params.set("markupRate", markupValue);
@@ -150,20 +270,7 @@ export default function CostEstimationPage() {
         );
       }
 
-      const nextExpandedTasks = new Set(result.mainTasks.map((task) => task.projectTaskId));
-      const nextExpandedSections = new Set<string>();
-      result.mainTasks.forEach((task) => {
-        nextExpandedSections.add(getSectionKey(task.projectTaskId, "materials"));
-        nextExpandedSections.add(getSectionKey(task.projectTaskId, "equipment"));
-        nextExpandedSections.add(getSectionKey(task.projectTaskId, "subtasks"));
-      });
-
-      setData(result);
-      setExpanded(nextExpandedTasks);
-      setExpandedSections(nextExpandedSections);
-      setMarkupInput(String((result.markupRate ?? 0) * 100));
-
-      if (options?.resetDirty) setIsDirty(false);
+      applyData(result, options?.resetDirty);
     } catch (error: any) {
       toast.error(error?.message || "Failed to load project cost estimation.");
     } finally {
@@ -198,101 +305,22 @@ export default function CostEstimationPage() {
     });
   }
 
-  async function updateProjectStatus(status: string) {
-    const response = await fetch("/api/planning/updateProjectStatus", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, status }),
-    });
-    const responseData = await response.json();
-    if (!response.ok) {
-      throw new Error(
-        [responseData?.error, responseData?.details].filter(Boolean).join(": ") ||
-          "Failed to update project status.",
-      );
-    }
-  }
-
-  function requestLeave(action: "back" | "next") {
-    if (!isDirty) {
-      if (action === "next") {
-        void handleConfirmSave(true, "next");
-      } else {
-        void (async () => {
-          try {
-            await updateProjectStatus("employee_assignment_pending");
-            router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
-          } catch (error: any) {
-            setIsNavigating(null);
-            toast.error(error?.message || "Failed to update project status.");
-          }
-        })();
-      }
-      return;
-    }
-    setPendingAction(action);
-    setShowSaveConfirm(true);
+  function handleNext() {
+    setIsNavigating("next");
+    setCachedMarkupRate(projectId, Number(markupInput));
+    setIsDirty(false);
+    setCachedStep(projectId, "overview_pending");
+    setOptimisticProjectStatus(projectId, "overview_pending");
+    router.push(`/admin/job-creation/overview?projectId=${projectId}`);
   }
 
   function handleGoBack() {
     setIsNavigating("back");
-    requestLeave("back");
-  }
-
-  function handleNext() {
-    setIsNavigating("next");
-    requestLeave("next");
-  }
-
-  async function handleConfirmSave(shouldSave: boolean, forcedAction?: "back" | "next") {
-    const action = forcedAction ?? pendingAction;
-    setShowSaveConfirm(false);
-    if (!action) return;
-
-    if (shouldSave) {
-      try {
-        setIsSavingFromModal(true);
-
-        const saveResponse = await fetch("/api/planning/saveProjectCostEstimation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, markupRate: Number(markupInput) }),
-        });
-        const saveData = await saveResponse.json();
-
-        if (!saveResponse.ok) {
-          throw new Error(
-            [saveData?.error, saveData?.details].filter(Boolean).join(": ") ||
-              "Failed to save project cost estimation.",
-          );
-        }
-
-        setIsDirty(false);
-        toast.success("Project cost estimation saved.");
-      } catch (error: any) {
-        setIsSavingFromModal(false);
-        setIsNavigating(null);
-        toast.error(error?.message || "Failed to save project cost estimation.");
-        return;
-      } finally {
-        setIsSavingFromModal(false);
-      }
-    }
-
-    try {
-      const nextStatus = action === "back" ? "employee_assignment_pending" : "overview_pending";
-      await updateProjectStatus(nextStatus);
-      setPendingAction(null);
-
-      if (action === "next") {
-        router.push(`/admin/job-creation/overview?projectId=${projectId}`);
-        return;
-      }
-      router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
-    } catch (error: any) {
-      setIsNavigating(null);
-      toast.error(error?.message || "Failed to continue.");
-    }
+    setCachedMarkupRate(projectId, Number(markupInput));
+    setIsDirty(false);
+    setCachedStep(projectId, "employee_assignment_pending");
+    setOptimisticProjectStatus(projectId, "employee_assignment_pending");
+    router.push(`/admin/job-creation/employee-assignment?projectId=${projectId}`);
   }
 
   const projectCode = data?.project.project_code || "Cost Estimation";
@@ -406,7 +434,7 @@ export default function CostEstimationPage() {
                             value={markupInput}
                             onChange={(e) => {
                               setMarkupInput(e.target.value);
-                              setIsDirty(true);
+                              setIsDirty(true); markWizardDirty(projectId);
                             }}
                             className="h-8 w-full max-w-[126px] rounded-md border border-slate-200 bg-white pl-2.5 pr-6 text-[13px] font-medium text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                           />
@@ -774,56 +802,6 @@ export default function CostEstimationPage() {
           </button>
         </div>
       </div>
-
-      {/* save confirm modal */}
-      {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 shadow-sm">
-            <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Save changes?</h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Do you want to save your cost estimation changes before leaving?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSaveConfirm(false);
-                  setPendingAction(null);
-                  setIsNavigating(null);
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                Don&apos;t Save
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(true)}
-                disabled={isSavingFromModal}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
-                style={{ backgroundColor: ACCENT }}>
-                {isSavingFromModal ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Save Project Totals"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <style jsx global>{`
         .green-scrollbar::-webkit-scrollbar {

@@ -1,9 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+// --- SIMULATED TIME (testing only) ---------------------------------------
+// The `useProjectNow` hook returns the simulated reference time when one is
+// configured, otherwise the real `new Date()`. To remove the simulation
+// integration, delete this import and replace `projectNow.getTime()` below
+// with `Date.now()`.
+import { useProjectNow } from "@/lib/time/useProjectNow";
+// -------------------------------------------------------------------------
 
 const ACCENT = "#00c065";
 
@@ -33,6 +40,7 @@ type StatusKey =
   | "cost_estimation_pending"
   | "overview_pending"
   | "quotation_pending"
+  | "grant_access_quotation"
   | "client_quotation_done"
   | "downpayment_pending"
   | "ready_to_start"
@@ -40,13 +48,14 @@ type StatusKey =
   | "review_pending"
   | "invoice_pending"
   | "invoice_agreement_pending"
+  | "invoice_signed"
   | "payment_pending"
   | "employee_management_pending"
   | "conclude_job_pending"
   | "completed"
   | "cancelled";
 
-const STATUS_ORDER: StatusKey[] = [
+const PROJECT_CREATION_STATUSES: StatusKey[] = [
   "main_task_pending",
   "sub_task_pending",
   "materials_pending",
@@ -55,7 +64,11 @@ const STATUS_ORDER: StatusKey[] = [
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+];
+
+const POST_CREATION_STATUSES: StatusKey[] = [
   "quotation_pending",
+  "grant_access_quotation",
   "client_quotation_done",
   "downpayment_pending",
   "ready_to_start",
@@ -63,11 +76,17 @@ const STATUS_ORDER: StatusKey[] = [
   "review_pending",
   "invoice_pending",
   "invoice_agreement_pending",
+  "invoice_signed",
   "payment_pending",
   "employee_management_pending",
   "conclude_job_pending",
   "completed",
   "cancelled",
+];
+
+const STATUS_ORDER: StatusKey[] = [
+  ...PROJECT_CREATION_STATUSES,
+  ...POST_CREATION_STATUSES,
 ];
 
 type StatusMeta = {
@@ -132,6 +151,12 @@ const STATUS_META: Record<StatusKey, StatusMeta> = {
     badgeBorder: "#bbf7d0",
     badgeColor: "#15803d",
   },
+  grant_access_quotation: {
+    label: "Awaiting Client Signature",
+    badgeBg: "#fffbeb",
+    badgeBorder: "#fde68a",
+    badgeColor: "#92400e",
+  },
   client_quotation_done: {
     label: "Client Signed Quotation",
     badgeBg: "#ecfdf5",
@@ -173,6 +198,12 @@ const STATUS_META: Record<StatusKey, StatusMeta> = {
     badgeBg: "#eef2ff",
     badgeBorder: "#c7d2fe",
     badgeColor: "#4338ca",
+  },
+  invoice_signed: {
+    label: "Invoice Signed",
+    badgeBg: "#ecfeff",
+    badgeBorder: "#a5f3fc",
+    badgeColor: "#0e7490",
   },
   payment_pending: {
     label: "Payment Pending",
@@ -233,18 +264,38 @@ function getProjectRoute(projectId: string, status: StatusKey | "unknown"): stri
     case "overview_pending":
       return `/admin/job-creation/overview?projectId=${projectId}`;
     case "quotation_pending":
+    case "grant_access_quotation":
       return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
     case "client_quotation_done":
       // The client has signed; the admin still needs to review and ack on the
       // quotation page before advancing to downpayment.
       return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
     case "downpayment_pending":
+      // Land on the admin dashboard with a query flag the JobProgressCard
+      // listens for, which opens the Downpayment modal automatically.
+      return `/admin?openDownpayment=${projectId}`;
     case "ready_to_start":
+      // Same pattern: dashboard + a flag that pops the kickoff modal so
+      // the manager can confirm-start from one click.
+      return `/admin?openKickoff=${projectId}`;
     case "in_progress":
-    case "review_pending":
+      // Live projects belong on the dashboard — that's where the
+      // JobProgressCard tracks subtask completion in real time. The
+      // ?projectId param tells admin/page.tsx to pre-select this row
+      // on load instead of falling through to whatever the auto-pick
+      // would have chosen.
+      return `/admin?projectId=${projectId}`;
     case "invoice_pending":
     case "invoice_agreement_pending":
+    case "invoice_signed":
     case "payment_pending":
+      // Anything invoice-related (preparing → sent → signed → payment
+      // pending) lands on the invoice-generation page. From there the
+      // admin can preview/download the PDF, send it to the client, or
+      // hit "Go to Payment" which redirects to the dashboard with the
+      // FinalPaymentModal pre-opened.
+      return `/admin/projects/invoice-generation?projectId=${projectId}`;
+    case "review_pending":
     case "employee_management_pending":
     case "conclude_job_pending":
     case "completed":
@@ -268,10 +319,29 @@ function formatDate(value: string | null | undefined) {
 
 export default function AdminProjectsPage() {
   const router = useRouter();
+  // --- SIMULATED TIME (testing only) -----------------------------------
+  // Drives the date filter from the simulated clock when one is set in
+  // settings. To remove: delete this line and the import above, and use
+  // `Date.now()` in place of `projectNow.getTime()` in the filter memo.
+  const { now: projectNow } = useProjectNow();
+  // ---------------------------------------------------------------------
   const [projects, setProjects] = useState<RawProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Override map for sections the user has manually toggled. Default open state
+  // is derived from "does the section have projects" — overrides only apply
+  // when the user has explicitly clicked the chevron.
+  const [sectionOverrides, setSectionOverrides] = useState<Map<StatusKey, boolean>>(
+    () => new Map(),
+  );
+  const [projectCreationOverride, setProjectCreationOverride] = useState<
+    boolean | null
+  >(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFilter, setDateFilter] = useState<"all" | "week" | "month" | "year">(
+    "all",
+  );
 
   const loadProjects = useCallback(async () => {
     try {
@@ -317,36 +387,93 @@ export default function AdminProjectsPage() {
     }
   }
 
+  const filteredProjects = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    let cutoff: number | null = null;
+    if (dateFilter !== "all") {
+      // --- SIMULATED TIME (testing only) --------------------------------
+      // Anchor the rolling window to the simulated clock when one is set,
+      // otherwise to the real wall clock. To remove simulation, swap
+      // `projectNow.getTime()` for `Date.now()`.
+      const now = new Date(projectNow.getTime());
+      // ------------------------------------------------------------------
+      const start = new Date(now);
+      if (dateFilter === "week") start.setDate(now.getDate() - 7);
+      else if (dateFilter === "month") start.setMonth(now.getMonth() - 1);
+      else if (dateFilter === "year") start.setFullYear(now.getFullYear() - 1);
+      cutoff = start.getTime();
+    }
+
+    return projects.filter((project) => {
+      if (query) {
+        const code = (project.projectCode || project.project_code || "").toLowerCase();
+        const title = (project.title || "").toLowerCase();
+        if (!title.includes(query) && !code.includes(query)) return false;
+      }
+
+      if (cutoff !== null) {
+        const ts = project.scheduledStartDatetime
+          ? new Date(project.scheduledStartDatetime).getTime()
+          : NaN;
+        if (Number.isNaN(ts) || ts < cutoff) return false;
+      }
+
+      return true;
+    });
+  }, [projects, searchQuery, dateFilter, projectNow]);
+
   const projectsByStatus = useMemo(() => {
     const map = new Map<StatusKey, RawProject[]>();
     for (const status of STATUS_ORDER) {
       map.set(status, []);
     }
 
-    for (const project of projects) {
+    for (const project of filteredProjects) {
       const key = normalizeStatus(project.rawStatus || project.status);
       if (key === "unknown") continue;
       map.get(key)?.push(project);
     }
 
     return map;
-  }, [projects]);
+  }, [filteredProjects]);
 
-  const totalCount = projects.length;
-  const visibleSections = STATUS_ORDER.filter(
-    (status) => (projectsByStatus.get(status)?.length ?? 0) > 0,
+  const isSectionOpen = useCallback(
+    (status: StatusKey): boolean => {
+      const override = sectionOverrides.get(status);
+      if (override !== undefined) return override;
+      return (projectsByStatus.get(status)?.length ?? 0) > 0;
+    },
+    [sectionOverrides, projectsByStatus],
   );
+
+  const toggleSection = useCallback(
+    (status: StatusKey) => {
+      const currentlyOpen = isSectionOpen(status);
+      setSectionOverrides((prev) => {
+        const next = new Map(prev);
+        next.set(status, !currentlyOpen);
+        return next;
+      });
+    },
+    [isSectionOpen],
+  );
+
+  const totalCount = filteredProjects.length;
+  const isFiltered = searchQuery.trim() !== "" || dateFilter !== "all";
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-6xl px-6 py-6">
-        <header className="mb-6 flex items-end justify-between gap-3">
+        <header className="mb-4 flex items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Projects</h1>
             <p className="mt-1 text-sm text-gray-500">
               {loading
                 ? "Loading projects…"
-                : `${totalCount} project${totalCount === 1 ? "" : "s"} grouped by status.`}
+                : `${totalCount} project${totalCount === 1 ? "" : "s"}${
+                    isFiltered ? " (filtered)" : " grouped by status."
+                  }`}
             </p>
           </div>
 
@@ -363,96 +490,205 @@ export default function AdminProjectsPage() {
           </button>
         </header>
 
-        {loading ? (
-          <div className="flex items-center justify-center rounded-2xl border border-gray-200 bg-white py-20 shadow-sm">
-            <div className="flex items-center gap-3 text-gray-600">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm">Loading projects…</span>
-            </div>
+        <div className="mb-6 flex flex-wrap items-center gap-3">
+          <div className="relative min-w-60 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by title or code…"
+              className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            />
           </div>
-        ) : error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-            {error}
-          </div>
-        ) : visibleSections.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-12 text-center text-sm text-gray-500">
-            No projects yet.
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {visibleSections.map((status) => {
-              const meta = STATUS_META[status];
-              const list = projectsByStatus.get(status) ?? [];
 
+          <div className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
+            {(["all", "week", "month", "year"] as const).map((option) => {
+              const active = dateFilter === option;
+              const label =
+                option === "all"
+                  ? "All"
+                  : option.charAt(0).toUpperCase() + option.slice(1);
               return (
-                <section
-                  key={status}
-                  className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setDateFilter(option)}
+                  className={`inline-flex h-8 items-center justify-center rounded-md px-3 text-xs font-semibold transition ${
+                    active
+                      ? "text-white shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                  style={active ? { backgroundColor: ACCENT } : undefined}
                 >
-                  <div
-                    className="h-1 w-full"
-                    style={{ backgroundColor: ACCENT }}
-                  />
-
-                  <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-                        style={{
-                          backgroundColor: meta.badgeBg,
-                          borderColor: meta.badgeBorder,
-                          color: meta.badgeColor,
-                        }}
-                      >
-                        {meta.label}
-                      </span>
-                      <span className="text-[12px] font-medium text-gray-500">
-                        {list.length} project{list.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <ul className="divide-y divide-gray-100">
-                    {list.map((project) => {
-                      const projectCode =
-                        project.projectCode || project.project_code || "No Code";
-
-                      return (
-                        <li key={project.id}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              router.push(getProjectRoute(project.id, status))
-                            }
-                            className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-3 text-left transition hover:bg-gray-50"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="truncate text-[14px] font-semibold text-gray-900">
-                                  {project.title || "Untitled Project"}
-                                </span>
-                                <span className="shrink-0 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
-                                  {projectCode}
-                                </span>
-                              </div>
-                              <div className="mt-1 text-[12px] text-gray-500">
-                                {formatDate(project.scheduledStartDatetime)} →{" "}
-                                {formatDate(project.scheduledEndDatetime)}
-                              </div>
-                            </div>
-
-                            <span className="shrink-0 text-[12px] font-medium text-emerald-700">
-                              Open →
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
+                  {label}
+                </button>
               );
             })}
           </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading projects…
+          </div>
+        ) : error ? (
+          <p className="text-sm text-red-700">{error}</p>
+        ) : (
+          (() => {
+            const isSearching = searchQuery.trim() !== "";
+            const projectCreationCount = PROJECT_CREATION_STATUSES.reduce(
+              (sum, s) => sum + (projectsByStatus.get(s)?.length ?? 0),
+              0,
+            );
+
+            const renderStatusSection = (status: StatusKey, indent: boolean) => {
+              const meta = STATUS_META[status];
+              const list = projectsByStatus.get(status) ?? [];
+              // While searching, hide sections that have no matching projects.
+              if (isSearching && list.length === 0) return null;
+              // While searching, force-open sections that have matches so the
+              // user can see results without an extra click.
+              const isOpen = isSearching ? list.length > 0 : isSectionOpen(status);
+
+              return (
+                <section key={status} className={indent ? "pl-6" : undefined}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(status)}
+                    className="flex w-full items-center gap-2 text-left"
+                  >
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${
+                        isOpen ? "rotate-0" : "-rotate-90"
+                      }`}
+                    />
+                    <h2 className="text-[15px] font-semibold text-gray-900">
+                      {meta.label}
+                    </h2>
+                    <span className="text-[12px] font-medium text-gray-500">
+                      {list.length} project{list.length === 1 ? "" : "s"}
+                    </span>
+                  </button>
+
+                  {isOpen &&
+                    (list.length === 0 ? (
+                      <p className="mt-2 pl-6 text-[12px] text-gray-400">
+                        No projects in this status.
+                      </p>
+                    ) : (
+                      <ul className="mt-3 space-y-2">
+                        {list.map((project) => {
+                          const projectCode =
+                            project.projectCode ||
+                            project.project_code ||
+                            "No Code";
+
+                          return (
+                            <li
+                              key={project.id}
+                              className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white px-5 py-3 shadow-sm"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate text-[14px] font-semibold text-gray-900">
+                                    {project.title || "Untitled Project"}
+                                  </span>
+                                  <span className="shrink-0 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
+                                    {projectCode}
+                                  </span>
+                                  <span
+                                    className="shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                                    style={{
+                                      backgroundColor: meta.badgeBg,
+                                      borderColor: meta.badgeBorder,
+                                      color: meta.badgeColor,
+                                    }}
+                                  >
+                                    {meta.label}
+                                  </span>
+                                </div>
+                                <div className="mt-1 text-[12px] text-gray-500">
+                                  {formatDate(project.scheduledStartDatetime)} →{" "}
+                                  {formatDate(project.scheduledEndDatetime)}
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  router.push(getProjectRoute(project.id, status))
+                                }
+                                className="shrink-0 inline-flex items-center justify-center rounded-lg px-4 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                                style={{ backgroundColor: ACCENT }}
+                              >
+                                Open
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ))}
+                </section>
+              );
+            };
+
+            const showProjectCreation = !isSearching || projectCreationCount > 0;
+            const projectCreationDefaultOpen = projectCreationCount > 0;
+            const projectCreationExpanded = isSearching
+              ? projectCreationCount > 0
+              : projectCreationOverride ?? projectCreationDefaultOpen;
+
+            if (isSearching && filteredProjects.length === 0) {
+              return (
+                <p className="text-sm text-gray-500">
+                  No projects match &ldquo;{searchQuery.trim()}&rdquo;.
+                </p>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                {showProjectCreation && (
+                  <section>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setProjectCreationOverride(!projectCreationExpanded)
+                      }
+                      className="flex w-full items-center gap-2 text-left"
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${
+                          projectCreationExpanded ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                      <h2 className="text-[16px] font-semibold text-gray-900">
+                        Project Creation
+                      </h2>
+                      <span className="text-[12px] font-medium text-gray-500">
+                        {projectCreationCount} project
+                        {projectCreationCount === 1 ? "" : "s"}
+                      </span>
+                    </button>
+
+                    {projectCreationExpanded && (
+                      <div className="mt-3 space-y-4">
+                        {PROJECT_CREATION_STATUSES.map((status) =>
+                          renderStatusSection(status, true),
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )}
+
+                {POST_CREATION_STATUSES.map((status) =>
+                  renderStatusSection(status, false),
+                )}
+              </div>
+            );
+          })()
         )}
       </div>
     </div>

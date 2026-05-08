@@ -1,15 +1,12 @@
-// Mirror of the schedule-page client snap (LOCAL-day semantics, matching how
-// unavailable_days.blocked_date is stored as a DATE column with no timezone).
+// Mirror of the schedule-page client snap (LOCAL-day semantics). The cascade
+// works at day granularity; callers slice the date portion off
+// unavailable_days.blocked_start_datetime before handing the set in here.
 // Used by the server write paths (create / save / update) so the DB can never
 // hold a project_sub_task whose start lands on — or whose [start, end) span
-// crosses — a blocked day.
+// crosses — a blocked day. Sundays are also treated as non-working via
+// isNonWorkingDay, so callers don't have to enumerate every Sunday.
 
-function localDateKey(date: Date) {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+import { isNonWorkingDay } from "./workHours";
 
 export function addHoursToIso(startIso: string | null, hours: number | null) {
   if (!startIso || hours === null) return null;
@@ -19,15 +16,15 @@ export function addHoursToIso(startIso: string | null, hours: number | null) {
 }
 
 // Pushes the start forward until the FULL [start, end) span clears every
-// blocked day. End = start + hours; preserves time-of-day across moves so
-// the user's chosen hour isn't lost.
+// non-working day (Sundays + every entry in the unavailable set). End =
+// start + hours; preserves time-of-day across moves so the user's chosen
+// hour isn't lost.
 export function snapStartPastUnavailableSpan(
   startIso: string | null,
   hours: number | null,
   unavailable: Set<string>,
 ): { iso: string | null; skippedDays: number } {
   if (!startIso) return { iso: startIso, skippedDays: 0 };
-  if (unavailable.size === 0) return { iso: startIso, skippedDays: 0 };
 
   const date = new Date(startIso);
   if (Number.isNaN(date.getTime())) return { iso: startIso, skippedDays: 0 };
@@ -37,7 +34,7 @@ export function snapStartPastUnavailableSpan(
   let skipped = 0;
   for (let guard = 0; guard < 365; guard++) {
     if (safeHours === 0) {
-      if (!unavailable.has(localDateKey(date))) {
+      if (!isNonWorkingDay(date, unavailable)) {
         return { iso: date.toISOString(), skippedDays: skipped };
       }
       date.setDate(date.getDate() + 1);
@@ -51,7 +48,7 @@ export function snapStartPastUnavailableSpan(
 
     let firstBlocked: Date | null = null;
     while (cursor < end) {
-      if (unavailable.has(localDateKey(cursor))) {
+      if (isNonWorkingDay(cursor, unavailable)) {
         firstBlocked = new Date(cursor);
         break;
       }

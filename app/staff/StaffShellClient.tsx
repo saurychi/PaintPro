@@ -3,14 +3,22 @@
 import React from "react"
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type SidebarUser } from "@/components/app-sidebar"
-import { SidebarBadgesProvider } from "@/components/sidebar-badges"
+import { SidebarBadgesProvider, useSidebarBadge } from "@/components/sidebar-badges"
+import { useMessagesUnread } from "@/lib/hooks/useMessagesUnread"
 import { cn } from "@/lib/utils"
+
+function MessagesBadgeFetcher() {
+  const total = useMessagesUnread("/staff/messages")
+  useSidebarBadge("messages", total, "danger")
+  return null
+}
 
 function StaffShell({ children, user }: { children: React.ReactNode; user: SidebarUser }) {
   const { open } = useSidebar()
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
+      <MessagesBadgeFetcher />
       <AppSidebar role="staff" user={user} />
 
       <main

@@ -1,15 +1,28 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
   Loader2,
   Plus,
+  RefreshCw,
   Wrench,
   X,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
+import {
+  getCachedSubTasks,
+  setCachedSubTasks,
+  setCachedStep,
+  setCachedRefData,
+  getCachedRefData,
+  getCachedMainTasks,
+  ensureWizardCacheHydrated,
+  markWizardDirty,
+} from "@/lib/wizardCache";
+import type { CachedSubTask } from "@/lib/wizardCache";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import AddEquipmentModal, {
@@ -46,18 +59,66 @@ type ServiceGroup = {
 const ACCENT = "#00c065";
 const ACCENT_SOFT = "#e6f9ef";
 
+/** Build the local ServiceGroup[] from the wizard cache's flat subtask list. */
+function buildServiceGroupsFromCache(
+  cachedSubTasks: CachedSubTask[],
+  projectId: string,
+): ServiceGroup[] {
+  const groupedMap = new Map<string, ServiceGroup>();
+
+  // Resolve main task names from cache
+  const mainTasks = getCachedMainTasks(projectId) ?? [];
+  const mainTaskNameMap = new Map(mainTasks.map((t) => [t.id, t.name]));
+
+  for (const st of cachedSubTasks) {
+    const groupId = st.mainTaskId;
+
+    if (!groupedMap.has(groupId)) {
+      groupedMap.set(groupId, {
+        id: groupId,
+        title: mainTaskNameMap.get(groupId) ?? "Main Task",
+        status: "pending",
+        children: [],
+      });
+    }
+
+    groupedMap.get(groupId)!.children.push({
+      id: st.id,
+      subTaskId: st.subTaskId,
+      title: st.title,
+      status: "pending",
+      assignedTo: "",
+      equipments: st.equipments.map((eq) => ({
+        id: eq.id,
+        equipmentId: eq.equipmentId ?? null,
+        name: eq.name,
+        quantity: eq.quantity,
+        unitCost: eq.unitCost,
+      })),
+    });
+  }
+
+  return Array.from(groupedMap.values()).map((group) => ({
+    ...group,
+    children: [...group.children].sort((a, b) => a.title.localeCompare(b.title)),
+  }));
+}
+
 export default function EquipmentAssignmentPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
 
+  useEffect(() => {
+    router.prefetch("/admin/job-creation/materials-assignment");
+    router.prefetch("/admin/job-creation/project-schedule");
+  }, [router]);
+
   const [services, setServices] = useState<ServiceGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [isDirty, setIsDirty] = useState(false);
-  const [pendingAction, setPendingAction] = useState<
-    "next" | "back" | "browserBack" | null
-  >(null);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [isNavigatingNext, setIsNavigatingNext] = useState(false);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
   const [equipmentPendingDelete, setEquipmentPendingDelete] = useState<{
@@ -73,12 +134,6 @@ export default function EquipmentAssignmentPage() {
     mainTaskId: string;
     subTaskId: string;
   } | null>(null);
-
-  const allowBrowserBackRef = useRef(false);
-  const suppressLeaveGuardRef = useRef(false);
-  // Tracks which subtasks the user actually modified, so Save only sends
-  // those rows instead of UPDATE'ing every subtask in the project.
-  const dirtySubTaskIdsRef = useRef<Set<string>>(new Set());
 
   const [equipmentCatalog, setEquipmentCatalog] = useState<
     EquipmentCatalogItem[]
@@ -97,97 +152,161 @@ export default function EquipmentAssignmentPage() {
     subTaskTitle: "",
   });
 
-  useEffect(() => {
-    async function loadProjectSubTaskEquipment() {
-      if (!projectId) {
-        toast.error("Missing project ID.");
-        setLoading(false);
-        return;
+  async function loadProjectSubTaskEquipment(forceRefresh = false) {
+    if (!projectId) {
+      toast.error("Missing project ID.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      if (forceRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
       }
 
-      try {
-        setLoading(true);
+      await ensureWizardCacheHydrated(projectId);
 
-        const response = await fetch(
-          `/api/planning/getProjectSubTaskEquipment?projectId=${projectId}`,
-        );
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data?.error || "Failed to load project subtask equipment.",
-          );
+      // --- Cache-first (skip if forceRefresh): derive equipment from cached subtasks ---
+      if (!forceRefresh) {
+        const cachedSubTasks = getCachedSubTasks(projectId);
+        if (cachedSubTasks && cachedSubTasks.length > 0) {
+          const groupedServices = buildServiceGroupsFromCache(cachedSubTasks, projectId);
+          setServices(groupedServices);
+          setExpanded(new Set(groupedServices.map((group) => group.id)));
+          setLoading(false);
+          return;
         }
+      }
 
-        const rows = Array.isArray(data?.projectSubTaskEquipment)
-          ? data.projectSubTaskEquipment
-          : [];
+      // --- Fetch from API and cache the result ---
+      const response = await fetch(
+        `/api/planning/getProjectSubTaskEquipment?projectId=${projectId}`,
+      );
+      const data = await response.json();
 
-        const groupedMap = new Map<string, ServiceGroup>();
+      if (!response.ok) {
+        throw new Error(
+          data?.error || "Failed to load project subtask equipment.",
+        );
+      }
 
-        for (const row of rows) {
-          const mainTask = row?.project_task?.main_task;
-          const subTask = row?.sub_task;
+      const rows = Array.isArray(data?.projectSubTaskEquipment)
+        ? data.projectSubTaskEquipment
+        : [];
 
-          if (!mainTask || !subTask) continue;
+      const groupedMap = new Map<string, ServiceGroup>();
 
-          const groupId = mainTask.main_task_id;
+      for (const row of rows) {
+        const mainTask = row?.project_task?.main_task;
+        const subTask = row?.sub_task;
 
-          if (!groupedMap.has(groupId)) {
-            groupedMap.set(groupId, {
-              id: groupId,
-              title: mainTask.name,
-              status: "pending",
-              children: [],
-            });
-          }
+        if (!mainTask || !subTask) continue;
 
-          groupedMap.get(groupId)!.children.push({
-            id: row.project_sub_task_id,
-            subTaskId: row.sub_task_id,
-            title: subTask.description,
-            status:
-              row.status === "done" ||
-              row.status === "active" ||
-              row.status === "pending"
-                ? row.status
-                : "pending",
-            assignedTo: row.assigned_user?.username ?? "",
-            equipments: Array.isArray(row.equipments)
-              ? row.equipments.map((item: any) => ({
-                  id: item.id,
-                  equipmentId: item.equipmentId ?? null,
-                  name: item.name,
-                  quantity: Number(item.quantity ?? 1),
-                  unitCost: Number(item.unitCost ?? 0),
-                }))
-              : [],
+        const groupId = mainTask.main_task_id;
+
+        if (!groupedMap.has(groupId)) {
+          groupedMap.set(groupId, {
+            id: groupId,
+            title: mainTask.name,
+            status: "pending",
+            children: [],
           });
         }
 
-        const groupedServices = Array.from(groupedMap.values()).map((group) => ({
-          ...group,
-          children: [...group.children].sort((a, b) =>
-            a.title.localeCompare(b.title),
-          ),
-        }));
-
-        setServices(groupedServices);
-        setExpanded(new Set(groupedServices.map((group) => group.id)));
-      } catch (error: any) {
-        toast.error(
-          error?.message || "Failed to load project subtask equipment.",
-        );
-      } finally {
-        setLoading(false);
+        groupedMap.get(groupId)!.children.push({
+          id: row.project_sub_task_id,
+          subTaskId: row.sub_task_id,
+          title: subTask.description,
+          status:
+            row.status === "done" ||
+            row.status === "active" ||
+            row.status === "pending"
+              ? row.status
+              : "pending",
+          assignedTo: row.assigned_user?.username ?? "",
+          equipments: Array.isArray(row.equipments)
+            ? row.equipments.map((item: any) => ({
+                id: item.id,
+                equipmentId: item.equipmentId ?? null,
+                name: item.name,
+                quantity: Number(item.quantity ?? 1),
+                unitCost: Number(item.unitCost ?? 0),
+              }))
+            : [],
+        });
       }
-    }
 
+      const groupedServices = Array.from(groupedMap.values()).map((group) => ({
+        ...group,
+        children: [...group.children].sort((a, b) =>
+          a.title.localeCompare(b.title),
+        ),
+      }));
+
+      // Cache the fetched subtasks so subsequent visits are instant
+      const subTasksForCache: CachedSubTask[] = rows
+        .filter((row: any) => row?.project_task?.main_task && row?.sub_task)
+        .map((row: any) => ({
+          id: row.project_sub_task_id,
+          subTaskId: row.sub_task_id,
+          mainTaskId: row.project_task.main_task.main_task_id,
+          projectTaskId: row.project_task_id,
+          title: row.sub_task.description,
+          sortOrder: row.sort_order ?? 0,
+          estimatedHours: row.estimated_hours ?? null,
+          scheduledStartDatetime: row.scheduled_start_datetime ?? null,
+          scheduledEndDatetime: row.scheduled_end_datetime ?? null,
+          assignedEmployeeIds: row.assigned_user ? [row.assigned_user.id] : [],
+          equipments: Array.isArray(row.equipments)
+            ? row.equipments.map((item: any) => ({
+                id: item.id,
+                equipmentId: item.equipmentId ?? null,
+                name: item.name,
+                quantity: Number(item.quantity ?? 1),
+                unitCost: Number(item.unitCost ?? 0),
+                notes: item.notes ?? null,
+              }))
+            : [],
+        }));
+      setCachedSubTasks(projectId, subTasksForCache);
+
+      setServices(groupedServices);
+      setExpanded(new Set(groupedServices.map((group) => group.id)));
+
+    } catch (error: any) {
+      toast.error(
+        error?.message || "Failed to load project subtask equipment.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
     loadProjectSubTaskEquipment();
   }, [projectId]);
 
   useEffect(() => {
     async function loadEquipmentCatalog() {
+      if (!projectId) return;
+
+      // --- Cache-first: check refData for equipment catalog ---
+      const cachedRef = getCachedRefData(projectId);
+      if (cachedRef?.equipmentCatalog && cachedRef.equipmentCatalog.length > 0) {
+        setEquipmentCatalog(
+          cachedRef.equipmentCatalog.map((item) => ({
+            id: item.equipment_id ?? item.id ?? "",
+            name: item.name,
+            unitCost: item.unit_cost ?? item.unitCost ?? 0,
+          })),
+        );
+        return;
+      }
+
+      // --- Cache miss: fetch from API and cache ---
       try {
         const response = await fetch("/api/planning/getEquipmentCatalog");
         const data = await response.json();
@@ -196,7 +315,18 @@ export default function EquipmentAssignmentPage() {
           throw new Error(data?.error || "Failed to load equipment catalog.");
         }
 
-        setEquipmentCatalog(Array.isArray(data?.equipment) ? data.equipment : []);
+        const items = Array.isArray(data?.equipment) ? data.equipment : [];
+        setEquipmentCatalog(items);
+
+        // Cache the raw catalog for future visits
+        setCachedRefData(projectId, {
+          equipmentCatalog: items.map((item: EquipmentCatalogItem) => ({
+            equipment_id: item.id,
+            name: item.name,
+            unit_cost: item.unitCost ?? 0,
+            category: null,
+          })),
+        });
       } catch (error: any) {
         toast.error(error?.message || "Failed to load equipment catalog.");
         setEquipmentCatalog([]);
@@ -204,40 +334,7 @@ export default function EquipmentAssignmentPage() {
     }
 
     loadEquipmentCatalog();
-  }, []);
-
-  useEffect(() => {
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (suppressLeaveGuardRef.current) return;
-      if (!isDirty) return;
-
-      event.preventDefault();
-      event.returnValue = "";
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
-
-  useEffect(() => {
-    window.history.pushState(null, "", window.location.href);
-
-    function handlePopState() {
-      if (allowBrowserBackRef.current) return;
-
-      if (!isDirty) {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-
-      window.history.pushState(null, "", window.location.href);
-      requestLeave("browserBack");
-    }
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [isDirty]);
+  }, [projectId]);
 
   function toggleGroup(groupId: string) {
     setExpanded((prev) => {
@@ -248,137 +345,47 @@ export default function EquipmentAssignmentPage() {
     });
   }
 
-  function clearLeaveButtonLoading() {
-    setIsNavigatingNext(false);
-    setIsNavigatingBack(false);
-  }
-
-  function setLeaveButtonLoading(action: "next" | "back" | "browserBack") {
-    setIsNavigatingNext(action === "next");
-    setIsNavigatingBack(action === "back");
-  }
-
-  function requestLeave(action: "next" | "back" | "browserBack") {
-    if (!isDirty) {
-      if (action === "next") {
-        setIsNavigatingNext(true);
-        void handleConfirmSave(true, "next");
-        return;
-      }
-
-      if (action === "back") {
-        setIsNavigatingBack(true);
-        void (async () => {
-          const ok = await updateProjectStatus("materials_pending");
-          if (!ok) {
-            setIsNavigatingBack(false);
-            return;
+  function saveEquipmentToCache() {
+    const cachedSubTasks = getCachedSubTasks(projectId);
+    if (cachedSubTasks) {
+      const updatedSubTasks = cachedSubTasks.map((st) => {
+        for (const group of services) {
+          const step = group.children.find((child) => child.id === st.id);
+          if (step) {
+            return {
+              ...st,
+              equipments: step.equipments.map((eq) => ({
+                id: eq.id,
+                equipmentId: eq.equipmentId ?? null,
+                name: eq.name,
+                quantity: eq.quantity,
+                unitCost: eq.unitCost ?? 0,
+                notes: null,
+              })),
+            };
           }
-          suppressLeaveGuardRef.current = true;
-          allowBrowserBackRef.current = true;
-          window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
-        })();
-        return;
-      }
-
-      if (action === "browserBack") {
-        allowBrowserBackRef.current = true;
-        window.history.back();
-        return;
-      }
-
-      return;
+        }
+        return st;
+      });
+      setCachedSubTasks(projectId, updatedSubTasks);
     }
-
-    clearLeaveButtonLoading();
-    setPendingAction(action);
-    setShowSaveConfirm(true);
+    setIsDirty(false);
   }
 
   function handleNext() {
-    requestLeave("next");
+    setIsNavigatingNext(true);
+    saveEquipmentToCache();
+    setCachedStep(projectId, "schedule_pending");
+    setOptimisticProjectStatus(projectId, "schedule_pending");
+    router.push(`/admin/job-creation/project-schedule?projectId=${projectId}`);
   }
 
   function handleGoBack() {
-    requestLeave("back");
-  }
-
-  async function handleConfirmSave(shouldSave: boolean, overrideAction?: "next" | "back" | "browserBack") {
-    const action = overrideAction ?? pendingAction;
-    if (!overrideAction) {
-      setShowSaveConfirm(false);
-      setPendingAction(null);
-    }
-
-    if (!action) return;
-
-    setLeaveButtonLoading(action);
-
-    if (shouldSave) {
-      const dirtyIds = dirtySubTaskIdsRef.current;
-      const projectSubTasks = services.flatMap((group) =>
-        group.children
-          .filter((step) => dirtyIds.has(step.id))
-          .map((step) => ({
-            project_sub_task_id: step.id,
-            equipments: step.equipments.map((item) => ({
-              id: item.id,
-              equipmentId: item.equipmentId ?? null,
-              name: item.name,
-              quantity: Number(item.quantity ?? 1),
-            })),
-          })),
-      );
-
-      const nextStatus =
-        action === "back" ? "materials_pending" : "schedule_pending";
-
-      // Only dirty subtasks + the status flip are sent. The API runs both in
-      // a single Promise.all server-side, so this is one round-trip.
-      const saveResponse = await fetch(
-        "/api/planning/saveProjectSubTaskEquipment",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, nextStatus, projectSubTasks }),
-        },
-      );
-
-      const saveData = await saveResponse.json().catch(() => ({}));
-
-      if (!saveResponse.ok) {
-        clearLeaveButtonLoading();
-        toast.error(saveData?.error || "Failed to save equipment assignment.");
-        return;
-      }
-
-      dirtySubTaskIdsRef.current = new Set();
-      setIsDirty(false);
-    }
-
-    suppressLeaveGuardRef.current = true;
-    allowBrowserBackRef.current = true;
-
-    // Match main-task-assignment / sub-task-assignment: full-page nav via
-    // window.location.href. Browser shows its native loading state instead of
-    // an in-app spinner that sits while Next.js JIT-compiles the destination
-    // (which is what was making router.push feel like minutes of waiting).
-    if (action === "next") {
-      window.location.href = `/admin/job-creation/project-schedule?projectId=${projectId}`;
-      return;
-    }
-
-    if (action === "back") {
-      window.location.href = `/admin/job-creation/materials-assignment?projectId=${projectId}`;
-      return;
-    }
-
-    clearLeaveButtonLoading();
-
-    if (action === "browserBack") {
-      window.history.back();
-      return;
-    }
+    setIsNavigatingBack(true);
+    saveEquipmentToCache();
+    setCachedStep(projectId, "materials_pending");
+    setOptimisticProjectStatus(projectId, "materials_pending");
+    router.push(`/admin/job-creation/materials-assignment?projectId=${projectId}`);
   }
 
   function openEquipmentModal(mainTaskId: string, subTaskId: string) {
@@ -445,8 +452,7 @@ export default function EquipmentAssignmentPage() {
       }),
     );
 
-    dirtySubTaskIdsRef.current.add(equipmentModalState.subTaskId);
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function removeSelectedEquipment(keys: Set<string>) {
@@ -465,11 +471,6 @@ export default function EquipmentAssignmentPage() {
       })),
     );
 
-    for (const key of keys) {
-      const parts = key.split("::");
-      if (parts.length >= 2) dirtySubTaskIdsRef.current.add(parts[1]);
-    }
-
     // Drop only the keys we just deleted from the global selection — leave
     // selections in other sub tasks intact so each sub task keeps its own
     // bulk-delete scope.
@@ -478,7 +479,7 @@ export default function EquipmentAssignmentPage() {
       for (const key of keys) next.delete(key);
       return next;
     });
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function toggleEquipmentDeleteSelection(
@@ -547,8 +548,7 @@ export default function EquipmentAssignmentPage() {
       next.delete(`${mainTaskId}::${subTaskId}::${equipmentId}`);
       return next;
     });
-    dirtySubTaskIdsRef.current.add(subTaskId);
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
   function removeAssignedEquipment(
@@ -576,23 +576,9 @@ export default function EquipmentAssignmentPage() {
       }),
     );
 
-    dirtySubTaskIdsRef.current.add(subTaskId);
-    setIsDirty(true);
+    setIsDirty(true); markWizardDirty(projectId);
   }
 
-  async function updateProjectStatus(status: string) {
-    const response = await fetch("/api/planning/updateProjectStatus", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, status }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      toast.error(data?.error || "Failed to update project status.");
-      return false;
-    }
-    return true;
-  }
 
   const totalAssignedEquipment = useMemo(() => {
     return services.reduce(
@@ -661,8 +647,19 @@ export default function EquipmentAssignmentPage() {
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
-                  Equipment Setup
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => loadProjectSubTaskEquipment(true)}
+                    disabled={refreshing}
+                    title="Refresh from database"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  </button>
+                  <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    Equipment Setup
+                  </div>
                 </div>
               </div>
             </div>
@@ -942,52 +939,6 @@ export default function EquipmentAssignmentPage() {
           </button>
         </div>
       </div>
-
-      {showSaveConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
-            <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Save changes?
-              </h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Do you want to save your equipment changes before leaving this page?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSaveConfirm(false);
-                  setPendingAction(null);
-                  clearLeaveButtonLoading();
-                }}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-700 transform transition-all duration-150 hover:bg-slate-50 hover:opacity-80 hover:scale-[0.985] active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Don't Save
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmSave(true)}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12px] font-semibold text-white transform transition-all duration-150 hover:opacity-85 hover:scale-[0.985] active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:scale-100"
-                style={{ backgroundColor: ACCENT }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <AddEquipmentModal
         open={equipmentModalState.open}
