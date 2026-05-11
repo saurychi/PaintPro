@@ -1,7 +1,8 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { Menu } from "lucide-react"
 import {
   SidebarProvider,
@@ -126,6 +127,85 @@ function ClientPendingDocumentBadge() {
   return null
 }
 
+// Background watcher that auto-signs out the client the moment the project
+// transitions to a terminal state — "completed" (normal end-of-work) or
+// "cancelled" with cancellation_phase "done" (cancel wrap-up finished).
+// Without this, a client sitting on any page wouldn't know the project
+// closed until they reloaded, at which point the layout server check
+// bounces them anyway. Polls the existing overview endpoint every 15s,
+// piggybacking on the same cadence the pending-docs badge uses.
+function ClientProjectTerminalWatcher() {
+  const { projectId } = useClientProject()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!projectId) return
+
+    let cancelled = false
+    let signedOut = false
+
+    async function signOutIfTerminal() {
+      if (cancelled || signedOut) return
+      try {
+        const response = await fetch(
+          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
+            projectId!,
+          )}`,
+          { cache: "no-store" },
+        )
+        if (!response.ok) return
+        const data = await response.json()
+        const status = String(data?.project?.status ?? "")
+          .trim()
+          .toLowerCase()
+        const phase = String(data?.project?.cancellation_phase ?? "")
+          .trim()
+          .toLowerCase()
+        const isTerminal =
+          status === "completed" ||
+          (status === "cancelled" && phase === "done")
+        if (!isTerminal) return
+        if (cancelled || signedOut) return
+        signedOut = true
+
+        // Drop the project-cookie server-side so a hard refresh doesn't
+        // bounce them right back through the same layout check.
+        try {
+          await fetch("/api/auth/client-access", { method: "DELETE" })
+        } catch {
+          // Best-effort. Even if the cookie clear fails, the layout's
+          // own terminal-status gate will redirect on next load.
+        }
+
+        toast.info("Project has been closed out", {
+          description: "You've been signed out. Thanks for working with us.",
+        })
+        router.replace("/auth/signin")
+      } catch {
+        // Network blip — try again on the next tick.
+      }
+    }
+
+    void signOutIfTerminal()
+    const interval = window.setInterval(() => {
+      void signOutIfTerminal()
+    }, 15_000)
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") void signOutIfTerminal()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
+  }, [projectId, router])
+
+  return null
+}
+
 function ClientShell({
   children,
   role,
@@ -142,6 +222,7 @@ function ClientShell({
       <AppSidebar role={role} user={user} />
       <ClientPendingDocumentBadge />
       <ClientMessagesBadge />
+      <ClientProjectTerminalWatcher />
 
       {/* Mobile-only top bar with the hamburger trigger. The sidebar primitive
           renders the desktop sidebar `hidden md:block`, so on phones there's
