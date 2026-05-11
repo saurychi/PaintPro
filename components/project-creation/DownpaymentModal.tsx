@@ -1,12 +1,49 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { X, Loader2, Send, Check } from "lucide-react";
 import { toast } from "sonner";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
 const BORDER = "border border-gray-200";
+
+function formatAud(amount: number) {
+  return `$AUD ${amount.toLocaleString("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+// Parse a comma-formatted currency string ("1,500,000.50") into a
+// plain number. Empty / invalid input → 0 so downstream math stays
+// safe.
+function parseCurrencyInput(value: string): number {
+  if (!value) return 0;
+  const cleaned = value.replace(/,/g, "");
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Re-format whatever the user typed into a thousand-separated string.
+// Commas anywhere in the input are stripped first; digits and a single
+// decimal are kept; the integer half gets a comma every three digits.
+// Returns the cleaned string verbatim, so:
+//   "1500000"     -> "1,500,000"
+//   "1,500,000"   -> "1,500,000"
+//   "1500.55"     -> "1,500.55"
+//   "abc"         -> ""
+function formatCurrencyInput(raw: string): string {
+  if (!raw) return "";
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+  const firstDot = cleaned.indexOf(".");
+  const intPart = firstDot === -1 ? cleaned : cleaned.slice(0, firstDot);
+  const decPartRaw =
+    firstDot === -1 ? "" : cleaned.slice(firstDot + 1).replace(/\./g, "");
+  const intWithCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return firstDot === -1 ? intWithCommas : `${intWithCommas}.${decPartRaw}`;
+}
 
 type Props = {
   open: boolean;
@@ -20,49 +57,74 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
   const [estimatedBudget, setEstimatedBudget] = useState<number>(0);
   const [estimatedCost, setEstimatedCost] = useState<number>(0);
   const [percentage, setPercentage] = useState<string>("50");
-  const [paidAmount, setPaidAmount] = useState<string>("");
+  // savedDownpayment = the cumulative amount already recorded in the DB
+  // (read-only display field). inputPayment = the NEW instalment the
+  // admin is adding right now; it gets added on top of savedDownpayment
+  // when the request fires, then cleared so the field is ready for the
+  // next instalment.
+  const [savedDownpayment, setSavedDownpayment] = useState<number>(0);
+  const [inputPayment, setInputPayment] = useState<string>("");
   const [confirming, setConfirming] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [notifying, setNotifying] = useState(false);
   const [notified, setNotified] = useState(false);
+
+  const fetchBudget = useCallback(async () => {
+    if (!projectId) return;
+    setLoadingBudget(true);
+    try {
+      const response = await fetch(
+        `/api/planning/getProjectBudget?projectId=${encodeURIComponent(projectId)}`,
+      );
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data?.error || "Failed to fetch budget.");
+      setEstimatedBudget(Number(data.estimatedBudget) || 0);
+      setEstimatedCost(Number(data.estimatedCost) || 0);
+      setSavedDownpayment(Number(data.downpayment) || 0);
+    } catch {
+      setEstimatedBudget(0);
+      setSavedDownpayment(0);
+    } finally {
+      setLoadingBudget(false);
+    }
+  }, [projectId]);
 
   useEffect(() => {
     if (!open || !projectId) return;
 
-    setPaidAmount("");
+    setInputPayment("");
     setPercentage("50");
     setEstimatedCost(0);
     setEstimatedBudget(0);
+    setSavedDownpayment(0);
     setNotified(false);
 
-    async function fetchBudget() {
-      setLoadingBudget(true);
-      try {
-        const response = await fetch(
-          `/api/planning/getProjectBudget?projectId=${encodeURIComponent(projectId!)}`,
-        );
-        const data = await response.json();
-
-        if (!response.ok) throw new Error(data?.error || "Failed to fetch budget.");
-        setEstimatedBudget(Number(data.estimatedBudget) || 0);
-        setEstimatedCost(Number(data.estimatedCost) || 0);
-        if (data.downpayment) {
-          setPaidAmount(String(data.downpayment));
-        }
-      } catch {
-        setEstimatedBudget(0);
-      } finally {
-        setLoadingBudget(false);
-      }
-    }
-
     fetchBudget();
-  }, [open, projectId]);
+  }, [open, projectId, fetchBudget]);
 
   const pct = Math.max(0, Math.min(100, Number(percentage) || 0));
   const calculatedDownpayment = (estimatedBudget * pct) / 100;
-  const paid = parseFloat(paidAmount) || 0;
-  const neededDownpayment = Math.max(0, calculatedDownpayment - paid);
-  const canConfirm = paid > 0 && paid >= calculatedDownpayment;
+  const inputAmount = parseCurrencyInput(inputPayment);
+  // The cumulative we'd land on if the admin clicked Add/Confirm right
+  // now. Drives the gating below — the API expects the full cumulative
+  // total, not the delta.
+  const prospectiveTotal = savedDownpayment + inputAmount;
+  const neededAfterSaved = Math.max(0, calculatedDownpayment - savedDownpayment);
+  const neededAfterInput = Math.max(
+    0,
+    calculatedDownpayment - prospectiveTotal,
+  );
+  const meetsCalculated =
+    prospectiveTotal > 0 && prospectiveTotal >= calculatedDownpayment;
+  // Add is for partial instalments — only fires when the admin
+  // actually entered a positive amount and the running total is still
+  // short of the calculated downpayment.
+  const canAdd = inputAmount > 0 && !meetsCalculated;
+  // Confirm fires once the prospective total reaches the threshold —
+  // either via a fresh input or because saved already covers it.
+  const canConfirm = meetsCalculated;
+  const isBusy = confirming || adding;
 
   async function handleNotifyClient() {
     if (!projectId || notifying) return;
@@ -76,10 +138,12 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
           projectId,
           // Send the figures the manager is currently looking at so the
           // reminder message tells the client exactly how much is needed,
-          // rather than a generic "downpayment due".
+          // rather than a generic "downpayment due". We send the
+          // already-recorded total + the amount still needed after that
+          // — independent of whatever the admin happens to be typing.
           calculatedDownpayment,
-          paidAmount: paid,
-          neededDownpayment,
+          paidAmount: savedDownpayment,
+          neededDownpayment: neededAfterSaved,
           percentage: pct,
         }),
       });
@@ -110,8 +174,52 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
     }
   }
 
+  async function handleAdd() {
+    if (!projectId || isBusy || !canAdd) return;
+
+    // Snapshot the values BEFORE the request so the toast / clear
+    // logic still has the correct numbers if state churns.
+    const newTotal = prospectiveTotal;
+    const addedThisRound = inputAmount;
+
+    try {
+      setAdding(true);
+
+      const response = await fetch("/api/planning/manageDownpayment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          downpayment: newTotal,
+          finalize: false,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to save partial payment.");
+      }
+
+      toast.success("Partial payment recorded.", {
+        description: `${formatAud(addedThisRound)} added — ${formatAud(newTotal)} of ${formatAud(calculatedDownpayment)} now collected.`,
+      });
+
+      // Clear the input field so the admin can immediately type the
+      // next instalment, then refetch so the read-only Paid
+      // Downpayment field reflects the freshly-saved total.
+      setInputPayment("");
+      await fetchBudget();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save partial payment.",
+      );
+    } finally {
+      setAdding(false);
+    }
+  }
+
   async function handleConfirm() {
-    if (!projectId || confirming) return;
+    if (!projectId || isBusy || !canConfirm) return;
 
     try {
       setConfirming(true);
@@ -119,7 +227,11 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
       const response = await fetch("/api/planning/manageDownpayment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, downpayment: paid }),
+        body: JSON.stringify({
+          projectId,
+          downpayment: prospectiveTotal,
+          finalize: true,
+        }),
       });
 
       if (!response.ok) {
@@ -139,15 +251,25 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+      <div className="w-full max-w-md overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
+        {/* Green accent strip — matches the dashboard CurrentJob card so the
+            two cards read as part of the same workflow lane. */}
+        <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
+        {/* Header — also gets a faint green wash that fades into the body so
+            the accent strip doesn't sit on a stark white background. */}
+        <div
+          className="flex items-center justify-between border-b border-gray-200 px-5 py-4"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(0,192,101,0.08) 0%, rgba(0,192,101,0) 100%)",
+          }}
+        >
           <h3 className="text-base font-semibold text-gray-900">Down Payment</h3>
           <button
             type="button"
             onClick={onClose}
-            disabled={confirming}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50">
+            disabled={isBusy}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -165,7 +287,7 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                 <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
                   Total Cost
                 </label>
-                <div className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}>
+                <div className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}>
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
                   </span>
@@ -184,7 +306,7 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                   Calculated Downpayment
                 </label>
                 <div className="flex gap-2">
-                  <div className={`flex h-10 flex-1 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}>
+                  <div className={`flex h-10 flex-1 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}>
                     <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                       $AUD
                     </span>
@@ -195,7 +317,7 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                       })}
                     </span>
                   </div>
-                  <div className={`flex h-10 w-24 items-center overflow-hidden rounded-lg border ${BORDER} bg-white`}>
+                  <div className={`flex h-10 w-24 items-center overflow-hidden rounded-md border ${BORDER} bg-white`}>
                     <input
                       type="number"
                       min={0}
@@ -209,17 +331,19 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                 </div>
               </div>
 
-              {/* Needed Downpayment */}
+              {/* Paid Downpayment (read-only) — what's already in the
+                  database. Updates after every Add so the running
+                  tally is always visible. */}
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
-                  Needed Downpayment
+                  Paid Downpayment
                 </label>
-                <div className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}>
+                <div className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}>
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
                   </span>
                   <span className="flex-1 px-3 text-sm text-gray-700">
-                    {neededDownpayment.toLocaleString("en-AU", {
+                    {savedDownpayment.toLocaleString("en-AU", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -227,33 +351,68 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                 </div>
               </div>
 
-              {/* Paid Downpayment */}
+              {/* Needed Downpayment (read-only) — what's still missing
+                  to hit the calculated threshold, before counting the
+                  current input. */}
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
-                  Paid Downpayment
+                  Needed Downpayment
+                </label>
+                <div className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}>
+                  <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
+                    $AUD
+                  </span>
+                  <span className="flex-1 px-3 text-sm text-gray-700">
+                    {neededAfterSaved.toLocaleString("en-AU", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Input Payment — the only editable field. Admin types
+                  the new instalment they want to add; we sum it with
+                  Paid Downpayment when sending to the API and clear
+                  this field once the request lands. */}
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
+                  Input Payment
                 </label>
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-white focus-within:ring-2`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-white focus-within:ring-2`}
                   style={{ ["--tw-ring-color" as any]: ACCENT }}>
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
                   </span>
                   <input
-                    type="number"
-                    min={0}
-                    value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
-                    placeholder="Enter Payment"
+                    type="text"
+                    inputMode="decimal"
+                    value={inputPayment}
+                    onChange={(e) =>
+                      setInputPayment(formatCurrencyInput(e.target.value))
+                    }
+                    placeholder="Enter new instalment"
                     className="flex-1 bg-transparent px-3 text-sm text-gray-900 outline-none placeholder:text-gray-400"
                   />
                 </div>
-                {paid > 0 && paid < calculatedDownpayment ? (
-                  <p className="mt-1 text-[11px] text-red-500">
-                    Payment must be at least $AUD{" "}
-                    {calculatedDownpayment.toLocaleString("en-AU", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                {inputAmount > 0 && !meetsCalculated ? (
+                  <p className="mt-1 text-[11px] text-amber-600">
+                    Adding this brings the total to{" "}
+                    {formatAud(prospectiveTotal)} —{" "}
+                    {formatAud(neededAfterInput)} still needed to reach{" "}
+                    {formatAud(calculatedDownpayment)}. Click{" "}
+                    <strong>Add</strong> to record this instalment, or{" "}
+                    <strong>Notify Client</strong> to remind them of the
+                    remainder.
+                  </p>
+                ) : null}
+                {inputAmount > 0 && meetsCalculated ? (
+                  <p className="mt-1 text-[11px] text-emerald-600">
+                    Adding this brings the total to{" "}
+                    {formatAud(prospectiveTotal)} — covers the calculated
+                    downpayment. Click <strong>Confirm</strong> to lock
+                    it in.
                   </p>
                 ) : null}
               </div>
@@ -266,8 +425,8 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
           <button
             type="button"
             onClick={handleNotifyClient}
-            disabled={notifying || notified || confirming || loadingBudget || !projectId}
-            className="mr-auto inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={notifying || notified || isBusy || loadingBudget || !projectId}
+            className="mr-auto inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {notifying ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -282,26 +441,45 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
           <button
             type="button"
             onClick={onClose}
-            disabled={confirming}
-            className="rounded-lg border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50">
+            disabled={isBusy}
+            className="rounded-md border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50">
             Go Back
           </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={!canConfirm || confirming || loadingBudget}
-            className="inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ backgroundColor: ACCENT }}
-            onMouseEnter={(e) => {
-              if (canConfirm && !confirming)
-                e.currentTarget.style.backgroundColor = ACCENT_HOVER;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = ACCENT;
-            }}>
-            {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {confirming ? "Confirming..." : "Confirm"}
-          </button>
+          {canConfirm ? (
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={isBusy || loadingBudget}
+              className="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ backgroundColor: ACCENT }}
+              onMouseEnter={(e) => {
+                if (!isBusy)
+                  e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = ACCENT;
+              }}>
+              {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {confirming ? "Confirming..." : "Confirm"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={!canAdd || isBusy || loadingBudget}
+              className="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ backgroundColor: ACCENT }}
+              onMouseEnter={(e) => {
+                if (canAdd && !isBusy)
+                  e.currentTarget.style.backgroundColor = ACCENT_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = ACCENT;
+              }}>
+              {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {adding ? "Adding..." : "Add"}
+            </button>
+          )}
         </div>
       </div>
     </div>

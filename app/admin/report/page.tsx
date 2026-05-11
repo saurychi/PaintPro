@@ -748,14 +748,30 @@ export default function AdminReportPage() {
           <h1 className="ml-5 text-[20px] font-semibold leading-tight tracking-tight text-gray-950 dark:text-slate-100">
             Report
           </h1>
-          <p className="ml-5 mt-1 text-xs leading-5 text-gray-500 dark:text-slate-300">
-            What happened in the selected period — completed jobs, cash
-            waiting on payment, and where projects sit in the pipeline.
-          </p>
         </div>
 
         <div className={toolbarShell}>
           <div className="flex flex-wrap items-center gap-2">
+            {/* Quick-jump nav buttons — same destinations as the
+                Report Actions cards on the right, surfaced in the
+                header toolbar for one-click access. Green hover tint
+                + lift/shadow on hover, scale-down on press. */}
+            <Link
+              href="/admin/report/report-list"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#00a054] hover:shadow-md active:translate-y-0 active:scale-[0.97] dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300"
+            >
+              <FileText className="h-4 w-4" />
+              Project Report List
+            </Link>
+
+            <Link
+              href="/admin/report/report-overview"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#00a054] hover:shadow-md active:translate-y-0 active:scale-[0.97] dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Dashboard Charts
+            </Link>
+
             <div className="relative">
               <select
                 value={view}
@@ -1140,8 +1156,14 @@ export default function AdminReportPage() {
               </div>
             </section>
 
+            {/* Report Actions sits last in the aside; `xl:flex-1`
+                lets it absorb whatever vertical space is left over so
+                the column bottom-aligns with the taller left column.
+                Content stays at the top of the card; only the border
+                extends to fill. `shrink-0` stays in place for smaller
+                breakpoints where each section stacks naturally. */}
             <section
-              className={`flex shrink-0 flex-col ${cardShell} ${cardAccent}`}>
+              className={`flex shrink-0 flex-col ${cardShell} ${cardAccent} xl:shrink xl:flex-1`}>
               <div className={sectionHeader}>
                 <div className="text-xs font-semibold text-gray-950 dark:text-slate-100">
                   Report Actions

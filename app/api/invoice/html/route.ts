@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  CostEstimationLoadError,
+  loadProjectCostEstimation,
+} from "@/lib/planning/loadProjectCostEstimation";
 
 export const runtime = "nodejs";
 
@@ -144,7 +148,7 @@ async function getAdminSignatureInfo(projectId: string) {
   }
 
   const { data: fileData, error: downloadError } = await supabaseAdmin.storage
-    .from("signatures")
+    .from("project-signatures")
     .download(signaturePath);
 
   if (downloadError || !fileData) {
@@ -225,7 +229,7 @@ async function getClientInvoiceSignatureInfo(projectId: string) {
   }
 
   const { data: fileData, error: downloadError } = await supabaseAdmin.storage
-    .from("signatures")
+    .from("project-signatures")
     .download(signaturePath);
 
   if (downloadError || !fileData) {
@@ -246,44 +250,69 @@ async function getClientInvoiceSignatureInfo(projectId: string) {
   };
 }
 
-export async function GET(request: Request) {
+/**
+ * Render-only helper. Same role as renderCancellationAgreementHtml —
+ * lets the signature endpoint pass the freshly-drawn client signature
+ * inline so the raw image never lands in storage.
+ */
+export async function renderInvoiceHtml(args: {
+  projectId: string;
+  /** Origin URL the cost-estimation fetch should target. The GET handler
+   *  derives this from the incoming request; the signature endpoint
+   *  passes its own origin. */
+  origin: string;
+  markupRate?: string;
+  /** Inline client signature data URL — bypasses storage lookup. */
+  clientSignatureDataUrl?: string;
+  clientSignedName?: string;
+}): Promise<string> {
+  const {
+    projectId,
+    origin,
+    markupRate = "30",
+    clientSignatureDataUrl,
+    clientSignedName,
+  } = args;
+
+  if (!projectId) {
+    throw new Error("Missing projectId.");
+  }
+
+  // Direct call into the loader to avoid a self-HTTP fetch back to
+  // /api/planning/getProjectCostEstimation. Same code path the GET
+  // endpoint runs, just without the network round-trip and JSON
+  // ser/des overhead.
+  let data: CostEstimationResponse;
   try {
-    const url = new URL(request.url);
-    const projectId = url.searchParams.get("projectId")?.trim() || "";
-    const markupRate = url.searchParams.get("markupRate")?.trim() || "30";
-
-    if (!projectId) {
-      return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
-    }
-
-    const origin = url.origin;
-
-    const estimationResponse = await fetch(
-      `${origin}/api/planning/getProjectCostEstimation?projectId=${encodeURIComponent(
-        projectId,
-      )}&markupRate=${encodeURIComponent(markupRate)}`,
-      { cache: "no-store" },
-    );
-
-    const data = (await estimationResponse.json()) as CostEstimationResponse;
-
-    if (!estimationResponse.ok) {
-      return NextResponse.json(
-        {
-          error: data?.error || "Failed to load invoice data.",
-          details: data?.details || null,
-        },
-        { status: 500 },
+    data = (await loadProjectCostEstimation(
+      projectId,
+      markupRate,
+    )) as CostEstimationResponse;
+  } catch (loaderError) {
+    if (loaderError instanceof CostEstimationLoadError) {
+      throw new Error(
+        [loaderError.message, loaderError.details]
+          .filter(Boolean)
+          .join(": "),
       );
     }
+    throw loaderError;
+  }
 
-    const project = data.project;
-    const client = data.client;
-    const mainTasks = Array.isArray(data.mainTasks) ? data.mainTasks : [];
-    const summary = data.summary;
-    const adminSignatureInfo = await getAdminSignatureInfo(projectId);
-    const clientInvoiceSignatureInfo =
-      await getClientInvoiceSignatureInfo(projectId);
+  const project = data.project;
+  const client = data.client;
+  const mainTasks = Array.isArray(data.mainTasks) ? data.mainTasks : [];
+  const summary = data.summary;
+  const adminSignatureInfo = await getAdminSignatureInfo(projectId);
+  // Prefer the inline override the signature endpoint passes in over
+  // hitting storage. Without storage, the GET preview just renders
+  // without the client signature, which is correct pre-sign.
+  const clientInvoiceSignatureInfo = clientSignatureDataUrl
+    ? {
+        signatureDataUrl: clientSignatureDataUrl,
+        signedName: clientSignedName ?? client?.full_name ?? null,
+      }
+    : await getClientInvoiceSignatureInfo(projectId);
 
     const { data: paymentRow } = await supabaseAdmin
       .from("projects")
@@ -451,6 +480,11 @@ export async function GET(request: Request) {
               display: grid;
               grid-template-columns: 1fr 1fr;
               gap: 28px;
+              /* Reserve the signature block on its own page so the
+                 client-signature stamp (lib/server/invoicePdf.ts)
+                 always lands at predictable PDF coordinates. */
+              break-before: page;
+              page-break-before: always;
             }
             .sig-box {
               min-height: 86px;
@@ -576,7 +610,7 @@ export async function GET(request: Request) {
 
                 <div class="summary-row">
                   <span>Downpayment</span>
-                  <span>-${escapeHtml(formatCurrency(downpayment))}</span>
+                  <span>${escapeHtml(formatCurrency(downpayment))}</span>
                 </div>
 
                 <div class="summary-row total">
@@ -633,6 +667,28 @@ export async function GET(request: Request) {
         </body>
       </html>
     `;
+
+  return html;
+}
+
+// Thin GET wrapper around the renderer. Used by the iframe preview;
+// the signature endpoint bypasses this and calls renderInvoiceHtml
+// directly with the client signature inlined.
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const projectId = url.searchParams.get("projectId")?.trim() || "";
+    const markupRate = url.searchParams.get("markupRate")?.trim() || "30";
+
+    if (!projectId) {
+      return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
+    }
+
+    const html = await renderInvoiceHtml({
+      projectId,
+      origin: url.origin,
+      markupRate,
+    });
 
     return new Response(html, {
       status: 200,

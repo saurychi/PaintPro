@@ -214,8 +214,15 @@ export default function ReportListPage() {
   const [projects, setProjects] = useState<ReportProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Tracks which row's "See more" button is in flight so we can swap
+  // the chevron for a spinner while Next routes to the detail page.
+  // Cleared automatically when this page unmounts on navigation; we
+  // never need to reset it manually.
+  const [navigatingToId, setNavigatingToId] = useState<string | null>(null);
 
   function openProjectDetail(project: ReportProjectRow) {
+    if (navigatingToId) return;
+    setNavigatingToId(project.projectId);
     router.push(
       `/admin/report/report-list/${encodeURIComponent(project.projectId)}`,
     );
@@ -585,16 +592,7 @@ export default function ReportListPage() {
               {filteredProjects.map((project) => (
                 <tr
                   key={project.projectId}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openProjectDetail(project)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openProjectDetail(project);
-                    }
-                  }}
-                  className="cursor-pointer text-xs transition hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none dark:hover:bg-slate-700/60 dark:focus-visible:bg-slate-700/60"
+                  className="text-xs transition hover:bg-gray-50 dark:hover:bg-slate-700/60"
                 >
                   <td className="px-4 py-3 align-middle">
                     <div className="whitespace-nowrap font-semibold text-gray-950 dark:text-slate-100">
@@ -642,16 +640,29 @@ export default function ReportListPage() {
                   </td>
 
                   <td className="py-3 pl-4 pr-6 text-right align-middle">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openProjectDetail(project);
-                      }}
-                      className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border border-[#00c065]/25 bg-[#00c065]/10 px-2.5 text-xs font-semibold text-[#047857] transition-colors hover:border-[#00c065]/40 hover:bg-[#00c065]/15 dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/20">
-                      See more
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
+                    {(() => {
+                      const isNavigatingThisRow =
+                        navigatingToId === project.projectId;
+                      const isAnyRowNavigating = navigatingToId !== null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openProjectDetail(project);
+                          }}
+                          disabled={isAnyRowNavigating}
+                          className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border border-[#00c065]/25 bg-[#00c065]/10 px-2.5 text-xs font-semibold text-[#047857] transition-colors hover:border-[#00c065]/40 hover:bg-[#00c065]/15 disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#00c065]/25 dark:bg-[#00c065]/15 dark:text-emerald-300 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/20"
+                        >
+                          {isNavigatingThisRow ? "Loading..." : "See more"}
+                          {isNavigatingThisRow ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

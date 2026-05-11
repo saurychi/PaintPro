@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from("projects")
-      .select("project_id, project_code")
+      .select("project_id, project_code, status, cancellation_phase")
       .eq("project_code", projectCode)
       .maybeSingle()
 
@@ -26,6 +26,22 @@ export async function POST(request: NextRequest) {
 
     if (!data) {
       return NextResponse.json({ error: "Project code not found." }, { status: 404 })
+    }
+
+    // Terminal projects are archive-state — block code sign-in so old
+    // codes can't be reused to peek at a closed-out project. "Terminal"
+    // = status flipped to "completed" or the project was cancelled and
+    // the post-cancel wrap-up reached cancellation_phase "done".
+    const status = String(data.status ?? "").trim().toLowerCase()
+    const phase = String(data.cancellation_phase ?? "").trim().toLowerCase()
+    if (
+      status === "completed" ||
+      (status === "cancelled" && phase === "done")
+    ) {
+      return NextResponse.json(
+        { error: "This project has been closed and is no longer accessible." },
+        { status: 403 },
+      )
     }
 
     const response = NextResponse.json({

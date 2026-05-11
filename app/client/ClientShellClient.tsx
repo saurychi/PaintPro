@@ -1,7 +1,8 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { Menu } from "lucide-react"
 import {
   SidebarProvider,
@@ -84,19 +85,123 @@ function ClientPendingDocumentBadge() {
 
     void refresh()
 
-    // Re-check periodically so the badge clears once the client signs and
-    // the project advances to the next status. Also re-runs on every route
-    // change inside the client portal (pathname dep) so the badge is current
-    // immediately after signing instead of waiting for the next interval tick.
-    const interval = window.setInterval(refresh, 60_000)
+    // Tighter poll than the original 60s so a status flip from the admin
+    // (e.g. they just clicked "Notify") shows up within ~15s without the
+    // user touching anything. The body of the request is tiny, so the
+    // bandwidth cost is negligible.
+    const interval = window.setInterval(refresh, 15_000)
+
+    // When the user comes back to the tab after working elsewhere, refresh
+    // immediately instead of waiting for the next interval tick. Common
+    // case: client had this tab open, switched to email, admin notified
+    // them, they switch back → badge appears instantly.
+    function handleVisibility() {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    // Cross-component refresh signal — the dashboard's "Refresh" button on
+    // the Pending Documents card dispatches this event so the sidebar
+    // badge re-fetches in the same gesture.
+    function handleManualRefresh() {
+      void refresh()
+    }
+    window.addEventListener(
+      "paintpro:refresh-pending-docs",
+      handleManualRefresh,
+    )
 
     return () => {
       cancelled = true
       window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener(
+        "paintpro:refresh-pending-docs",
+        handleManualRefresh,
+      )
     }
   }, [projectId, pathname])
 
   useSidebarBadge("pending-documents", pendingCount, "danger")
+
+  return null
+}
+
+// Background watcher that auto-signs out the client the moment the project
+// transitions to a terminal state — "completed" (normal end-of-work) or
+// "cancelled" with cancellation_phase "done" (cancel wrap-up finished).
+// Without this, a client sitting on any page wouldn't know the project
+// closed until they reloaded, at which point the layout server check
+// bounces them anyway. Polls the existing overview endpoint every 15s,
+// piggybacking on the same cadence the pending-docs badge uses.
+function ClientProjectTerminalWatcher() {
+  const { projectId } = useClientProject()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!projectId) return
+
+    let cancelled = false
+    let signedOut = false
+
+    async function signOutIfTerminal() {
+      if (cancelled || signedOut) return
+      try {
+        const response = await fetch(
+          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
+            projectId!,
+          )}`,
+          { cache: "no-store" },
+        )
+        if (!response.ok) return
+        const data = await response.json()
+        const status = String(data?.project?.status ?? "")
+          .trim()
+          .toLowerCase()
+        const phase = String(data?.project?.cancellation_phase ?? "")
+          .trim()
+          .toLowerCase()
+        const isTerminal =
+          status === "completed" ||
+          (status === "cancelled" && phase === "done")
+        if (!isTerminal) return
+        if (cancelled || signedOut) return
+        signedOut = true
+
+        // Drop the project-cookie server-side so a hard refresh doesn't
+        // bounce them right back through the same layout check.
+        try {
+          await fetch("/api/auth/client-access", { method: "DELETE" })
+        } catch {
+          // Best-effort. Even if the cookie clear fails, the layout's
+          // own terminal-status gate will redirect on next load.
+        }
+
+        toast.info("Project has been closed out", {
+          description: "You've been signed out. Thanks for working with us.",
+        })
+        router.replace("/auth/signin")
+      } catch {
+        // Network blip — try again on the next tick.
+      }
+    }
+
+    void signOutIfTerminal()
+    const interval = window.setInterval(() => {
+      void signOutIfTerminal()
+    }, 15_000)
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") void signOutIfTerminal()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
+  }, [projectId, router])
 
   return null
 }
@@ -117,6 +222,7 @@ function ClientShell({
       <AppSidebar role={role} user={user} />
       <ClientPendingDocumentBadge />
       <ClientMessagesBadge />
+      <ClientProjectTerminalWatcher />
 
       {/* Mobile-only top bar with the hamburger trigger. The sidebar primitive
           renders the desktop sidebar `hidden md:block`, so on phones there's

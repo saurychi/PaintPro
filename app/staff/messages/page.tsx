@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import {
   fetchConversations,
   fetchMessages,
@@ -11,9 +12,16 @@ import {
   type Message
 } from "@/lib/messages"
 import { supabase } from '@/lib/supabaseClient'
-import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus, ArrowLeft } from "lucide-react"
+import { Search, MessageSquare, Loader2, MoreHorizontal, UserPlus, ArrowLeft, Ruler } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import StaffPageShell from "@/components/staff/StaffPageShell"
+import {
+  MEASURE_HANDOFF_KEY,
+  presetOptions,
+  scanSurfacesFromPresets,
+  type SurfacePresetOption,
+} from "@/lib/measure"
+import type { SurfaceScalePresets } from "@/lib/planning/surfacePresets"
 
 const ACCENT = "#00c065"
 
@@ -62,6 +70,8 @@ type ConversationPayload = {
 }
 
 export default function StaffMessages() {
+  const router = useRouter()
+
   // UI State
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -86,6 +96,14 @@ export default function StaffMessages() {
 
   // Mobile view toggle (list vs chat)
   const [mobileView, setMobileView] = useState<"list" | "chat">("list")
+
+  // Canonical surface list pulled from surface_scale_presets. Drives the
+  // 3-dot "Open in Measure Generator" affordance on incoming messages —
+  // we only show it for messages that mention a surface the admins have
+  // configured in the DB.
+  const [surfacePresetOptions, setSurfacePresetOptions] = useState<
+    SurfacePresetOption[]
+  >([])
 
   // Message actions state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
@@ -143,6 +161,31 @@ export default function StaffMessages() {
       if (user) setCurrentUserId(user.id)
     }
     getUser()
+  }, [])
+
+  // Load surface presets once on mount. Silent on failure — the
+  // affordance just won't appear, which is the safe fallback.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const response = await fetch("/api/planning/getSurfaceScalePresets", {
+          cache: "no-store",
+        })
+        if (!response.ok) return
+        const data = (await response.json()) as {
+          surfaceScalePresets?: SurfaceScalePresets
+        }
+        if (cancelled) return
+        setSurfacePresetOptions(presetOptions(data?.surfaceScalePresets))
+      } catch {
+        // Network errors leave the option list empty; the 3-dot menu
+        // simply won't show.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // 2. Auto-Scroll to bottom function
@@ -547,6 +590,32 @@ export default function StaffMessages() {
     }
   }
 
+  // Hand off the parsed surface keys from an incoming message to the
+  // Measure Generator page via sessionStorage and route there. The
+  // generator reads MEASURE_HANDOFF_KEY on mount, looks each key up in
+  // surface_scale_presets, and pre-populates rows with the matching
+  // label + unit.
+  const handleOpenMeasureGenerator = (msg: Message) => {
+    const surfaceKeys = scanSurfacesFromPresets(
+      msg.content,
+      surfacePresetOptions,
+    )
+    if (surfaceKeys.length === 0) return
+    try {
+      window.sessionStorage.setItem(
+        MEASURE_HANDOFF_KEY,
+        JSON.stringify({
+          surfaceKeys,
+          sourceMessage: msg.content,
+          conversationId: msg.conversation_id,
+        }),
+      )
+    } catch {}
+    setOpenMenuId(null)
+    startHideDots()
+    router.push("/staff/measure-generator")
+  }
+
   const handleSaveEdit = async (messageId: string) => {
     if (!editText.trim()) return
     try {
@@ -814,13 +883,19 @@ export default function StaffMessages() {
                 const isEditing = editingId === msg.id
                 const menuOpen = openMenuId === msg.id
                 const dotsVisible = visibleDotsId === msg.id || menuOpen
+                const incomingSurfaces =
+                  !isMe && surfacePresetOptions.length > 0
+                    ? scanSurfacesFromPresets(msg.content, surfacePresetOptions)
+                    : []
+                const hasMeasureAction = incomingSurfaces.length > 0
+                const showHoverDots = isMe || hasMeasureAction
 
                 return (
                   <div
                     key={msg.id}
                     className={`flex w-full items-end gap-1 ${isMe ? "justify-end" : "justify-start"}`}
-                    onMouseEnter={() => isMe && showDots(msg.id)}
-                    onMouseLeave={() => isMe && startHideDots()}
+                    onMouseEnter={() => showHoverDots && showDots(msg.id)}
+                    onMouseLeave={() => showHoverDots && startHideDots()}
                   >
                     {/* Dots button — left of bubble for sent messages */}
                     {isMe && (
@@ -884,6 +959,33 @@ export default function StaffMessages() {
                       )}
                       <span className="mt-1 text-[10px] text-gray-500">{timeString}</span>
                     </div>
+
+                    {/* Dots button — right of bubble for incoming messages
+                        that mention surfaces. Opens the Measure Generator
+                        pre-populated with what the manager asked for. */}
+                    {hasMeasureAction && (
+                      <div className="relative shrink-0 mb-0.5">
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setOpenMenuId(menuOpen ? null : msg.id)}
+                          className={`p-1 rounded-full hover:bg-gray-100 text-gray-400 transition-opacity duration-200 ${dotsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                          aria-label="Message actions"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                        {menuOpen && (
+                          <div className="absolute bottom-full right-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[200px]">
+                            <button
+                              onClick={() => handleOpenMeasureGenerator(msg)}
+                              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2 whitespace-nowrap"
+                            >
+                              <Ruler className="h-3.5 w-3.5 shrink-0 text-[#00c065]" />
+                              <span>Open in Measure Generator</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}

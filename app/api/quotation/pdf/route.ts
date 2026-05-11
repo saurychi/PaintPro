@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import type { Browser } from "playwright-core";
-import { launchPdfBrowser } from "@/lib/server/pdfBrowser";
+import type { BrowserContext } from "playwright-core";
+import { getPdfBrowser } from "@/lib/server/pdfBrowser";
 
 // Playwright + @sparticuz/chromium need a long-running Node runtime; the Edge
 // runtime can't load the binary. maxDuration covers cold-start + render time
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
 
   try {
     const url = new URL(request.url);
@@ -26,13 +26,17 @@ export async function GET(request: Request) {
       projectId,
     )}&markupRate=${encodeURIComponent(markupRate)}`;
 
-    browser = await launchPdfBrowser();
+    // Reuse the cached browser across requests (~1-2s saved per call).
+    // Each render gets its own isolated context so concurrent renders
+    // don't share storage / cookies — contexts are cheap (~50ms).
+    const browser = await getPdfBrowser();
+    context = await browser.newContext();
+    const page = await context.newPage();
 
-    const page = await browser.newPage();
-
-    await page.goto(htmlUrl, {
-      waitUntil: "networkidle",
-    });
+    // domcontentloaded is enough — the HTML page server-renders the
+    // quotation body inline (no client-side fetch waterfall). Switching
+    // away from networkidle saves ~500ms of "wait for nothing" time.
+    await page.goto(htmlUrl, { waitUntil: "domcontentloaded" });
 
     await page.emulateMedia({ media: "screen" });
 
@@ -69,8 +73,10 @@ export async function GET(request: Request) {
       { status: 500 },
     );
   } finally {
-    if (browser) {
-      await browser.close();
+    // Close the context (and its pages) but leave the browser alive for
+    // the next request. Closing the browser here would defeat the cache.
+    if (context) {
+      await context.close().catch(() => {});
     }
   }
 }

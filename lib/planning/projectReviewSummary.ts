@@ -449,3 +449,118 @@ export function buildProjectReviewSummary(args: {
       .sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
+
+// For a cancelled project's "Review and Final Checks" step the user wants
+// the same review modal as the end-of-work flow, but scoped to only what
+// actually happened before the cancellation — completed subtasks, the
+// main tasks they fall under, the materials those tasks consumed, the
+// equipment those subtasks used, and the employees who clocked time on
+// them. Anything still pending at cancel time gets filtered out because
+// it never executed.
+export function filterReviewSummaryToCompletedOnly(
+  summary: ProjectReviewSummary | null,
+): ProjectReviewSummary | null {
+  if (!summary) return null;
+
+  const completedSubTaskIds = new Set<string>();
+
+  // "Finished" timing statuses: only subtasks that fully ran (and were
+  // closed out) belong on a review. "not started" never ran;
+  // "working on it..." is an in-flight subtask that wasn't completed,
+  // which counts as "weren't done" for review purposes — so both drop
+  // out, even when their parent main task has other completed subtasks.
+  const FINISHED_TIMING_STATUSES = new Set([
+    "completed",
+    "early",
+    "on time",
+    "late",
+  ]);
+
+  const filteredMainTasks = summary.mainTasks
+    .map((mainTask) => {
+      const completedSubTasks = mainTask.subTasks.filter((subTask) =>
+        FINISHED_TIMING_STATUSES.has(subTask.timingStatus),
+      );
+      for (const subTask of completedSubTasks) {
+        completedSubTaskIds.add(subTask.id);
+      }
+      return {
+        ...mainTask,
+        subTasks: completedSubTasks,
+      };
+    })
+    // Drop main tasks whose subtasks were all pending or in-flight —
+    // including them would mislead the admin into thinking work was
+    // logged against a task that never actually finished.
+    .filter((mainTask) => mainTask.subTasks.length > 0);
+
+  // Re-derive the materials list from the surviving main tasks. Materials
+  // attach to the main task in this schema, so anything tied to a fully
+  // skipped main task drops out automatically.
+  const filteredMaterials: ReviewMaterialSummary[] = [];
+  const seenMaterialIds = new Set<string>();
+  for (const mainTask of filteredMainTasks) {
+    for (const material of mainTask.materials) {
+      if (seenMaterialIds.has(material.id)) continue;
+      seenMaterialIds.add(material.id);
+      filteredMaterials.push(material);
+    }
+  }
+
+  // Equipment lives on individual subtasks — collect names from the
+  // surviving (completed) subtasks only, then filter the original
+  // equipment summary down to those names so the per-equipment usage
+  // counts and notes carry through.
+  const equipmentNamesUsed = new Set<string>();
+  for (const mainTask of filteredMainTasks) {
+    for (const subTask of mainTask.subTasks) {
+      for (const name of subTask.equipmentNames) {
+        equipmentNamesUsed.add(name);
+      }
+    }
+  }
+  const filteredEquipment = summary.equipment.filter((entry) =>
+    equipmentNamesUsed.has(entry.name),
+  );
+
+  const filteredEmployees = summary.employees
+    .map((employee) => {
+      const filteredAssignedTasks = employee.assignedTasks.filter((task) =>
+        completedSubTaskIds.has(task.subTaskId),
+      );
+      return {
+        ...employee,
+        // Recompute the timing counters from the filtered task list so
+        // the on-time/early/late stats reflect only completed work.
+        earlyCount: filteredAssignedTasks.filter(
+          (task) => task.timingStatus === "early",
+        ).length,
+        onTimeCount: filteredAssignedTasks.filter(
+          (task) => task.timingStatus === "on time",
+        ).length,
+        lateCount: filteredAssignedTasks.filter(
+          (task) => task.timingStatus === "late",
+        ).length,
+        assignedTasks: filteredAssignedTasks,
+      };
+    })
+    // Hide employees who weren't actually credited with any completed
+    // subtask before cancellation — they don't belong on the review.
+    .filter((employee) => employee.assignedTasks.length > 0);
+
+  return {
+    ...summary,
+    totalMainTasks: filteredMainTasks.length,
+    totalSubTasks: filteredMainTasks.reduce(
+      (sum, mainTask) => sum + mainTask.subTasks.length,
+      0,
+    ),
+    totalEmployees: filteredEmployees.length,
+    totalMaterials: filteredMaterials.length,
+    totalEquipment: filteredEquipment.length,
+    mainTasks: filteredMainTasks,
+    materials: filteredMaterials,
+    equipment: filteredEquipment,
+    employees: filteredEmployees,
+  };
+}

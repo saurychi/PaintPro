@@ -628,6 +628,8 @@ export default function TaskManagementSettingsPage() {
     name: string;
     defaultSortOrder: number;
     isActive: boolean;
+    formulaTemplateId: string;
+    surfaceKey: string;
   }) {
     setIsSavingModal(true);
 
@@ -641,8 +643,53 @@ export default function TaskManagementSettingsPage() {
 
       mergeSavedMainTasks([savedMainTask]);
       setSelectedMainTaskId(savedMainTask.main_task_id);
+
+      // Persist the formula attachment as a material_estimation_rule
+      // row linking the new main_task to the selected formula. Without
+      // this, the dropdown choice was silently lost. Duration formulas
+      // bind to sub_tasks (not main_tasks) so they can't be linked at
+      // main-task creation time; we surface a warning in that case.
+      let linkSummary = `Surface: ${input.surfaceKey}`;
+      try {
+        const ruleResponse = await fetch(
+          "/api/planning/material-estimation-rule",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mainTaskId: savedMainTask.main_task_id,
+              formulaTemplateId: input.formulaTemplateId,
+              materialName: input.name,
+              minimumQuantity: 0,
+              isActive: input.isActive,
+            }),
+          },
+        );
+        const ruleBody = await ruleResponse.json().catch(() => null);
+        if (!ruleResponse.ok) {
+          throw new Error(
+            [ruleBody?.error, ruleBody?.details]
+              .filter(Boolean)
+              .join(" - ") || "Failed to link formula.",
+          );
+        }
+        linkSummary = `Linked to formula. Surface: ${input.surfaceKey}.`;
+      } catch (linkError) {
+        // Main task is already saved, so don't fail the whole flow.
+        // Warn the user so they can re-link in Edit Estimations.
+        const message =
+          linkError instanceof Error
+            ? linkError.message
+            : "Could not attach the selected formula.";
+        toast.error("Formula link failed.", {
+          description: `${message} The main task was still created. Wire the formula manually from Edit Estimations.`,
+        });
+      }
+
       setAddMainTaskOpen(false);
-      toast.success("Main task created.");
+      toast.success("Main task created.", {
+        description: linkSummary,
+      });
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to create main task."));
     } finally {
@@ -911,7 +958,7 @@ export default function TaskManagementSettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex h-[100dvh] items-center justify-center bg-gray-50 p-6">
+      <div className="flex h-dvh items-center justify-center bg-gray-50 p-6">
         <div className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-5 py-4 text-sm font-medium text-gray-700 shadow-sm">
           <Loader2 className="h-4 w-4 animate-spin text-[#00c065]" />
           Loading task catalog...
@@ -921,7 +968,7 @@ export default function TaskManagementSettingsPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col overflow-y-auto bg-gray-50 p-4 lg:h-[100dvh] lg:max-h-[100dvh] lg:min-h-0 lg:overflow-hidden">
+    <div className="flex min-h-screen flex-col overflow-y-auto bg-gray-50 p-4 lg:h-dvh lg:max-h-dvh lg:min-h-0 lg:overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold text-gray-900">

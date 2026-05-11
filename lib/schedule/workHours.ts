@@ -133,6 +133,51 @@ export function computeWorkSegments(
   return segments;
 }
 
+// Inverse of `computeWorkSegments`: given a [start, end) span (typically
+// `project_sub_tasks.scheduled_start_datetime` ↔ `scheduled_end_datetime`),
+// return the number of working hours inside it. Sundays, unavailable days,
+// time outside 09-17, and the lunch hour are all excluded — so a span
+// that "looks" like 24 hours of clock time but spans an overnight gap
+// reports the actual ~7 hours of work it represents.
+export function workHoursBetween(
+  start: Date,
+  end: Date,
+  unavailableDateSet?: Set<string> | null,
+): number {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  if (end.getTime() <= start.getTime()) return 0;
+
+  const set = unavailableDateSet ?? new Set<string>();
+  let totalMs = 0;
+
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+
+  for (let guard = 0; guard < 365 * 2 && cursor.getTime() <= end.getTime(); guard += 1) {
+    if (!isNonWorkingDay(cursor, set)) {
+      const blocks: Array<[number, number]> = [
+        [WORK_START_HOUR, LUNCH_START_HOUR],
+        [LUNCH_END_HOUR, WORK_END_HOUR],
+      ];
+      for (const [bh, eh] of blocks) {
+        const blockStart = new Date(cursor);
+        blockStart.setHours(bh, 0, 0, 0);
+        const blockEnd = new Date(cursor);
+        blockEnd.setHours(eh, 0, 0, 0);
+
+        const overlapStart = Math.max(blockStart.getTime(), start.getTime());
+        const overlapEnd = Math.min(blockEnd.getTime(), end.getTime());
+        if (overlapEnd > overlapStart) {
+          totalMs += overlapEnd - overlapStart;
+        }
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return totalMs / 3_600_000;
+}
+
 // Convenience wrapper for callers that only need the overall envelope
 // (first segment's start, last segment's end). Returns the start
 // untouched on a zero-hour input so DB rows stay stable.

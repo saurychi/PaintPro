@@ -325,21 +325,30 @@ export default function SubTaskAssignment() {
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));
 
-        // Populate cache for future visits
+        // Populate cache for future visits. Critical: preserve any
+        // equipment that's already in the cache from a prior hydrate —
+        // overwriting with `[]` here is what wiped equipment in the
+        // wizard flow before. Same pattern as buildSubTasksForCache.
+        const existingCacheById = new Map(
+          (getCachedSubTasks(projectId) ?? []).map((st) => [st.id, st]),
+        );
         const subTasksForCache: CachedSubTask[] = groupedServices.flatMap((group) =>
-          group.children.map((child) => ({
-            id: child.id,
-            subTaskId: child.subTaskId,
-            mainTaskId: group.id,
-            projectTaskId: group.projectTaskId,
-            title: child.title,
-            sortOrder: child.sortOrder,
-            estimatedHours: null,
-            scheduledStartDatetime: null,
-            scheduledEndDatetime: null,
-            assignedEmployeeIds: [],
-            equipments: [],
-          })),
+          group.children.map((child) => {
+            const prev = existingCacheById.get(child.id);
+            return {
+              id: child.id,
+              subTaskId: child.subTaskId,
+              mainTaskId: group.id,
+              projectTaskId: group.projectTaskId,
+              title: child.title,
+              sortOrder: child.sortOrder,
+              estimatedHours: prev?.estimatedHours ?? null,
+              scheduledStartDatetime: prev?.scheduledStartDatetime ?? null,
+              scheduledEndDatetime: prev?.scheduledEndDatetime ?? null,
+              assignedEmployeeIds: prev?.assignedEmployeeIds ?? [],
+              equipments: prev?.equipments ?? [],
+            };
+          }),
         );
         setCachedSubTasks(projectId, subTasksForCache);
       } catch (error: any) {

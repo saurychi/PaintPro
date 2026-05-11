@@ -478,16 +478,10 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!generatedTasks.length) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Generated tasks are required before saving the project.",
-        code: "INVALID_INPUT",
-      },
-      { status: 400 }
-    );
-  }
+  // Manual mode: zero generatedTasks means the admin will add tasks later
+  // from the main-task-assignment page. Skip the catalog validation, AI
+  // scheduling, and cost estimation below and just insert the project row.
+  const isManualMode = generatedTasks.length === 0;
 
   if (
     scheduledStartDatetime &&
@@ -647,20 +641,23 @@ export async function POST(req: Request) {
 
   // Same set the schedule pages render — manual blocks + public holidays —
   // so the fallback recompute on save also lands on a valid working day.
-  const unavailableDays = await listScheduleUnavailableDays(
-    req.headers.get("cookie"),
-  );
+  // Manual mode has no tasks to schedule, so skip both DB calls.
+  const unavailableDays = isManualMode
+    ? []
+    : await listScheduleUnavailableDays(req.headers.get("cookie"));
 
-  const fallbackProjectSchedule = buildProjectSchedule({
-    project: {
-      scheduled_start_datetime: scheduledStartDatetime,
-      scheduled_end_datetime: scheduledEndDatetime,
-      dimensions: projectDimensions,
-    },
-    generatedTasks,
-    existingBlocks: [],
-    unavailableDates: unavailableDays.map((day) => day.blockedDate),
-  });
+  const fallbackProjectSchedule = isManualMode
+    ? { scheduledItems: [], projectScheduledEndDatetime: null as string | null }
+    : buildProjectSchedule({
+        project: {
+          scheduled_start_datetime: scheduledStartDatetime,
+          scheduled_end_datetime: scheduledEndDatetime,
+          dimensions: projectDimensions,
+        },
+        generatedTasks,
+        existingBlocks: [],
+        unavailableDates: unavailableDays.map((day) => day.blockedDate),
+      });
 
   // Server-authoritative per-subtask schedule, keyed by (taskName, subTaskTitle).
   // Used at the project_sub_task insert site below so we don't trust whatever
@@ -739,6 +736,30 @@ export async function POST(req: Request) {
         );
       }
     }
+
+  // Manual mode short-circuits here: no tasks were generated, so there's
+  // nothing to validate against the catalog, no sub-tasks/staff/materials
+  // to insert, and no cost to estimate. The project lands in
+  // main_task_pending with zero estimates; the admin fills in tasks on
+  // the next page.
+  if (isManualMode) {
+    return NextResponse.json({
+      ok: true,
+      client: {
+        client_id: savedClientId,
+        full_name: clientFullName || null,
+        email: clientEmail || null,
+        phone: clientPhone || null,
+        address: clientAddress || null,
+        notes: clientNotes,
+      },
+      project: {
+        projectId: insertedProject.project_id,
+        projectCode: insertedProject.project_code,
+        title: insertedProject.title ?? title,
+      },
+    });
+  }
 
   // ── Catalog from cache (replaces 3 SELECT *)
   // The whole catalog is already loaded into memory at module scope by
@@ -904,14 +925,32 @@ export async function POST(req: Request) {
         subTask.scheduledEndDatetime ??
         null;
 
+      const assignedEmployees = normalizeAssignedEmployees(subTask);
+
+      // Default equipment quantity to the number of assigned employees:
+      // if a subtask needs ladders and has 2 employees on it, two ladders
+      // should be reserved by default. Only applies when the incoming
+      // quantity is at the default 1 — if the admin explicitly bumped a
+      // single shared item up (e.g. one scaffold for the whole crew),
+      // we honor that. `Math.max(1, ...)` keeps a sensible floor when no
+      // employees have been assigned yet.
+      const defaultEquipmentQuantity = Math.max(1, assignedEmployees.length);
+      const normalizedEquipment = normalizeEquipmentUsageForStorage(
+        subTask.equipment,
+      ).map((entry) =>
+        entry.quantity <= 1
+          ? { ...entry, quantity: defaultEquipmentQuantity }
+          : entry,
+      );
+
       subTaskPlans.push({
         matchedSubTask,
         subTaskTitle: subTask.title,
         estimatedHours,
-        equipmentPayload: normalizeEquipmentUsageForStorage(subTask.equipment),
+        equipmentPayload: normalizedEquipment,
         subTaskScheduledStart,
         subTaskScheduledEnd,
-        assignedEmployees: normalizeAssignedEmployees(subTask),
+        assignedEmployees,
         materials: subTask.materials,
       });
     }

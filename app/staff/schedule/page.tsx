@@ -20,6 +20,7 @@ import {
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import ScheduleSkeleton from "@/components/schedule/ScheduleSkeleton";
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjectNow } from "@/lib/time/useProjectNow";
@@ -896,14 +897,7 @@ export default function StaffSchedulePage() {
           <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
             <div className="flex-1 p-2 lg:min-h-0 lg:overflow-hidden">
               {loading ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                    <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                    <span className="text-sm font-medium text-gray-700">
-                      Loading schedule...
-                    </span>
-                  </div>
-                </div>
+                <ScheduleSkeleton />
               ) : (
                 <div className="grid grid-cols-12 gap-2 lg:h-full lg:min-h-0">
                   <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
@@ -1353,7 +1347,28 @@ export default function StaffSchedulePage() {
                 </div>
               </div>
 
-              <div className="flex justify-end border-t border-gray-200 px-5 py-4">
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
+                {selectedDate ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Read selectedDate eagerly — clearing it below would
+                      // turn the URL into `?date=null`. The dashboard's
+                      // route effect picks up `?date=YYYY-MM-DD` and snaps
+                      // its workday picker to it. No openDownpayment /
+                      // openKickoff / projectId params are passed: staff
+                      // shouldn't trip admin-only modals or land on the
+                      // job-creation wizard.
+                      const targetDate = selectedDate;
+                      setSelectedDate(null);
+                      router.push(
+                        `/staff?date=${encodeURIComponent(targetDate)}`,
+                      );
+                    }}
+                    className="rounded-lg bg-[#00c065] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
+                    Go to dashboard
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setSelectedDate(null)}

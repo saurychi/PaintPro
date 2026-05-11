@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
@@ -14,6 +15,17 @@ import DashboardInsightCard from "../../components/dashboard/dashboardInsightCar
 import NotificationsCard from "@/components/dashboard/notificationsCard";
 import { buildEmployeeReviewItems } from "@/lib/planning/employeePerformance";
 import { buildProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
+import {
+  CANCELLATION_STEPS,
+  getCancellationGroupVisualStatus,
+  getCancellationStepVisualStatus,
+  normalizeCancellationPhase,
+  type CancellationPhase,
+} from "@/lib/planning/cancellationPhase";
+import {
+  useProjectSubtaskRealtime,
+  type ProjectSubtaskRow,
+} from "@/lib/realtime/useProjectSubtaskRealtime";
 import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 
 type StepVisualStatus = "done" | "active" | "pending";
@@ -43,11 +55,30 @@ type RawProject = {
   project_code?: string | null;
   status?: string | null;
   rawStatus?: string | null;
+  cancellationPhase?: string | null;
   scheduledStartDatetime?: string | null;
   scheduledEndDatetime?: string | null;
   clientName?: string | null;
   siteAddress?: string | null;
 };
+
+// Cancelled projects with an unfinished wrap-up phase still need admin
+// attention, so they don't count as terminal here. Only "completed"
+// projects and cancelled-then-fully-closed ones drop to the back of
+// the workday picker.
+function isProjectTerminal(project: RawProject): boolean {
+  const status = String(project.rawStatus ?? project.status ?? "")
+    .trim()
+    .toLowerCase();
+  if (status === "completed") return true;
+  if (status === "cancelled") {
+    const phase = String(project.cancellationPhase ?? "")
+      .trim()
+      .toLowerCase();
+    return phase === "done";
+  }
+  return false;
+}
 
 type ProjectsResponse = {
   projects?: RawProject[];
@@ -516,22 +547,47 @@ function buildProcessItems(args: {
   projectStatus: string;
   mainTasks: Record<string, unknown>[];
   projectEnd: string | null;
+  cancellationPhase: CancellationPhase | null;
+  cancelledAt: string | null;
 }) {
-  const { projectStatus, mainTasks, projectEnd } = args;
+  const {
+    projectStatus,
+    mainTasks,
+    projectEnd,
+    cancellationPhase,
+    cancelledAt,
+  } = args;
 
   const normalized = normalizeStatus(projectStatus);
+  const isCancelled = normalized === "cancelled";
 
   const items: ProcessItem[] = [];
 
   for (let index = 0; index < mainTasks.length; index += 1) {
     const mainTask = mainTasks[index];
 
-    const subTasks = [
+    const allSubTasks = [
       ...asArray<Record<string, unknown>>(mainTask.subTasks),
       ...asArray<Record<string, unknown>>(mainTask.subtasks),
       ...asArray<Record<string, unknown>>(mainTask.projectSubTasks),
       ...asArray<Record<string, unknown>>(mainTask.project_sub_tasks),
     ];
+
+    // Cancelled projects: drop subtasks that never finished and skip
+    // main tasks whose subtasks are all unfinished — same rule the admin
+    // dashboard applies.
+    const subTasks = isCancelled
+      ? allSubTasks.filter((subTask) => {
+          const rawStatus = readString(
+            subTask.status,
+            subTask.rawStatus,
+            subTask.project_status,
+          );
+          return getTaskStatus(rawStatus) === "done";
+        })
+      : allSubTasks;
+
+    if (isCancelled && subTasks.length === 0) continue;
 
     const childItems: ProcessItem[] = subTasks.map((subTask, subIndex) => {
       const rawStatus = readString(
@@ -662,6 +718,44 @@ function buildProcessItems(args: {
     });
   }
 
+  if (isCancelled) {
+    // Mirror the admin "Project Cancellation" group so staff see the
+    // same wrap-up steps. Buttons are disabled for staff via
+    // canManageCancellation=false on JobProgressCard, so this is
+    // purely informational on their dashboard.
+    const cancellationChildren: ProcessItem[] = CANCELLATION_STEPS.map(
+      (step) => {
+        const status = getCancellationStepVisualStatus(
+          step.id,
+          cancellationPhase,
+        );
+        return {
+          id: step.id,
+          title: step.title,
+          status,
+          startLabel: formatDateTime(cancelledAt),
+          endLabel:
+            status === "done"
+              ? step.id === "cancellation-conclude"
+                ? "Cancelled"
+                : "Completed"
+              : status === "active"
+                ? "Working on it..."
+                : "-",
+        };
+      },
+    );
+
+    items.push({
+      id: "project-cancellation",
+      title: "Project Cancellation",
+      status: getCancellationGroupVisualStatus(cancellationPhase),
+      startLabel: formatDateTime(cancelledAt),
+      endLabel: "Cancelled",
+      children: cancellationChildren,
+    });
+  }
+
   return items;
 }
 
@@ -691,18 +785,37 @@ export default function DashboardPage() {
   const [mainTasks, setMainTasks] = useState<Record<string, unknown>[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
+  // Tracks the most recent project the staff member explicitly picked
+  // from the dropdown. The auto-select effect honours it so a deliberate
+  // pick of a finished project isn't overridden by the prefer-active
+  // logic below.
+  const explicitlyPickedIdRef = useRef<string | null>(null);
+
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     if (!isProjectTimeReferenceReady) return;
+
+    // Honour ?date=YYYY-MM-DD if it's a valid calendar date — that's the
+    // hand-off used by the staff schedule's "Go to dashboard" button so a
+    // schedule pick lands on the same workday in the dashboard. Falls back
+    // to the simulated reference clock (or wall clock) if the param is
+    // missing or malformed.
+    const requestedDate = searchParams?.get("date")?.trim() ?? "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+      setSelectedDashboardDate(requestedDate);
+      return;
+    }
 
     setSelectedDashboardDate(
       formatDateInputValue(referenceIso ? new Date(referenceIso) : new Date()),
     );
-  }, [isProjectTimeReferenceReady, referenceIso]);
+  }, [isProjectTimeReferenceReady, referenceIso, searchParams]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -745,19 +858,28 @@ export default function DashboardPage() {
   }, [refreshKey]);
 
   useEffect(() => {
-    async function loadProjectOverview() {
-      if (!selectedProjectId) return;
+    if (!selectedProjectId) return;
 
+    // Cancel-on-rerun guard: prevents an older fetch's response from
+    // landing AFTER a newer one (would otherwise overwrite mainTasks
+    // and produce the "card briefly shows the right project, then
+    // flips to a different one" bug).
+    let cancelled = false;
+    const runForId = selectedProjectId;
+
+    async function loadProjectOverview() {
       try {
         setLoadingDetails(true);
 
         const response = await fetch(
           `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
-            selectedProjectId,
+            runForId,
           )}`,
         );
 
         const data = (await response.json()) as OverviewResponse;
+
+        if (cancelled || runForId !== selectedProjectId) return;
 
         if (!response.ok) {
           throw new Error(
@@ -787,7 +909,7 @@ export default function DashboardPage() {
 
           setProjects((prev) =>
             prev.map((project) =>
-              project.id === selectedProjectId
+              project.id === runForId
                 ? {
                     ...project,
                     status: freshStatus,
@@ -809,26 +931,142 @@ export default function DashboardPage() {
         setOpenProcessIds(defaultOpen);
         setOpenSubtaskIds(new Set());
       } catch (error) {
+        if (cancelled || runForId !== selectedProjectId) return;
         console.error(error);
         setOverviewProject(null);
         setMainTasks([]);
         setOpenProcessIds(new Set());
         setOpenSubtaskIds(new Set());
       } finally {
-        setLoadingDetails(false);
+        if (!cancelled && runForId === selectedProjectId) {
+          setLoadingDetails(false);
+        }
       }
     }
 
     loadProjectOverview();
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedProjectId, refreshKey]);
 
-  const projectsForSelectedDate = useMemo(() => {
-    const matchingProjects = projects.filter((project) =>
+  // Realtime subscription on project_sub_task — when an admin or
+  // another employee marks a subtask done, this dashboard's
+  // mainTasks state patches in place without a refetch. See
+  // useProjectSubtaskRealtime for the wiring details.
+  const watchedProjectTaskIds = useMemo(() => {
+    return mainTasks
+      .map((mainTask) => {
+        const value = mainTask.project_task_id ?? mainTask.id;
+        return typeof value === "string" ? value : null;
+      })
+      .filter((id): id is string => Boolean(id));
+  }, [mainTasks]);
+
+  const patchSubtaskInState = useCallback((newRow: ProjectSubtaskRow) => {
+    setMainTasks((prevMainTasks) => {
+      let touched = false;
+      const next = prevMainTasks.map((mainTask) => {
+        const subtaskKeys = [
+          "subTasks",
+          "subtasks",
+          "projectSubTasks",
+          "project_sub_tasks",
+        ] as const;
+
+        const updatedMainTask = { ...mainTask };
+        let mainTaskTouched = false;
+
+        for (const key of subtaskKeys) {
+          const subtasks = mainTask[key];
+          if (!Array.isArray(subtasks)) continue;
+          const patched = subtasks.map((subTask) => {
+            const record = subTask as Record<string, unknown>;
+            const id = String(
+              record.project_sub_task_id ?? record.id ?? "",
+            );
+            if (id !== newRow.project_sub_task_id) return subTask;
+            mainTaskTouched = true;
+            return {
+              ...record,
+              status: newRow.status,
+              scheduled_start_datetime: newRow.scheduled_start_datetime,
+              scheduled_end_datetime: newRow.scheduled_end_datetime,
+              updated_at: newRow.updated_at,
+            };
+          });
+          if (mainTaskTouched) {
+            (updatedMainTask as Record<string, unknown>)[key] = patched;
+          }
+        }
+
+        if (mainTaskTouched) {
+          touched = true;
+          return updatedMainTask;
+        }
+        return mainTask;
+      });
+
+      return touched ? next : prevMainTasks;
+    });
+  }, []);
+
+  const realtimeStatus = useProjectSubtaskRealtime({
+    projectTaskIds: watchedProjectTaskIds,
+    enabled: Boolean(selectedProjectId) && !loadingDetails,
+    onSubtaskEvent: useCallback(
+      (event) => {
+        if (event.eventType === "INSERT" || event.eventType === "DELETE") {
+          // Schema-shape events are rare during execution — fall back
+          // to the heavyweight refresh so joined fields stay correct.
+          setRefreshKey((k) => k + 1);
+          return;
+        }
+        patchSubtaskInState(event.newRow);
+      },
+      [patchSubtaskInState],
+    ),
+  });
+
+  // All projects scheduled for the selected date (regardless of
+  // status). We keep this around so we can tell apart "the day is
+  // genuinely empty" from "the day has projects but staff has nothing
+  // actionable on them" — the empty-state copy differs.
+  const projectsScheduledForDay = useMemo(() => {
+    return projects.filter((project) =>
       isProjectOnDate(project, selectedDashboardDate),
     );
-
-    return matchingProjects.length > 0 ? matchingProjects : projects;
   }, [projects, selectedDashboardDate]);
+
+  // Staff only sees in_progress projects — anything past the work
+  // phase (review_pending, invoice_*, payment_*, etc.) belongs to
+  // the admin's wrap-up, not to staff. Anything before in_progress
+  // (job creation) is also admin-only. This filter applies to both
+  // the workday picker dropdown and the auto-select target so the
+  // staff dashboard never lands on a "done" project.
+  const projectsForSelectedDate = useMemo(() => {
+    return projectsScheduledForDay
+      .filter((project) => {
+        const status = String(project.rawStatus ?? project.status ?? "")
+          .trim()
+          .toLowerCase();
+        return status === "in_progress";
+      })
+      .slice()
+      .sort((a, b) => {
+        const aTerm = isProjectTerminal(a);
+        const bTerm = isProjectTerminal(b);
+        if (aTerm === bTerm) return 0;
+        return aTerm ? 1 : -1;
+      });
+  }, [projectsScheduledForDay]);
+
+  // True when the day has scheduled projects but every one of them
+  // has moved past in_progress — drives the "No work left today"
+  // empty state vs the generic "No projects today".
+  const dayHasOnlyDoneProjects =
+    projectsScheduledForDay.length > 0 && projectsForSelectedDate.length === 0;
 
   useEffect(() => {
     if (projectsForSelectedDate.length === 0) {
@@ -837,16 +1075,32 @@ export default function DashboardPage() {
       return;
     }
 
-    const selectedStillValid = projectsForSelectedDate.some(
+    const selected = projectsForSelectedDate.find(
       (project) => project.id === selectedProjectId,
     );
 
-    if (selectedStillValid) return;
+    if (!selected) {
+      const nextProject = projectsForSelectedDate[0];
+      setSelectedProjectId(nextProject.id);
+      setSelectedProject(nextProject);
+      return;
+    }
 
-    const nextProject = projectsForSelectedDate[0];
+    // Honour explicit dropdown picks even when terminal.
+    if (explicitlyPickedIdRef.current === selectedProjectId) return;
 
-    setSelectedProjectId(nextProject.id);
-    setSelectedProject(nextProject);
+    // Auto-driven selection lands on a finished project — flip to the
+    // first active project on the same workday so the dashboard shows
+    // the in-flight work by default.
+    if (!isProjectTerminal(selected)) return;
+
+    const firstActive = projectsForSelectedDate.find(
+      (project) => !isProjectTerminal(project),
+    );
+    if (!firstActive) return;
+
+    setSelectedProjectId(firstActive.id);
+    setSelectedProject(firstActive);
   }, [projectsForSelectedDate, selectedProjectId]);
 
   const selectedStatus = readString(
@@ -862,13 +1116,36 @@ export default function DashboardPage() {
     return deriveProjectMeta(selectedProject, overviewProject, mainTasks);
   }, [selectedProject, overviewProject, mainTasks]);
 
+  const cancellationPhase = useMemo(
+    () =>
+      normalizeCancellationPhase(
+        typeof overviewProject?.cancellation_phase === "string"
+          ? (overviewProject.cancellation_phase as string)
+          : null,
+      ),
+    [overviewProject],
+  );
+
+  const cancelledAt = useMemo(() => {
+    const value = overviewProject?.cancelled_at;
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  }, [overviewProject]);
+
   const processItems = useMemo(() => {
     return buildProcessItems({
       projectStatus: selectedStatus,
       mainTasks,
       projectEnd: projectMeta.endDatetime || null,
+      cancellationPhase,
+      cancelledAt,
     });
-  }, [selectedStatus, mainTasks, projectMeta.endDatetime]);
+  }, [
+    selectedStatus,
+    mainTasks,
+    projectMeta.endDatetime,
+    cancellationPhase,
+    cancelledAt,
+  ]);
 
   const reviewSummary = useMemo(() => {
     return buildProjectReviewSummary({
@@ -921,15 +1198,11 @@ export default function DashboardPage() {
       );
     }
 
-    // Soft warning: status update succeeded but the cascade follow-up
-    // (shifting later subtasks) didn't go through. Don't fail the action,
-    // just nudge the user.
-    if (data?.cascade?.warning) {
-      toast.warning("Subtask marked done, but follow-up schedule shift didn't apply", {
-        description:
-          "Network blip — the rest of the subtasks weren't shifted. Reload to see what happened.",
-      });
-    }
+    // Cascade runs in the background server-side now and broadcasts
+    // its updates via realtime — the dashboard auto-patches the
+    // shifted subtask times. If it fails, the server logs it and
+    // the user notices their schedule didn't move. We no longer
+    // surface a per-call cascade warning here.
 
     const nextProjectStatus =
       typeof data?.projectStatus === "string" && data.projectStatus.trim()
@@ -960,7 +1233,13 @@ export default function DashboardPage() {
       );
     }
 
-    setRefreshKey((k) => k + 1);
+    // No `setRefreshKey((k) => k + 1)` here on purpose — the realtime
+    // subscription on project_sub_task patches the finishing subtask's
+    // status change AND the cascade's later-subtask shifts as their
+    // UPDATE events broadcast. Triggering a full overview refetch
+    // would do the same work twice and add ~200-500ms to the
+    // perceived "Finishing..." spinner. Project status flip is
+    // covered by the optimistic setters above.
   }
 
   function handleDashboardProjectChange(projectId: string) {
@@ -968,6 +1247,9 @@ export default function DashboardPage() {
 
     if (!nextProject) return;
 
+    // Dropdown click is explicit — don't let the auto-select effect
+    // flip back to an active sibling on the next render.
+    explicitlyPickedIdRef.current = projectId;
     setSelectedProjectId(nextProject.id);
     setSelectedProject(nextProject);
   }
@@ -1018,6 +1300,14 @@ export default function DashboardPage() {
               currentUserId={currentUserId}
               employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
+              emptyProjectState={
+                dayHasOnlyDoneProjects
+                  ? "no-work-left-today"
+                  : "no-projects-today"
+              }
+              cancellationPhase={cancellationPhase}
+              canManageCancellation={false}
+              realtimeStatus={realtimeStatus}
             />
           </div>
 

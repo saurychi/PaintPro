@@ -157,14 +157,20 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        // Only surface projects that have actually entered the work / wrap-up
-        // phase. Earlier draft statuses belong on /admin/projects, not on the
-        // calendar.
+        // Surface every project with a confirmed schedule — including the
+        // pre-work states (client signed quotation → downpayment → ready)
+        // where the calendar still needs to show *when* the work is going
+        // to happen. Earlier draft statuses belong on /admin/projects, not
+        // on the calendar.
         const SCHEDULE_VISIBLE_STATUSES = new Set([
+          "client_quotation_done",
+          "downpayment_pending",
+          "ready_to_start",
           "in_progress",
           "review_pending",
           "invoice_pending",
           "invoice_agreement_pending",
+          "invoice_signed",
           "payment_pending",
           "employee_management_pending",
           "conclude_job_pending",

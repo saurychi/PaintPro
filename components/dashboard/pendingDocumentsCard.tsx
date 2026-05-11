@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, FileText, Loader2 } from "lucide-react";
+import { AlertCircle, FileText, Loader2, RefreshCw } from "lucide-react";
 
 type ProjectStatus = string;
 
@@ -20,6 +20,10 @@ type Props = {
   projects?: PendingDocumentProject[];
   selectedProject?: PendingDocumentProject | null;
   loading?: boolean;
+  // When provided, renders a refresh icon button next to the title. Caller
+  // is responsible for re-fetching the project data and (optionally)
+  // notifying any sidebar badges that depend on the same status.
+  onRefresh?: () => void | Promise<void>;
   className?: string;
 };
 
@@ -36,10 +40,22 @@ function PendingDocumentsCard({
   projects = [],
   selectedProject = null,
   loading = false,
+  onRefresh,
   className = "",
 }: Props) {
   const router = useRouter();
   const sectionRef = useRef<HTMLElement | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    if (!onRefresh || refreshing) return;
+    try {
+      setRefreshing(true);
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const [size, setSize] = useState({
     width: 0,
@@ -116,14 +132,32 @@ function PendingDocumentsCard({
             ) : null}
           </div>
 
-          {loading ? (
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-400 dark:text-slate-500" />
-          ) : pendingProjects.length > 0 ? (
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-medium text-amber-700 dark:border-amber-500/35 dark:bg-amber-500/15 dark:text-amber-300">
-              <AlertCircle className="h-3.5 w-3.5" />
-              Needs signature
-            </span>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-slate-400 dark:text-slate-500" />
+            ) : pendingProjects.length > 0 ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-medium text-amber-700 dark:border-amber-500/35 dark:bg-amber-500/15 dark:text-amber-300">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Needs signature
+              </span>
+            ) : null}
+            {onRefresh ? (
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing || loading}
+                title="Refresh pending documents"
+                aria-label="Refresh pending documents"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700">
+                <RefreshCw
+                  className={[
+                    "h-3.5 w-3.5",
+                    refreshing || loading ? "animate-spin" : "",
+                  ].join(" ")}
+                />
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -131,8 +165,13 @@ function PendingDocumentsCard({
         <div className="min-h-0 flex-1 overflow-hidden">
           <div
             className={[
-              "flex h-full min-h-0 flex-1 items-center overflow-y-auto",
-              isCompact ? "px-4 py-3" : "px-4 py-4",
+              // `items-start` (not `items-center`) — when there's a
+              // single document the row should sit at the top of the
+              // body, not float in the middle of all the empty space.
+              // The empty-state below has its own `items-center` so it
+              // still self-centers when there's nothing to show.
+              "flex h-full min-h-0 flex-1 items-start overflow-y-auto",
+              isCompact ? "px-4 py-2" : "px-4 py-3",
               "[&::-webkit-scrollbar]:w-2",
               "[&::-webkit-scrollbar-track]:bg-transparent",
               "[&::-webkit-scrollbar-thumb]:rounded-full",

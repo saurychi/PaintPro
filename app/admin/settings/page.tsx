@@ -13,6 +13,7 @@ import {
   getAutoStartProjects,
   setAutoStartProjects,
 } from "@/lib/settings/autoStartProjects";
+import { SIGNATURE_UPDATED_EVENT } from "@/lib/hooks/useUserSignature";
 
 const ACCENT = "#00c065";
 
@@ -447,6 +448,13 @@ export default function AdminSettings() {
       }
 
       setSignatureMsg("Signature saved.");
+
+      // Let the sidebar badge fetcher and the dashboard's Create Project
+      // gate drop their stale "no signature" state without waiting for a
+      // refetch.
+      try {
+        window.dispatchEvent(new Event(SIGNATURE_UPDATED_EVENT));
+      } catch {}
     } catch (e: any) {
       console.error(e);
       setSignatureErr(e?.message || "Failed to save signature.");
@@ -468,7 +476,7 @@ export default function AdminSettings() {
     return (
       <div className="min-h-svh flex items-center justify-center bg-white px-6 dark:bg-slate-950">
         <div className="flex flex-col items-center gap-4 text-center">
-          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-slate-500 dark:border-t-[#00c065]" />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-r-gray-200 border-b-gray-200 border-l-gray-200 border-t-[#00c065] dark:border-r-slate-600 dark:border-b-slate-600 dark:border-l-slate-600 dark:border-t-[#00c065]" />
           <p className="text-sm text-gray-600 dark:text-slate-400">Loading settings…</p>
         </div>
       </div>
@@ -811,11 +819,11 @@ export default function AdminSettings() {
                     />
 
                     <SettingsNavigationCard
-                      title="Change Estimations"
+                      title="Edit Estimations"
                       description="Manage estimation formulas, variables, and preview rules."
                       icon={Calculator}
                       onClick={() =>
-                        router.push("/admin/settings/change-estimations")
+                        router.push("/admin/settings/edit-estimations")
                       }
                     />
                   </div>

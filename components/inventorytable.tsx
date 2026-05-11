@@ -63,20 +63,20 @@ function formatUnit(unit: string | null | undefined, quantity: number) {
 }
 
 export default function InventoryTable({ data, type, isLoading, onRowClick, onQuickAdd }: InventoryTableProps) {
-  if (isLoading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-gray-500" /></div>
-  if (!data || data.length === 0) return <div className="m-auto flex flex-col items-center justify-center text-gray-400 py-12"><p className="text-sm">No items found matching your filters.</p></div>
+  if (isLoading) return <div className="flex justify-center p-6"><Loader2 className="animate-spin text-gray-500 h-4 w-4" /></div>
+  if (!data || data.length === 0) return <div className="m-auto flex flex-col items-center justify-center text-gray-400 py-8"><p className="text-xs">No items found matching your filters.</p></div>
 
   return (
-    <div className="flex-1 overflow-auto custom-scrollbar rounded-lg border border-gray-200 bg-white shadow-sm">
-      <table className="w-full text-sm text-left">
-        <thead className="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0 z-10 shadow-[0_1px_0_#e5e7eb]">
+    <div className="flex-1 overflow-auto custom-scrollbar rounded-md border border-gray-200 bg-white shadow-sm">
+      <table className="w-full text-xs text-left">
+        <thead className="text-[10px] text-gray-500 uppercase bg-gray-50 sticky top-0 z-10 shadow-[0_1px_0_#e5e7eb]">
           <tr>
-            <th className="px-5 py-3.5 font-semibold">Item Name</th>
-            <th className="px-5 py-3.5 font-semibold">Location</th>
-            <th className="px-5 py-3.5 font-semibold">Supplier</th>
-            <th className="px-5 py-3.5 font-semibold">Status / Details</th>
-            {type === "materials" && <th className="px-5 py-3.5 font-semibold text-center">Needed Stock</th>}
-            {type === "materials" && <th className="px-5 py-3.5 font-semibold text-right">Unit Cost</th>}
+            <th className="px-3 py-2 font-semibold">Item Name</th>
+            <th className="px-3 py-2 font-semibold">Location</th>
+            <th className="px-3 py-2 font-semibold">Supplier</th>
+            <th className="px-3 py-2 font-semibold">Status / Details</th>
+            {type === "materials" && <th className="px-3 py-2 font-semibold text-center">Needed Stock</th>}
+            {type === "materials" && <th className="px-3 py-2 font-semibold text-right">Unit Cost</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -84,60 +84,60 @@ export default function InventoryTable({ data, type, isLoading, onRowClick, onQu
             const id = getItemId(item)
             const supplierLabel = getSupplierLabel(item)
             const supplierColor = getSupplierColor(item)
-            
+
             const stock = getStockValue(item, type)
             const reorderPoint = item.reorder_point ?? 0
             const neededStock = item.needed_stock ?? 0
-            
+
             const isBelowReorder = type === "materials" && stock < reorderPoint
             const isNearReorder = type === "materials" && !isBelowReorder && stock <= (reorderPoint + 1)
             const hasNeededStock = type === "materials" && neededStock > 0
 
             return (
               <tr key={id} onClick={() => onRowClick(item)} className="hover:bg-gray-50 transition-colors cursor-pointer">
-                <td className="px-5 py-3">
-                  <div className="font-semibold text-gray-900">{item.name || "Unnamed Item"}</div>
+                <td className="px-3 py-2">
+                  <div className="text-xs font-semibold text-gray-900">{item.name || "Unnamed Item"}</div>
                   {item.tag?.tag_name && (
-                    <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase tracking-wide" style={{ color: item.tag.color || "#6b7280", borderColor: item.tag.color || "#e5e7eb", backgroundColor: `${item.tag.color || "#e5e7eb"}15` }}>
+                    <span className="inline-block mt-0.5 px-1.5 py-0 text-[9px] font-bold rounded-full border uppercase tracking-wide" style={{ color: item.tag.color || "#6b7280", borderColor: item.tag.color || "#e5e7eb", backgroundColor: `${item.tag.color || "#e5e7eb"}15` }}>
                       {item.tag.tag_name}
                     </span>
                   )}
                 </td>
-                
-                <td className="px-5 py-3 text-gray-600">{item.location?.name || <span className="text-gray-400 italic">Unassigned</span>}</td>
-                
-                <td className="px-5 py-3 text-gray-600">
+
+                <td className="px-3 py-2 text-[11px] text-gray-600">{item.location?.name || <span className="text-gray-400 italic">Unassigned</span>}</td>
+
+                <td className="px-3 py-2 text-[11px] text-gray-600">
                   {supplierLabel ? (
-                    <span className="inline-block px-2.5 py-0.5 text-xs font-medium rounded-full border" style={{ color: supplierColor || "#d97706", borderColor: supplierColor || "#fcd34d", backgroundColor: `${supplierColor || "#fcd34d"}15` }}>
+                    <span className="inline-block px-2 py-0 text-[10px] font-medium rounded-full border" style={{ color: supplierColor || "#d97706", borderColor: supplierColor || "#fcd34d", backgroundColor: `${supplierColor || "#fcd34d"}15` }}>
                       {supplierLabel}
                     </span>
                   ) : <span className="text-gray-400">-</span>}
                 </td>
 
-                <td className="px-5 py-3">
-                  <div className="flex flex-col gap-1">
-                    <span className={`w-fit px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                        item.status === 'Available' || item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 
-                        item.status === 'Needs Reorder' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 
-                        item.status === 'In Use' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 
-                        item.status === 'Archived' ? 'bg-gray-200 text-gray-600 border border-gray-300' : 
+                <td className="px-3 py-2">
+                  <div className="flex flex-col gap-0.5">
+                    <span className={`w-fit px-1.5 py-0 rounded-full text-[9px] font-bold uppercase tracking-wide ${
+                        item.status === 'Available' || item.status === 'Active' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                        item.status === 'Needs Reorder' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                        item.status === 'In Use' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                        item.status === 'Archived' ? 'bg-gray-200 text-gray-600 border border-gray-300' :
                         'bg-gray-100 text-gray-700 border border-gray-200'
                       }`}
                     >
                       {item.status || 'Active'}
                     </span>
-                    
+
                     {type === "materials" && (
                       <>
-                        <span className="text-gray-900 text-xs font-medium mt-0.5">
+                        <span className="text-gray-900 text-[11px] font-medium">
                           In Stock: {stock} {formatUnit(item.unit, stock)}
                         </span>
-                        
+
                         {/* Display Reorder Point Warning */}
-                        <span className="text-xs text-gray-500 flex items-center gap-1">
+                        <span className="text-[10px] text-gray-500 flex items-center gap-1">
                           Reorder Pt: {reorderPoint}
-                          {isBelowReorder && !hasNeededStock && <AlertTriangle className="w-3 h-3 text-red-500 fill-red-500" />}
-                          {isNearReorder && !hasNeededStock && <AlertTriangle className="w-3 h-3 text-yellow-500 fill-yellow-500" />}
+                          {isBelowReorder && !hasNeededStock && <AlertTriangle className="w-2.5 h-2.5 text-red-500 fill-red-500" />}
+                          {isNearReorder && !hasNeededStock && <AlertTriangle className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" />}
                         </span>
                       </>
                     )}
@@ -146,17 +146,17 @@ export default function InventoryTable({ data, type, isLoading, onRowClick, onQu
 
                 {/* NEEDED STOCK COLUMN WITH QUICK ADD SHORTCUT */}
                 {type === "materials" && (
-                  <td className="px-5 py-3 text-center">
+                  <td className="px-3 py-2 text-center">
                     {hasNeededStock ? (
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation() // Prevents the main row click from opening the normal edit modal
                           if (onQuickAdd) onQuickAdd(item)
                         }}
                         title="Click to resolve deficit"
-                        className="inline-flex items-center justify-center gap-1.5 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-colors px-2.5 py-1 rounded-md border border-red-200 font-semibold text-xs shadow-sm cursor-pointer"
+                        className="inline-flex items-center justify-center gap-1 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.97] px-2 py-0.5 rounded-md border border-red-200 font-semibold text-[10px] shadow-sm cursor-pointer"
                       >
-                        {neededStock} <AlertOctagon className="w-3.5 h-3.5 text-red-600 fill-red-200" />
+                        {neededStock} <AlertOctagon className="w-3 h-3 text-red-600 fill-red-200" />
                       </button>
                     ) : (
                       <span className="text-gray-400">-</span>
@@ -165,7 +165,7 @@ export default function InventoryTable({ data, type, isLoading, onRowClick, onQu
                 )}
 
                 {type === "materials" && (
-                  <td className="px-5 py-3 text-right font-semibold text-gray-900">
+                  <td className="px-3 py-2 text-right text-xs font-semibold text-gray-900">
                     PHP {(item.unit_cost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                 )}

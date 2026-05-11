@@ -92,6 +92,16 @@ export async function POST(request: NextRequest) {
       (existingProjectTasks ?? []).map((r) => [r.main_task_id, r.project_task_id]),
     );
 
+    // Snapshot the pre-delete project_task_id → main_task_id mapping so we
+    // can translate stale cached projectTaskIds (carried by materials) when
+    // the DB row was deleted-and-recreated below.
+    const oldProjectTaskToMainTask = new Map<string, string>(
+      (existingProjectTasks ?? []).map((r) => [
+        r.project_task_id as string,
+        r.main_task_id as string,
+      ]),
+    );
+
     // Delete removed main tasks (cascades to subtasks)
     const toDeletePTIds = (existingProjectTasks ?? [])
       .filter((row) => !incomingMainTaskIds.includes(row.main_task_id))
@@ -197,15 +207,48 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Insert current materials
+      // Resolve each material's project_task_id against the current set of
+      // valid IDs. If the cache carries a stale projectTaskId (because the
+      // row was deleted+recreated above, or because the cache survived
+      // across sessions), translate via main_task_id when possible. Drop
+      // materials whose parent task no longer exists — they're orphans.
+      const validPtIds = new Set<string>(ptIdMap.values());
+
+      const orphanedMaterials: IncomingMaterial[] = [];
       const materialRows = materials
-        .filter((m) => m.materialId && m.projectTaskId)
-        .map((m) => ({
-          project_task_id: m.projectTaskId,
-          material_id: m.materialId,
-          estimated_quantity: Number(m.quantity ?? 0),
-          estimated_cost: Number(m.estimatedCost ?? 0),
+        .filter((m) => m.materialId)
+        .map((m) => {
+          let projectTaskId = m.projectTaskId;
+          if (!validPtIds.has(projectTaskId)) {
+            const mainTaskId = oldProjectTaskToMainTask.get(projectTaskId);
+            const translated = mainTaskId ? ptIdMap.get(mainTaskId) : undefined;
+            if (translated) projectTaskId = translated;
+          }
+          return { material: m, projectTaskId };
+        })
+        .filter(({ material, projectTaskId }) => {
+          if (validPtIds.has(projectTaskId)) return true;
+          orphanedMaterials.push(material);
+          return false;
+        })
+        .map(({ material, projectTaskId }) => ({
+          project_task_id: projectTaskId,
+          material_id: material.materialId,
+          estimated_quantity: Number(material.quantity ?? 0),
+          estimated_cost: Number(material.estimatedCost ?? 0),
         }));
+
+      if (orphanedMaterials.length > 0) {
+        console.warn(
+          "[batchSaveProject] dropped %d orphaned materials with no matching project_task: %j",
+          orphanedMaterials.length,
+          orphanedMaterials.map((m) => ({
+            id: m.id,
+            cachedProjectTaskId: m.projectTaskId,
+            materialId: m.materialId,
+          })),
+        );
+      }
 
       if (materialRows.length > 0) {
         const { error: insertMaterialsError } = await supabaseAdmin
@@ -213,15 +256,26 @@ export async function POST(request: NextRequest) {
           .insert(materialRows);
 
         if (insertMaterialsError) {
+          console.error(
+            "[batchSaveProject] insert project_task_material failed:",
+            insertMaterialsError,
+            "rows sample:",
+            materialRows.slice(0, 3),
+          );
           return NextResponse.json(
-            { error: "Failed to save materials.", details: insertMaterialsError.message },
+            {
+              error: "Failed to save materials.",
+              details: insertMaterialsError.message,
+              code: insertMaterialsError.code ?? null,
+              hint: insertMaterialsError.hint ?? null,
+            },
             { status: 500 },
           );
         }
       }
     }
 
-    // ─── 4. Sync staff assignments (project_sub_task_staff) ──────────────────��
+    // ─── 4. Sync staff assignments (project_sub_task_staff) ──────────────────
     if (existingSubTaskIds.length > 0) {
       // Delete all existing staff for this project's subtasks
       const { error: deleteStaffError } = await supabaseAdmin
@@ -236,14 +290,32 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Confirm which of the cached subtask IDs actually exist in the DB
+      // right now — staff assignments referencing a deleted subtask would
+      // FK-fail the insert. The earlier project_task delete cascades into
+      // project_sub_task, so cache rows from a removed main task become
+      // orphans here.
+      const { data: liveSubTaskRows } = await supabaseAdmin
+        .from("project_sub_task")
+        .select("project_sub_task_id")
+        .in("project_sub_task_id", existingSubTaskIds);
+
+      const liveSubTaskIds = new Set(
+        (liveSubTaskRows ?? []).map(
+          (r) => r.project_sub_task_id as string,
+        ),
+      );
+
       // Insert current assignments
       const staffRows = subTasks.flatMap((st) =>
-        (st.assignedEmployeeIds ?? []).map((userId) => ({
-          project_sub_task_id: st.id,
-          user_id: userId,
-          role: "staff",
-          assignment_status: "assigned",
-        })),
+        liveSubTaskIds.has(st.id)
+          ? (st.assignedEmployeeIds ?? []).map((userId) => ({
+              project_sub_task_id: st.id,
+              user_id: userId,
+              role: "staff",
+              assignment_status: "assigned",
+            }))
+          : [],
       );
 
       if (staffRows.length > 0) {
@@ -252,8 +324,19 @@ export async function POST(request: NextRequest) {
           .insert(staffRows);
 
         if (insertStaffError) {
+          console.error(
+            "[batchSaveProject] insert project_sub_task_staff failed:",
+            insertStaffError,
+            "rows sample:",
+            staffRows.slice(0, 3),
+          );
           return NextResponse.json(
-            { error: "Failed to save staff assignments.", details: insertStaffError.message },
+            {
+              error: "Failed to save staff assignments.",
+              details: insertStaffError.message,
+              code: insertStaffError.code ?? null,
+              hint: insertStaffError.hint ?? null,
+            },
             { status: 500 },
           );
         }

@@ -359,15 +359,22 @@ export default function ClientDashboardPage() {
   useEffect(() => {
     if (!projectId) return;
 
+    // Cancel-on-rerun guard: if projectId changes mid-fetch, ignore the
+    // older response so it can't overwrite the freshly-loaded data.
+    let cancelled = false;
+    const runForId = projectId;
+
     async function load() {
       try {
         setLoadingDetails(true);
         setFetchError(null);
 
         const res = await fetch(
-          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(projectId!)}`,
+          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(runForId)}`,
         );
         const data = (await res.json()) as OverviewResponse;
+
+        if (cancelled || runForId !== projectId) return;
 
         if (!res.ok) {
           const msg =
@@ -387,16 +394,23 @@ export default function ClientDashboardPage() {
         // its seededForProjectRef effect on every refreshKey bump.
         setOpenSubtaskIds(new Set());
       } catch (err: unknown) {
+        if (cancelled || runForId !== projectId) return;
         const msg =
           err instanceof Error ? err.message : "Failed to load project data.";
         setFetchError(msg);
         toast.error("Could not load project", { description: msg });
       } finally {
-        setLoadingDetails(false);
+        if (!cancelled && runForId === projectId) {
+          setLoadingDetails(false);
+        }
       }
     }
 
     load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, refreshKey]);
 
   const projectStatus = readString(project?.status, project?.rawStatus);
@@ -529,14 +543,35 @@ export default function ClientDashboardPage() {
               onRefresh={() => setRefreshKey((k) => k + 1)}
               employeeReviewItems={employeeReviewItems}
               reviewSummary={reviewSummary}
+              // Hide the workflow breakdown until the project actually
+              // kicks off — clients shouldn't see internal job-creation
+              // wizard steps. Lifts automatically once status hits
+              // in_progress or beyond.
+              showPreExecutionTakeover
             />
           </div>
 
-          <div className="grid min-h-0 gap-4 lg:overflow-hidden lg:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          {/* Right column: PendingDocumentsCard sizes to its own
+              content (`auto`) instead of stealing 1/3 of the height
+              from the other cards. With usually 0-1 pending document,
+              an equal-share row leaves a big empty pad below. The
+              freed vertical space goes to Notifications + Insights. */}
+          <div className="grid min-h-0 gap-4 lg:overflow-hidden lg:grid-rows-[auto_minmax(0,1fr)_minmax(0,1fr)]">
             <div className="min-h-0 lg:overflow-hidden">
               <PendingDocumentsCard
                 selectedProject={pendingDocumentProject}
                 loading={loadingDetails}
+                onRefresh={() => {
+                  // Re-run the dashboard's project overview fetch (drives
+                  // this card's data) AND broadcast to the sidebar badge
+                  // so its "pending-documents" pill updates in lock-step.
+                  setRefreshKey((k) => k + 1);
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                      new Event("paintpro:refresh-pending-docs"),
+                    );
+                  }
+                }}
               />
             </div>
 

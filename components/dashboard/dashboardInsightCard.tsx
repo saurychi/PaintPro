@@ -419,11 +419,17 @@ function DashboardInsightCard({
 
   const { percent: percentComplete, currentLabel: currentTaskLabel } =
     useMemo(() => {
-      if (!processItems || processItems.length === 0) {
-        return { percent: 0, currentLabel: "No active task" };
+      // Mirror JobProgressCard's empty state: when no project is
+      // selected, the progress card renders NoProjectEmptyState — the
+      // analytics ring must not report progress against the workflow
+      // defaults the parent still passes in (`processItems` is built
+      // from WORKFLOW_STEPS regardless of selection, so a stale
+      // selectedStatus would otherwise leak a non-zero percent).
+      if (!projectId || !processItems || processItems.length === 0) {
+        return { percent: 0, currentLabel: "No active project" };
       }
       return computeProgressFromItems(processItems);
-    }, [processItems]);
+    }, [projectId, processItems]);
   const [loadingCosts, setLoadingCosts] = useState(false);
   const [costData, setCostData] = useState<{
     materialsCost: number;

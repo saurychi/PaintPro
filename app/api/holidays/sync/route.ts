@@ -184,6 +184,31 @@ export async function POST(request: NextRequest) {
 
     const holidays = await fetchCountryHolidays(countryCode);
 
+    // Deactivate every previously-synced holiday first. Without this step,
+    // holidays unique to a previously-selected country stay is_active=true
+    // and keep blocking the schedule even after the user switches countries.
+    // The next step re-activates only the rows whose dates match the new
+    // country's set; everything else stays inactive.
+    const { data: deactivatedRows, error: deactivateError } = await supabaseAdmin
+      .from("unavailable_days")
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("block_type", "holiday")
+      .eq("is_active", true)
+      .select("unavailable_day_id");
+
+    if (deactivateError) {
+      return NextResponse.json(
+        {
+          error: "Failed to clear stale holidays.",
+          details: deactivateError.message,
+        },
+        { status: 500 },
+      );
+    }
+
     const { data: existingRows, error: existingError } = await supabaseAdmin
       .from("unavailable_days")
       .select(
@@ -255,7 +280,7 @@ export async function POST(request: NextRequest) {
       countryCode,
       insertedCount: rowsToInsert.length,
       updatedCount: rowsToUpdate.length,
-      deactivatedCount: 0,
+      deactivatedCount: deactivatedRows?.length ?? 0,
     });
   } catch (error) {
     return NextResponse.json(

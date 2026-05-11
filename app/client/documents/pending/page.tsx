@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SignatureCanvas from "react-signature-canvas";
 import {
   Check,
   Download,
+  ExternalLink,
   FileText,
   Loader2,
   PenLine,
+  RefreshCw,
   Send,
 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useClientProject } from "../../ClientShellClient";
@@ -22,9 +25,14 @@ type ProjectOverviewResponse = {
     description?: string | null;
     site_address?: string | null;
     status?: string | null;
+    cancellation_phase?: string | null;
+    cancellation_balance?: number | null;
+    cancellation_earned_revenue?: number | null;
+    cancellation_earned_cost?: number | null;
     estimated_budget?: number | null;
     estimated_cost?: number | null;
     estimated_profit?: number | null;
+    downpayment?: number | null;
   };
   error?: string;
   details?: string;
@@ -85,6 +93,11 @@ export default function ClientPendingDocumentsPage() {
 
   const signatureRef = useRef<SignatureCanvas | null>(null);
   const signatureWrapRef = useRef<HTMLDivElement | null>(null);
+  // Separate signature canvas for the cancellation-agreement flow so the
+  // resize effect that auto-fits the canvas doesn't fight with the
+  // invoice/quotation canvas mounted in the main layout.
+  const cancellationSignatureRef = useRef<SignatureCanvas | null>(null);
+  const cancellationSignatureWrapRef = useRef<HTMLDivElement | null>(null);
 
   const projectId = searchParams.get("projectId") || sessionProjectId || "";
 
@@ -95,11 +108,16 @@ export default function ClientPendingDocumentsPage() {
     CostEstimationResponse["summary"] | null
   >(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [approving, setApproving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   // Tracks whether the bucket PDF has finished loading inside the iframe so
   // we can keep a spinner over it until the document is actually visible.
   const [previewLoaded, setPreviewLoaded] = useState(false);
+  // Bumped on every refresh so the iframe key changes and the viewer
+  // remounts, picking up the latest bucket PDF (e.g. the just-signed
+  // version) even when projectStatus hasn't advanced.
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
 
   const [signatureErr, setSignatureErr] = useState<string | null>(null);
 
@@ -107,11 +125,30 @@ export default function ClientPendingDocumentsPage() {
   // The signature endpoint persists the signed PDF but intentionally leaves
   // projects.status alone, so we drive the post-sign UI from these refs.
   const [justSignedQuotation, setJustSignedQuotation] = useState(false);
+  const [justSignedCancellationAgreement, setJustSignedCancellationAgreement] =
+    useState(false);
   const [notifyingPM, setNotifyingPM] = useState(false);
   const [pmNotified, setPmNotified] = useState(false);
+  const [signingCancellationAgreement, setSigningCancellationAgreement] =
+    useState(false);
+  const [cancellationSignatureErr, setCancellationSignatureErr] =
+    useState<string | null>(null);
 
   const projectStatus = String(project?.status || "").trim();
+  const cancellationPhase = String(project?.cancellation_phase || "")
+    .trim()
+    .toLowerCase();
   const documentType = getDocumentType(projectStatus);
+  // Cancellation-agreement signing surfaces here when the project is
+  // cancelled and the cancel-flow is parked on the "document" phase
+  // (admin clicked "Notify client", which uploads the unsigned agreement
+  // PDF to storage). After signing, the phase advances past "document".
+  const isPendingCancellationAgreement =
+    projectStatus === "cancelled" && cancellationPhase === "document";
+  const isCancellationAgreementSigned =
+    projectStatus === "cancelled" &&
+    (justSignedCancellationAgreement ||
+      (cancellationPhase !== "" && cancellationPhase !== "review" && cancellationPhase !== "document"));
 
   // Client can only sign once the manager has explicitly granted access
   // (grant_access_quotation). Before that (quotation_pending) the client
@@ -175,26 +212,29 @@ export default function ClientPendingDocumentsPage() {
     setPreviewLoaded(false);
   }, [previewSrc]);
 
-  useEffect(() => {
-    if (!projectId) {
-      setLoading(false);
-      return;
-    }
+  const loadProject = useCallback(
+    async (mode: "initial" | "refresh" = "initial") => {
+      if (!projectId) {
+        setLoading(false);
+        return;
+      }
 
-    async function loadProject() {
       try {
-        setLoading(true);
+        if (mode === "refresh") setRefreshing(true);
+        else setLoading(true);
 
         const [overviewRes, costRes] = await Promise.all([
           fetch(
             `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
               projectId,
             )}`,
+            { cache: "no-store" },
           ),
           fetch(
             `/api/planning/getProjectCostEstimation?projectId=${encodeURIComponent(
               projectId,
             )}`,
+            { cache: "no-store" },
           ),
         ]);
 
@@ -227,11 +267,30 @@ export default function ClientPendingDocumentsPage() {
         });
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
-    }
+    },
+    [projectId],
+  );
 
-    loadProject();
-  }, [projectId]);
+  useEffect(() => {
+    void loadProject("initial");
+  }, [loadProject]);
+
+  async function handleRefresh() {
+    if (refreshing || loading) return;
+    // Force the PDF viewer to remount so the bucket's latest version
+    // (e.g. the freshly client-signed PDF) is fetched again.
+    setPreviewLoaded(false);
+    setPreviewRefreshKey((k) => k + 1);
+    await loadProject("refresh");
+    // Same broadcast the dashboard's refresh button uses, so the sidebar
+    // "pending-documents" badge re-checks in lock-step instead of waiting
+    // for its next 15s poll.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("paintpro:refresh-pending-docs"));
+    }
+  }
 
   // react-signature-canvas defaults the canvas's intrinsic bitmap to 300x150
   // even when CSS stretches it to 100% width — so on a phone, touch points
@@ -287,6 +346,52 @@ export default function ClientPendingDocumentsPage() {
     // status changes — without this dep, the effect would attach to a stale
     // canvas after a re-render swaps the panel in.
   }, [isPendingQuotation, isPendingInvoiceAgreement]);
+
+  // Sibling effect for the cancellation-agreement signature canvas — same
+  // resize/devicePixelRatio handling, but bound to the dedicated cancellation
+  // refs so the two canvases don't fight over the same node.
+  useEffect(() => {
+    const wrap = cancellationSignatureWrapRef.current;
+    const sigPad = cancellationSignatureRef.current;
+    if (!wrap || !sigPad) return;
+
+    function resize() {
+      const pad = cancellationSignatureRef.current;
+      const node = cancellationSignatureWrapRef.current;
+      if (!pad || !node) return;
+
+      const canvas = pad.getCanvas();
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      const rect = node.getBoundingClientRect();
+
+      const data = typeof pad.toData === "function" ? pad.toData() : null;
+
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      const ctx = canvas.getContext("2d");
+      ctx?.setTransform(1, 0, 0, 1, 0, 0);
+      ctx?.scale(ratio, ratio);
+
+      if (data && typeof pad.fromData === "function") {
+        pad.fromData(data);
+      } else {
+        pad.clear();
+      }
+    }
+
+    resize();
+
+    const observer = new ResizeObserver(() => resize());
+    observer.observe(wrap);
+    window.addEventListener("orientationchange", resize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("orientationchange", resize);
+    };
+  }, [isPendingCancellationAgreement]);
 
   async function signQuotation() {
     if (!projectId || approving) return;
@@ -365,6 +470,10 @@ export default function ClientPendingDocumentsPage() {
         body: JSON.stringify({
           projectId,
           projectCode: project?.project_code ?? "",
+          // Lets the endpoint pick the right "next step" wording —
+          // "downpayment step" for quotations, "payment step" for
+          // invoices. Defaults to quotation when unspecified.
+          documentType: documentType === "invoice" ? "invoice" : "quotation",
         }),
       });
 
@@ -462,6 +571,130 @@ export default function ClientPendingDocumentsPage() {
     }
   }
 
+  async function signCancellationAgreement() {
+    if (!projectId || signingCancellationAgreement) return;
+
+    setCancellationSignatureErr(null);
+
+    if (
+      !cancellationSignatureRef.current ||
+      cancellationSignatureRef.current.isEmpty()
+    ) {
+      setCancellationSignatureErr("Please draw your signature.");
+      return;
+    }
+
+    try {
+      setSigningCancellationAgreement(true);
+
+      const signatureDataUrl = cancellationSignatureRef.current
+        .getTrimmedCanvas()
+        .toDataURL("image/png");
+
+      const response = await fetch(
+        "/api/client/documents/cancellation-agreement-signature",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            projectCode: project?.project_code,
+            signatureDataUrl,
+          }),
+        },
+      );
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to sign cancellation agreement.",
+        );
+      }
+
+      // The signature endpoint advances the project's cancellation_phase
+      // past "document". Reflect that locally so the post-sign UI sticks
+      // even before the next refresh.
+      setProject((prev) =>
+        prev ? { ...prev, cancellation_phase: "payment" } : prev,
+      );
+      setJustSignedCancellationAgreement(true);
+      cancellationSignatureRef.current.clear();
+      // Force the iframe to remount so it pulls the freshly-uploaded
+      // signed PDF from the bucket instead of showing the cached
+      // unsigned copy.
+      setPreviewLoaded(false);
+      setPreviewRefreshKey((k) => k + 1);
+
+      toast.success("Cancellation agreement signed.", {
+        description:
+          "Your signed agreement has been recorded. The project manager will continue the close-out from their side.",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to sign cancellation agreement.";
+
+      console.error(error);
+      toast.error("Signature failed", {
+        description: message,
+      });
+    } finally {
+      setSigningCancellationAgreement(false);
+    }
+  }
+
+  async function downloadCancellationAgreementPdf() {
+    if (!projectId || downloading) return;
+
+    try {
+      setDownloading(true);
+
+      const response = await fetch(
+        `/api/cancellation-agreement/from-bucket?projectId=${encodeURIComponent(
+          projectId,
+        )}&download=1`,
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to download cancellation agreement PDF.",
+        );
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = `cancellation-agreement-${
+        project?.project_code || projectId
+      }.pdf`;
+
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to download cancellation agreement PDF.";
+
+      console.error(error);
+      toast.error("Download failed", {
+        description: message,
+      });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function downloadDocumentPdf() {
     if (!projectId || downloading || documentType === "none") return;
 
@@ -511,6 +744,324 @@ export default function ClientPendingDocumentsPage() {
     }
   }
 
+  // Dedicated cancellation-agreement layout — shown instead of the
+  // invoice/quotation flow when the project is cancelled and currently
+  // parked on the "document" cancellation phase, OR when the client has
+  // just finished signing it. Mirrors the invoice layout (preview on
+  // left, signature panel on right) but uses cancellation-specific copy
+  // and the cancellation-agreement-signature endpoint.
+  if (
+    !loading &&
+    project &&
+    (isPendingCancellationAgreement || isCancellationAgreementSigned)
+  ) {
+    // Stream the saved PDF from storage instead of re-rendering from
+    // HTML every load. The /pdf route reads project_documents but the
+    // raw client signature is intentionally never persisted there, so
+    // it always produced an unsigned-looking preview even after the
+    // client signed. The signature endpoint uploads the baked-in
+    // signed PDF to the same bucket path on every sign, so
+    // /from-bucket reflects the latest signed (or unsigned, pre-sign)
+    // copy faithfully.
+    const previewUrl = projectId
+      ? `/api/cancellation-agreement/from-bucket?projectId=${encodeURIComponent(
+          projectId,
+        )}#navpanes=0&zoom=95`
+      : "";
+
+    return (
+      <div className="lg:h-screen lg:overflow-hidden bg-gray-50">
+        <div className="flex flex-col gap-3 p-3 sm:gap-4 sm:p-4 lg:h-full lg:min-h-0 lg:p-6">
+          <div className="shrink-0 rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="h-1 w-full rounded-t-xl bg-[#00c065]" />
+            <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-100">
+                    <FileText className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="truncate text-base font-semibold text-gray-900">
+                      {isCancellationAgreementSigned
+                        ? "Cancellation Agreement"
+                        : "Pending Cancellation Agreement"}
+                    </h1>
+                    <p className="mt-0.5 truncate text-xs text-gray-500">
+                      {isCancellationAgreementSigned
+                        ? "Your signed cancellation agreement has been recorded."
+                        : "Review and sign the agreement to finalise the project close-out."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {isCancellationAgreementSigned ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                    Signed
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+                    Needs signature
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={refreshing || loading}
+                  title="Refresh document status"
+                  aria-label="Refresh document status"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <RefreshCw
+                    className={[
+                      "h-3.5 w-3.5",
+                      refreshing || loading ? "animate-spin" : "",
+                    ].join(" ")}
+                  />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={downloadCancellationAgreementPdf}
+                  disabled={!projectId || downloading || loading}
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  {downloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  Download PDF
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-12 gap-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+            <div className="col-span-12 lg:col-span-8 lg:min-h-0 lg:overflow-hidden">
+              <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
+                <div className="shrink-0 border-b border-gray-100 px-4 py-3">
+                  <h2 className="text-sm font-semibold text-gray-900">
+                    Cancellation Agreement Preview
+                  </h2>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    This preview uses the generated cancellation agreement document.
+                  </p>
+                </div>
+
+                <div className="relative flex-1 overflow-hidden p-3 lg:min-h-[420px]">
+                  {previewUrl ? (
+                    <iframe
+                      key={`${previewUrl}-${previewRefreshKey}`}
+                      src={previewUrl}
+                      title="Cancellation Agreement Preview"
+                      onLoad={() => setPreviewLoaded(true)}
+                      className="h-full w-full rounded-lg border border-gray-200 bg-white min-h-[60vh] lg:min-h-0"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-gray-500">
+                      No agreement available yet.
+                    </div>
+                  )}
+                  {!previewLoaded && previewUrl ? (
+                    <div className="pointer-events-none absolute inset-3 flex items-center justify-center rounded-lg bg-white/60">
+                      <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <aside className="col-span-12 lg:col-span-4 lg:min-h-0 lg:overflow-hidden">
+              <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
+                <div className="h-1 w-full shrink-0 bg-[#00c065]" />
+
+                <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold text-gray-900">
+                      Cancellation Details
+                    </h2>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Project summary and document status.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={refreshing || loading}
+                    title="Refresh document details"
+                    aria-label="Refresh document details"
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                    <RefreshCw
+                      className={[
+                        "h-3.5 w-3.5",
+                        refreshing || loading ? "animate-spin" : "",
+                      ].join(" ")}
+                    />
+                  </button>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-medium text-gray-500">
+                        Project
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-gray-900">
+                        {project?.title || "Untitled Project"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-medium text-gray-500">
+                        Project Code
+                      </p>
+                      <p className="mt-1 font-mono text-sm font-semibold text-gray-900">
+                        {project?.project_code || "—"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-medium text-gray-500">
+                        Site Address
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-gray-900">
+                        {project?.site_address || "No address provided"}
+                      </p>
+                    </div>
+
+                    {/* Settlement — surfaces the bottom-line money the
+                        client either gets back or still owes after the
+                        cancellation. cancellation_balance is the source
+                        of truth (positive = refund to client, negative =
+                        client owes more, zero = settled). */}
+                    {(() => {
+                      const cancellationBalance = Number(
+                        project?.cancellation_balance ?? 0,
+                      );
+                      const settledLabel =
+                        cancellationBalance > 0
+                          ? "Refund to receive"
+                          : cancellationBalance < 0
+                            ? "Outstanding to pay"
+                            : "Fully settled";
+                      const settledHint =
+                        cancellationBalance > 0
+                          ? "PaintPro will return this to you after the agreement is signed."
+                          : cancellationBalance < 0
+                            ? "Owed to PaintPro for work already completed before cancellation."
+                            : "No money changes hands — completed work matched the downpayment.";
+                      const settledClass =
+                        cancellationBalance > 0
+                          ? "border-emerald-100 bg-emerald-50 text-emerald-900"
+                          : cancellationBalance < 0
+                            ? "border-rose-100 bg-rose-50 text-rose-900"
+                            : "border-gray-100 bg-gray-50 text-gray-900";
+
+                      return (
+                        <>
+                          <div className={`rounded-lg border px-3 py-3 ${settledClass}`}>
+                            <p className="text-[11px] font-medium opacity-80">
+                              {settledLabel}
+                            </p>
+                            <p className="mt-1 text-sm font-semibold">
+                              {formatCurrency(Math.abs(cancellationBalance))}
+                            </p>
+                            <p className="mt-1 text-[11px] leading-4 opacity-80">
+                              {settledHint}
+                            </p>
+                          </div>
+                        </>
+                      );
+                    })()}
+
+                    {isCancellationAgreementSigned ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-emerald-800">
+                          Cancellation agreement signed
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-emerald-700">
+                          The project manager will continue the close-out
+                          from their side. You can download the signed
+                          agreement anytime using the button above.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-emerald-800">
+                          Client signature required
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-emerald-700">
+                          Please review the cancellation agreement preview,
+                          draw your signature, then click Sign Agreement.
+                        </p>
+
+                        <div className="mt-3">
+                          <label className="text-[11px] font-semibold text-emerald-900">
+                            Signature
+                          </label>
+
+                          <div
+                            ref={cancellationSignatureWrapRef}
+                            className="mt-1 h-40 sm:h-[130px] overflow-hidden rounded-lg border border-emerald-200 bg-white touch-none">
+                            <SignatureCanvas
+                              ref={cancellationSignatureRef}
+                              penColor="black"
+                              canvasProps={{
+                                className: "block h-full w-full bg-white",
+                              }}
+                            />
+                          </div>
+
+                          {cancellationSignatureErr ? (
+                            <p className="mt-2 text-xs font-medium text-red-600">
+                              {cancellationSignatureErr}
+                            </p>
+                          ) : null}
+
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                cancellationSignatureRef.current?.clear();
+                                setCancellationSignatureErr(null);
+                              }}
+                              className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                              Clear Signature
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={signCancellationAgreement}
+                              disabled={
+                                !projectId ||
+                                loading ||
+                                signingCancellationAgreement ||
+                                !isPendingCancellationAgreement
+                              }
+                              className="ml-auto inline-flex h-9 items-center gap-2 rounded-lg bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
+                              {signingCancellationAgreement ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <PenLine className="h-3.5 w-3.5" />
+                              )}
+                              Sign Agreement
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     // Below lg: natural-flow scroll so the document and the sidebar stack
     // vertically. lg+: keep the locked-screen split layout.
@@ -556,6 +1107,26 @@ export default function ClientPendingDocumentsPage() {
                   {projectStatus || "No status"}
                 </span>
               )}
+
+              {/* Header refresh — re-checks whether the project has
+                  advanced (e.g. quotation just signed and now pending
+                  invoice instead). Same behaviour as the sidebar
+                  refresh, surfaced here so the user doesn't have to
+                  scroll. */}
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing || loading}
+                title="Refresh document status"
+                aria-label="Refresh document status"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                <RefreshCw
+                  className={[
+                    "h-3.5 w-3.5",
+                    refreshing || loading ? "animate-spin" : "",
+                  ].join(" ")}
+                />
+              </button>
 
               {/* Download PDF only appears once the invoice is signed
                   (status: invoice_signed). Quotations follow their own
@@ -632,7 +1203,7 @@ export default function ClientPendingDocumentsPage() {
                       </div>
                     ) : null}
                     <iframe
-                      key={`${documentType}-${projectStatus}-${projectId}`}
+                      key={`${documentType}-${projectStatus}-${projectId}-${previewRefreshKey}`}
                       src={previewSrc}
                       title={`${documentLabel} Preview`}
                       onLoad={() => setPreviewLoaded(true)}
@@ -648,13 +1219,29 @@ export default function ClientPendingDocumentsPage() {
             <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
               <div className="h-1 w-full shrink-0 bg-[#00c065]" />
 
-              <div className="shrink-0 border-b border-gray-100 px-4 py-3">
-                <h2 className="text-sm font-semibold text-gray-900">
-                  {documentLabel} Details
-                </h2>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  Project summary and document status.
-                </p>
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-gray-900">
+                    {documentLabel} Details
+                  </h2>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Project summary and document status.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={refreshing || loading}
+                  title="Refresh document details"
+                  aria-label="Refresh document details"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <RefreshCw
+                    className={[
+                      "h-3.5 w-3.5",
+                      refreshing || loading ? "animate-spin" : "",
+                    ].join(" ")}
+                  />
+                </button>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -687,44 +1274,40 @@ export default function ClientPendingDocumentsPage() {
                       </p>
                     </div>
 
-                    {documentType === "invoice" ? (
-                      <>
-                        <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                          <p className="text-[11px] font-medium text-gray-500">
-                            Site Address
-                          </p>
-                          <p className="mt-1 text-sm font-medium text-gray-900">
-                            {project?.site_address || "No address provided"}
-                          </p>
-                        </div>
+                    {/* Shared layout for both quotation and invoice —
+                        same fields rendered the same way regardless of
+                        document type. The signing buttons below stay
+                        type-specific (quotation only shows on
+                        quotation, invoice only on invoice). */}
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-medium text-gray-500">
+                        Site Address
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-gray-900">
+                        {project?.site_address || "No address provided"}
+                      </p>
+                    </div>
 
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                          <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                            <p className="text-[11px] font-medium text-gray-500">
-                              Estimated Budget
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-gray-900">
-                              {formatCurrency(
-                                costSummary?.quotationTotal ??
-                                  project?.estimated_budget,
-                              )}
-                            </p>
-                          </div>
-
-                          <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                            <p className="text-[11px] font-medium text-gray-500">
-                              Estimated Cost
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-gray-900">
-                              {formatCurrency(
-                                costSummary?.totalCost ??
-                                  project?.estimated_cost,
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-medium text-gray-500">
+                        Total Payment
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-gray-900">
+                        {formatCurrency(
+                          Math.max(
+                            0,
+                            Number(
+                              costSummary?.quotationTotal ??
+                                project?.estimated_budget ??
+                                0,
+                            ) - Number(project?.downpayment ?? 0),
+                          ),
+                        )}
+                      </p>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Total cost less the downpayment already paid.
+                      </p>
+                    </div>
 
                     {isPendingQuotation || isPendingInvoiceAgreement ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
@@ -850,6 +1433,13 @@ export default function ClientPendingDocumentsPage() {
                             ? "Project Manager Notified"
                             : "Notify Project Manager"}
                         </button>
+
+                        <Link
+                          href="/client/documents?openType=QTE"
+                          className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-white px-4 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Go to file
+                        </Link>
                       </div>
                     ) : isQuotationApproved ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
@@ -860,6 +1450,13 @@ export default function ClientPendingDocumentsPage() {
                           This signed quotation is complete, and the project is
                           now ready to start.
                         </p>
+
+                        <Link
+                          href="/client/documents?openType=QTE"
+                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98]">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Go to file
+                        </Link>
                       </div>
                     ) : isInvoiceAccepted ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
@@ -867,9 +1464,35 @@ export default function ClientPendingDocumentsPage() {
                           Invoice signed
                         </p>
                         <p className="mt-1 text-xs leading-5 text-emerald-700">
-                          Your signed invoice agreement has been recorded and is
-                          now pending payment.
+                          Your signed invoice agreement has been recorded and
+                          is now pending payment. Let the project manager know
+                          so they can move on to receiving payment.
                         </p>
+
+                        <button
+                          type="button"
+                          onClick={notifyProjectManager}
+                          disabled={!projectId || notifyingPM || pmNotified}
+                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {notifyingPM ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : pmNotified ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Send className="h-3.5 w-3.5" />
+                          )}
+                          {pmNotified
+                            ? "Project Manager Notified"
+                            : "Notify Project Manager"}
+                        </button>
+
+                        <Link
+                          href="/client/documents?openType=INV"
+                          className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-white px-4 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Go to file
+                        </Link>
                       </div>
                     ) : null}
                   </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo, useState, useEffect, useRef, Fragment } from "react";
+import React, { memo, useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 // --- SIMULATED TIME (testing only) ---------------------------------------
 // Uses the simulated reference clock when one is set in settings, otherwise
@@ -12,7 +12,7 @@ import { useProjectNow } from "@/lib/time/useProjectNow";
 import { useAutoStartProjects } from "@/lib/settings/autoStartProjects";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
-import { BarChart3, ChevronDown, ChevronRight, Pencil, RefreshCw } from "lucide-react";
+import { BarChart3, Check, ChevronDown, ChevronRight, Loader2, Pencil, RefreshCw, Send, X } from "lucide-react";
 import DownpaymentModal from "@/components/project-creation/DownpaymentModal";
 import ProjectReviewModal from "@/components/dashboard/ProjectReviewModal";
 import GeneratedTaskEditModal, {
@@ -28,7 +28,19 @@ import type {
   EmployeeManagementFinishPayload,
   EmployeeReviewItem,
 } from "@/lib/planning/employeePerformance";
+import { filterEmployeeReviewItemsToFinishedOnly } from "@/lib/planning/employeePerformance";
 import type { ProjectReviewSummary } from "@/lib/planning/projectReviewSummary";
+import { filterReviewSummaryToCompletedOnly } from "@/lib/planning/projectReviewSummary";
+import {
+  CANCELLATION_STEP_BY_ID,
+  CANCELLATION_STEP_IDS,
+  getCancellationGroupVisualStatus,
+  getCancellationStepVisualStatus,
+  getNextCancellationPhase,
+  normalizeCancellationPhase,
+  type CancellationPhase,
+  type CancellationStepId,
+} from "@/lib/planning/cancellationPhase";
 
 export type StepVisualStatus = "done" | "active" | "pending";
 
@@ -75,18 +87,73 @@ type Props = {
   currentUserId?: string | null;
   employeeReviewItems?: EmployeeReviewItem[];
   reviewSummary?: ProjectReviewSummary | null;
-  emptyProjectState?: "select-project" | "no-projects-today";
+  emptyProjectState?:
+    | "select-project"
+    | "no-projects-today"
+    | "no-work-left-today";
   // True when there's at least one OTHER project scheduled for the same day
   // as the currently-selected one. Drives the post-conclude "project done"
   // takeover: once this project hits `completed` we only swap the progress
   // panel for the celebration view if the day has nothing else queued.
   hasOtherProjectsToday?: boolean;
   className?: string;
+  // Substep within the post-cancel wrap-up. Only meaningful when the
+  // project's status is "cancelled". Drives which Project Cancellation
+  // child shows the action button and what status pills the rest of
+  // them render.
+  cancellationPhase?: CancellationPhase | null;
+  // Displayed inside the Document Management modal so the admin and
+  // client both see the same settlement amount on the agreement.
+  cancellationBalance?: number | null;
+  cancellationEarnedRevenue?: number | null;
+  cancellationEarnedCost?: number | null;
+  cancellationSettled?: number | null;
+  cancelledFromStatus?: string | null;
+  // Admin/manager dashboards drive the post-cancel wrap-up; staff
+  // dashboards only get a read-only view because they can't advance
+  // phases or send the agreement. When false, cancellation child
+  // action buttons stay disabled.
+  canManageCancellation?: boolean;
+  // Optional connection state from useProjectSubtaskRealtime — when
+  // provided, the header shows a small dot/pill so the user knows
+  // whether subtask updates from other dashboards will land live or
+  // need a manual refresh.
+  realtimeStatus?: "idle" | "connecting" | "live" | "error" | "closed";
+  // When true and the project is still in a pre-kickoff status (job
+  // creation through ready_to_start), the card hides the workflow
+  // breakdown and shows a "Project creation ongoing" message instead.
+  // Used by the client dashboard so the client doesn't see internal
+  // wizard steps before any real work has started.
+  showPreExecutionTakeover?: boolean;
 };
 
 const GREEN = "#00c065";
 const SCROLL_TRACK = "#E6F8EF";
 const SCROLL_TRACK_DARK = "#1f2937";
+
+// Currency input helpers — used by the cancellation Payment Management
+// modal's instalment input so anything typed gets a thousand separator
+// automatically and pasted commas are accepted as-is. Mirrors the
+// helpers in DownpaymentModal / FinalPaymentModal so all three feel
+// identical.
+function parseCurrencyInput(value: string): number {
+  if (!value) return 0;
+  const cleaned = value.replace(/,/g, "");
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatCurrencyInput(raw: string): string {
+  if (!raw) return "";
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+  const firstDot = cleaned.indexOf(".");
+  const intPart = firstDot === -1 ? cleaned : cleaned.slice(0, firstDot);
+  const decPartRaw =
+    firstDot === -1 ? "" : cleaned.slice(firstDot + 1).replace(/\./g, "");
+  const intWithCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return firstDot === -1 ? intWithCommas : `${intWithCommas}.${decPartRaw}`;
+}
 
 const JOB_CREATION_CHILD_ROUTES: Record<string, string> = {
   "workflow-main-task": "/admin/job-creation/main-task-assignment",
@@ -226,6 +293,7 @@ function readProjectScheduledStart(project: unknown): string | null {
   }
   return null;
 }
+
 
 // Formats a positive millisecond span as "Xd Yh Zm" (omits zero leading
 // units, always shows minutes when nothing else is present).
@@ -410,13 +478,55 @@ function isManageEndOfWorkGroup(group: ProcessItem) {
   );
 }
 
+function isCancellationGroup(group: ProcessItem) {
+  return (
+    group.id === "project-cancellation" ||
+    group.title.toLowerCase().trim() === "project cancellation"
+  );
+}
+
+function isCancellationStepId(value: string): value is CancellationStepId {
+  return (CANCELLATION_STEP_IDS as readonly string[]).includes(value);
+}
+
 function isEndOfWorkStatus(status: string) {
   return END_OF_WORK_STATUS_ORDER.includes(status as EndOfWorkPendingStatus);
 }
 
+// Pre-execution = the project hasn't actually kicked off yet. Covers
+// the whole job-creation wizard, the post-quotation client / payment
+// gates, and "ready_to_start" (which is the about-to-start state, not
+// yet executing any subtask). Once status hits "in_progress" the
+// project is considered live and the takeover lifts.
+const PRE_EXECUTION_STATUSES = new Set<string>([
+  "main_task_pending",
+  "sub_task_pending",
+  "materials_pending",
+  "equipment_pending",
+  "schedule_pending",
+  "employee_assignment_pending",
+  "cost_estimation_pending",
+  "overview_pending",
+  "quotation_pending",
+  "grant_access_quotation",
+  "client_quotation_done",
+  "downpayment_pending",
+  "ready_to_start",
+]);
+
+function isPreExecutionStatus(status: string) {
+  return PRE_EXECUTION_STATUSES.has(String(status || "").trim().toLowerCase());
+}
+
 function getReviewModalActionLabel(projectStatus: string) {
-  if (projectStatus === "in_progress") return "Start Review";
-  if (projectStatus === "review_pending") return "Complete Review";
+  // Both `in_progress` (about to enter review) and `review_pending`
+  // (currently in review) collapse to a single "Complete Review"
+  // action — the intermediate "Start Review" was removed because it
+  // doesn't add any user value: opening the modal already shows the
+  // review summary, so clicking once should be enough to finish.
+  if (projectStatus === "in_progress" || projectStatus === "review_pending") {
+    return "Complete Review";
+  }
   return null;
 }
 
@@ -566,6 +676,7 @@ function computeEffectiveChildStatus(
   isManageEndOfWorkGroup: boolean,
   startOfWorkDone: boolean,
   effectiveProjectStatus: string,
+  cancellationPhase: CancellationPhase | null = null,
 ): StepVisualStatus {
   if (child.id === "project-kickoff" && startOfWorkDone) return "done";
   if (
@@ -581,6 +692,9 @@ function computeEffectiveChildStatus(
     return "done";
   if (isManageEndOfWorkGroup && Boolean(END_OF_WORK_STEP_BY_ID[child.id]))
     return getEndOfWorkStepVisualStatus(child.id, effectiveProjectStatus);
+  if (isCancellationStepId(child.id)) {
+    return getCancellationStepVisualStatus(child.id, cancellationPhase);
+  }
   return child.status;
 }
 
@@ -616,14 +730,37 @@ function NoProjectEmptyState({
   mode,
   onGoToReports,
 }: {
-  mode: "select-project" | "no-projects-today";
+  mode: "select-project" | "no-projects-today" | "no-work-left-today";
   onGoToReports: () => void;
 }) {
+  if (mode === "no-work-left-today") {
+    // Day has scheduled projects but staff has nothing actionable on
+    // them (every project's subtasks are done — admin is wrapping up).
+    // Different copy from "no projects today" so the user knows the
+    // day isn't empty, just done from their side.
+    return (
+      <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center">
+        <div className="max-w-sm">
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border border-[#00c065]/20 bg-[#00c065]/10 text-[#00c065]">
+            <BarChart3 className="h-5 w-5" />
+          </div>
+          <h3 className="mt-3 text-sm font-semibold text-gray-900 dark:text-slate-100">
+            No work left today
+          </h3>
+          <p className="mt-1 text-sm leading-5 text-gray-500 dark:text-slate-400">
+            All scheduled work for the day has been finished. Nothing
+            is currently in progress.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (mode === "no-projects-today") {
     return (
       <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center">
         <div className="max-w-sm">
-          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-[#00c065]/20 bg-[#00c065]/10 text-[#00c065]">
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border border-[#00c065]/20 bg-[#00c065]/10 text-[#00c065]">
             <BarChart3 className="h-5 w-5" />
           </div>
           <h3 className="mt-3 text-sm font-semibold text-gray-900 dark:text-slate-100">
@@ -635,7 +772,7 @@ function NoProjectEmptyState({
           <button
             type="button"
             onClick={onGoToReports}
-            className="mt-4 inline-flex h-9 items-center justify-center rounded-lg bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
             Go to reports
           </button>
         </div>
@@ -670,6 +807,15 @@ function JobProgressCard({
   emptyProjectState = "select-project",
   hasOtherProjectsToday = false,
   className = "",
+  cancellationPhase: cancellationPhaseProp = null,
+  cancellationBalance = null,
+  cancellationEarnedRevenue = null,
+  cancellationEarnedCost = null,
+  cancellationSettled = null,
+  cancelledFromStatus = null,
+  canManageCancellation = true,
+  realtimeStatus = "idle",
+  showPreExecutionTakeover = false,
 }: Props) {
   const router = useRouter();
 
@@ -714,6 +860,88 @@ function JobProgressCard({
   const [finalPaymentModalOpen, setFinalPaymentModalOpen] = useState(false);
   const [employeeManagementModalOpen, setEmployeeManagementModalOpen] =
     useState(false);
+  // Shown while the invoice HTML is being warmed up before navigating
+  // to /admin/projects/invoice-generation. The actual render happens
+  // inside the iframe on the destination page, but pre-fetching the
+  // route lets us block until the heavy work is done so the user sees
+  // the loaded page on arrival instead of a flash of empty iframe.
+  const [generatingInvoiceOpen, setGeneratingInvoiceOpen] = useState(false);
+
+  // Cancellation flow state — paralleling the end-of-work modals.
+  // `cancellationPhaseOverride` lets us reflect a phase advance instantly
+  // in the UI before the next refresh fetches the canonical value.
+  const [cancellationPhaseOverride, setCancellationPhaseOverride] = useState<
+    CancellationPhase | null
+  >(null);
+  const [cancellationReviewModalOpen, setCancellationReviewModalOpen] =
+    useState(false);
+  const [cancellationPaymentModalOpen, setCancellationPaymentModalOpen] =
+    useState(false);
+  const [cancellationEmployeeModalOpen, setCancellationEmployeeModalOpen] =
+    useState(false);
+  const [cancellationConcludeConfirmOpen, setCancellationConcludeConfirmOpen] =
+    useState(false);
+  const [advancingCancellationStep, setAdvancingCancellationStep] = useState<
+    CancellationStepId | null
+  >(null);
+
+  // Tracks the "notify client about settlement" button on the
+  // Payment Management modal. Mirrors the downpayment notify pattern —
+  // brief loading state, then a "Client notified" pill that auto-clears
+  // after a few seconds so the admin can re-notify if needed.
+  const [cancellationPaymentNotifying, setCancellationPaymentNotifying] =
+    useState(false);
+  const [cancellationPaymentNotified, setCancellationPaymentNotified] =
+    useState(false);
+  useEffect(() => {
+    setCancellationPaymentNotified(false);
+  }, [projectId, cancellationPaymentModalOpen]);
+
+  // Cancellation settlement collection — mirrors the downpayment modal
+  // pattern. `savedSettlement` is the cumulative amount already persisted
+  // to projects.cancellation_settled; `inputSettlement` is the new
+  // instalment the admin is typing in right now. Add records the
+  // instalment without advancing the phase, Confirm finalises and
+  // bumps the phase to 'employee' once savedSettlement covers the
+  // absolute settlement balance.
+  const [savedSettlement, setSavedSettlement] = useState<number>(0);
+  const [inputSettlement, setInputSettlement] = useState<string>("");
+  const [addingSettlement, setAddingSettlement] = useState(false);
+  const [confirmingSettlement, setConfirmingSettlement] = useState(false);
+  // Whenever the modal opens (or the underlying project / prop value
+  // changes), refresh both the running tally from the prop and clear
+  // the input field so the admin lands on a clean slate.
+  useEffect(() => {
+    if (!cancellationPaymentModalOpen) return;
+    setSavedSettlement(Number(cancellationSettled ?? 0));
+    setInputSettlement("");
+  }, [cancellationPaymentModalOpen, cancellationSettled, projectId]);
+
+  // Effective phase = override (most recent local advance) if set, else
+  // the prop coming from the parent's overview fetch. Falls back to
+  // "review" if the project is cancelled but we got nothing — keeps
+  // the wrap-up actionable instead of stuck.
+  const effectiveCancellationPhase: CancellationPhase | null = useMemo(() => {
+    if (cancellationPhaseOverride) return cancellationPhaseOverride;
+    return normalizeCancellationPhase(cancellationPhaseProp);
+  }, [cancellationPhaseOverride, cancellationPhaseProp]);
+
+  // Memoised so the EmployeeManagementModal sees a stable array reference
+  // across renders. Passing a fresh array on every render (the previous
+  // `filterEmployeeReviewItemsToFinishedOnly(employeeReviewItems)` inline
+  // call) was triggering the modal's `[open, employees]` reset effect on
+  // each save — wiping `submittedUserIds` and `activeIndex`, so the modal
+  // jumped back to employee 1 instead of advancing.
+  const cancellationEmployeeReviewItems = useMemo(
+    () => filterEmployeeReviewItemsToFinishedOnly(employeeReviewItems),
+    [employeeReviewItems],
+  );
+
+  // Reset the override whenever the project changes — otherwise we'd
+  // carry over a stale phase from a previous selection.
+  useEffect(() => {
+    setCancellationPhaseOverride(null);
+  }, [projectId]);
   const [employeeManagementSaving, setEmployeeManagementSaving] =
     useState(false);
   const [editingGeneratedTask, setEditingGeneratedTask] =
@@ -738,6 +966,7 @@ function JobProgressCard({
   const effectiveProjectId = projectId || readProjectId(selectedProject);
   const effectiveProjectStatus = projectStatusOverride || selectedProjectStatus;
   const effectiveCurrentUserId = currentUserId || resolvedCurrentUserId;
+
 
   useEffect(() => {
     setProjectStatusOverride(null);
@@ -978,6 +1207,32 @@ function JobProgressCard({
     pathname,
   ]);
 
+  // Same pattern for the cancellation settlement modal — fired by the
+  // /admin/projects/cancellation-agreement-generation page's "Advance
+  // to Payment Management" button once the client has signed the
+  // agreement. Gated on the cancellation phase actually being at the
+  // payment step so the modal doesn't pop for earlier/later wrap-up
+  // states.
+  useEffect(() => {
+    const requestedId = searchParams?.get("openCancellationPayment");
+    if (!requestedId) return;
+    if (!effectiveProjectId || requestedId !== effectiveProjectId) return;
+    if (effectiveCancellationPhase !== "payment") return;
+
+    setCancellationPaymentModalOpen(true);
+
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.delete("openCancellationPayment");
+    const next = params.toString();
+    router.replace(`${pathname}${next ? `?${next}` : ""}`, { scroll: false });
+  }, [
+    searchParams,
+    effectiveProjectId,
+    effectiveCancellationPhase,
+    router,
+    pathname,
+  ]);
+
   useEffect(() => {
     if (currentUserId) {
       setResolvedCurrentUserId(currentUserId);
@@ -1006,28 +1261,15 @@ function JobProgressCard({
     );
   }, [effectiveProjectStatus]);
 
-  useEffect(() => {
-    if (!processItems.length || !effectiveProjectId) return;
-    if (seededForProjectRef.current === effectiveProjectId) return;
-    seededForProjectRef.current = effectiveProjectId;
+  // Compute the focus group's identity (i.e. WHICH parent task is
+  // active right now) up here so the seeding effect below can re-run
+  // whenever it changes — not just whenever the project switches. The
+  // user wants the active parent always expanded; if a subtask flips
+  // to "active" via realtime or via the cascade after a finish, the
+  // effect needs to notice and re-focus.
+  const focusGroupId = useMemo(() => {
+    if (!processItems.length) return null;
 
-    // Pick the parent of the active subtask — fall back to the first
-    // group that still has pending (non-done) work if nothing's "active"
-    // yet. This is the parent the user wants expanded by default; every
-    // other group should be collapsed regardless of whatever was open
-    // before this project loaded.
-    //
-    // Important: child.status on the raw ProcessItem is the
-    // workflow-time status (filled in by buildProcessItems) — it stays
-    // "pending" for end-of-work children even when the project actually
-    // sits in "invoice_pending" / "payment_pending" / etc. The
-    // user-visible status is computed at render time via
-    // `computeEffectiveChildStatus`, which factors in
-    // effectiveProjectStatus + startOfWorkDone. Use the same function
-    // here so the finder treats the END-OF-WORK group's "Invoice
-    // Generation" (or whatever step is current) as active and picks it
-    // over any earlier already-done main task whose children happen to
-    // still carry stale non-done raw statuses.
     const childIsActive = (child: ProcessItem, isEndOfWork: boolean) =>
       computeEffectiveChildStatus(
         child,
@@ -1044,7 +1286,10 @@ function JobProgressCard({
         effectiveProjectStatus,
       ) !== "done";
 
-    const focusGroup =
+    // Pick the parent of the FIRST active subtask. If nothing's active
+    // yet (e.g. project just loaded and all subtasks are "pending"),
+    // fall back to the first group that still has pending work.
+    const found =
       processItems.find((group) => {
         const isEndOfWork = isManageEndOfWorkGroup(group);
         const children = buildStartOfWorkChildren(group);
@@ -1055,6 +1300,29 @@ function JobProgressCard({
         const children = buildStartOfWorkChildren(group);
         return children.some((child) => childIsNotDone(child, isEndOfWork));
       });
+
+    return found?.id ?? null;
+  }, [processItems, startOfWorkDone, effectiveProjectStatus]);
+
+  useEffect(() => {
+    if (!processItems.length || !effectiveProjectId) return;
+    // Seed key combines projectId + the focus group id, so:
+    //   - Switching projects re-seeds (different projectId)
+    //   - The active subtask changing parents (e.g. last subtask of
+    //     "Surface Prep" finishes, "Painting" becomes the active
+    //     parent) re-seeds and the new parent expands automatically
+    //   - Plain refreshes that don't change the focus do NOT re-seed,
+    //     so the user's manual toggles aren't clobbered.
+    const seedKey = `${effectiveProjectId}:${focusGroupId ?? ""}`;
+    if (seededForProjectRef.current === seedKey) return;
+    seededForProjectRef.current = seedKey;
+
+    // Important: child.status on the raw ProcessItem is the
+    // workflow-time status (filled in by buildProcessItems). The
+    // user-visible status is computed at render time via
+    // `computeEffectiveChildStatus`. Both are used in focusGroupId
+    // above and the rendering, so they stay in sync.
+    const focusGroup = processItems.find((group) => group.id === focusGroupId);
 
     const focusId = focusGroup?.id ?? null;
 
@@ -1085,8 +1353,7 @@ function JobProgressCard({
   }, [
     processItems,
     effectiveProjectId,
-    effectiveProjectStatus,
-    startOfWorkDone,
+    focusGroupId,
     toggleProcessRow,
   ]);
 
@@ -1206,6 +1473,34 @@ function JobProgressCard({
       setProjectStatusOverride(nextStatus);
       onRefresh?.();
 
+      // Conclude-job flow: tear down the project's conversation
+      // threads so they stop cluttering everyone's message lists
+      // once the project is closed. Done after the status update
+      // so the project is already marked completed if this fails.
+      if (nextStatus === "completed") {
+        try {
+          const cleanupResponse = await fetch(
+            "/api/planning/deleteProjectConversations",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectId: effectiveProjectId }),
+            },
+          );
+          if (!cleanupResponse.ok) {
+            const cleanupBody = await cleanupResponse
+              .json()
+              .catch(() => null);
+            console.error(
+              "deleteProjectConversations failed:",
+              cleanupBody?.error ?? cleanupResponse.statusText,
+            );
+          }
+        } catch (cleanupError) {
+          console.error("deleteProjectConversations error:", cleanupError);
+        }
+      }
+
       toast.success(successTitle, {
         description: successDescription,
       });
@@ -1220,6 +1515,63 @@ function JobProgressCard({
       });
     } finally {
       setUpdatingEndOfWorkStepId(null);
+    }
+  }
+
+  // Advances cancellation_phase by one step. Each cancellation child's
+  // action button funnels through here once its substep completes — for
+  // Review, that's "Review completed"; for Payment, "Settlement
+  // recorded"; for Document, the cancellation agreement was signed; for
+  // Employee, all employees have been reviewed; for Conclude, the
+  // project is officially closed-out.
+  async function advanceCancellationPhase(
+    stepId: CancellationStepId,
+    fromPhase: CancellationPhase,
+  ): Promise<boolean> {
+    if (!effectiveProjectId || advancingCancellationStep) return false;
+
+    const toPhase = getNextCancellationPhase(fromPhase);
+    if (!toPhase) return false;
+
+    try {
+      setAdvancingCancellationStep(stepId);
+
+      const response = await fetch(
+        "/api/planning/advanceCancellationPhase",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: effectiveProjectId,
+            fromPhase,
+            toPhase,
+          }),
+        },
+      );
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          [data?.error, data?.details].filter(Boolean).join(": ") ||
+            "Failed to advance cancellation step.",
+        );
+      }
+
+      setCancellationPhaseOverride(toPhase);
+      onRefresh?.();
+      return true;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to advance cancellation step.";
+      console.error(error);
+      toast.error("Could not advance cancellation step", {
+        description: message,
+      });
+      return false;
+    } finally {
+      setAdvancingCancellationStep(null);
     }
   }
 
@@ -1443,20 +1795,64 @@ function JobProgressCard({
             </p>
           </div>
 
-          {onRefresh ? (
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={loadingDetails}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 dark:text-slate-400 transition hover:bg-gray-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700">
-              <RefreshCw
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Live-updates indicator. Hidden in the "idle" state so
+                we don't draw user attention to it on dashboards
+                without an active subscription (e.g. before a project
+                is selected). */}
+            {realtimeStatus !== "idle" ? (
+              <div
+                title={
+                  realtimeStatus === "live"
+                    ? "Live — subtask updates from other dashboards land automatically"
+                    : realtimeStatus === "connecting"
+                      ? "Connecting to live updates…"
+                      : realtimeStatus === "error"
+                        ? "Live updates disconnected — try refreshing"
+                        : "Live updates closed"
+                }
                 className={[
-                  "h-3.5 w-3.5",
-                  loadingDetails || navigating ? "animate-spin" : "",
-                ].join(" ")}
-              />
-            </button>
-          ) : null}
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                  realtimeStatus === "live"
+                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                    : realtimeStatus === "connecting"
+                      ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                      : "bg-red-50 text-red-700 ring-1 ring-red-200",
+                ].join(" ")}>
+                <span
+                  className={[
+                    "h-1.5 w-1.5 rounded-full",
+                    realtimeStatus === "live"
+                      ? "bg-emerald-500 animate-pulse"
+                      : realtimeStatus === "connecting"
+                        ? "bg-amber-500"
+                        : "bg-red-500",
+                  ].join(" ")}
+                  aria-hidden
+                />
+                {realtimeStatus === "live"
+                  ? "Live"
+                  : realtimeStatus === "connecting"
+                    ? "…"
+                    : "Offline"}
+              </div>
+            ) : null}
+
+            {onRefresh ? (
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loadingDetails}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 dark:text-slate-400 transition hover:bg-gray-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700">
+                <RefreshCw
+                  className={[
+                    "h-3.5 w-3.5",
+                    loadingDetails || navigating ? "animate-spin" : "",
+                  ].join(" ")}
+                />
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -1495,30 +1891,57 @@ function JobProgressCard({
             {!selectedProject ? (
               <NoProjectEmptyState
                 mode={emptyProjectState}
-                onGoToReports={() => router.push("/admin/report")}
+                onGoToReports={() => router.push("/admin/report/report-list")}
               />
             ) : loadingDetails ? (
               <ProgressSkeleton />
-            ) : effectiveProjectStatus === "completed" &&
-              !hasOtherProjectsToday ? (
-              // Once the only project on the day is concluded, the
-              // progress list isn't useful anymore — swap in a celebratory
-              // "all done" view that points the admin to the reports page.
+            ) : showPreExecutionTakeover &&
+              isPreExecutionStatus(effectiveProjectStatus) ? (
+              // Pre-kickoff takeover for the client dashboard — the
+              // workflow breakdown is admin/staff-internal noise until
+              // there's actual work to track. Shows a friendly "we're
+              // still setting things up" message instead.
+              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center">
+                <div className="max-w-sm">
+                  <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+                    <RefreshCw className="h-5 w-5 animate-spin [animation-duration:3s]" />
+                  </div>
+                  <h3 className="mt-3 text-sm font-semibold text-gray-900 dark:text-slate-100">
+                    Project creation ongoing
+                  </h3>
+                  <p className="mt-1 text-sm leading-5 text-gray-500 dark:text-slate-400">
+                    Your project is being set up. The progress timeline
+                    will appear here once work kicks off on site.
+                  </p>
+                </div>
+              </div>
+            ) : effectiveProjectStatus === "completed" ||
+              (effectiveProjectStatus === "cancelled" &&
+                effectiveCancellationPhase === "done") ? (
+              // Whenever the SELECTED project is fully closed-out,
+              // swap the progress list for the "all done" view + Go to
+              // reports button. Fires for both completed projects and
+              // cancelled projects whose post-cancel wrap-up reached
+              // the "done" phase — both are archive-state from the
+              // dashboard's perspective.
               <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center">
                 <div className="max-w-sm">
                   <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border border-[#00c065]/20 bg-[#00c065]/10 text-[#00c065]">
                     <BarChart3 className="h-5 w-5" />
                   </div>
                   <h3 className="mt-3 text-sm font-semibold text-gray-900 dark:text-slate-100">
-                    Project is done
+                    {effectiveProjectStatus === "cancelled"
+                      ? "Project cancellation closed-out"
+                      : "Project is done"}
                   </h3>
                   <p className="mt-1 text-sm leading-5 text-gray-500 dark:text-slate-400">
-                    Nothing else is scheduled for this day. Head over to
-                    reports to review the wrap-up.
+                    {effectiveProjectStatus === "cancelled"
+                      ? "The cancellation wrap-up is complete. Head over to reports to review the close-out."
+                      : "Nothing else is scheduled for this day. Head over to reports to review the wrap-up."}
                   </p>
                   <button
                     type="button"
-                    onClick={() => router.push("/admin/report")}
+                    onClick={() => router.push("/admin/report/report-list")}
                     className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
                     Go to reports
                   </button>
@@ -1538,30 +1961,18 @@ function JobProgressCard({
                   const currentIsStartOfWorkGroup = isStartOfWorkGroup(group);
                   const currentIsManageEndOfWorkGroup =
                     isManageEndOfWorkGroup(group);
+                  const currentIsCancellationGroup = isCancellationGroup(group);
 
                   const effectiveGroupStatus: StepVisualStatus =
                     currentIsStartOfWorkGroup && startOfWorkDone
                       ? "done"
                       : currentIsManageEndOfWorkGroup
                         ? getEndOfWorkGroupVisualStatus(effectiveProjectStatus)
-                        : group.status;
-
-                  const doneCount = groupChildren.filter((child) => {
-                    if (child.id === "project-kickoff" && startOfWorkDone)
-                      return true;
-                    if (
-                      currentIsManageEndOfWorkGroup &&
-                      END_OF_WORK_STEP_BY_ID[child.id]
-                    ) {
-                      return (
-                        getEndOfWorkStepVisualStatus(
-                          child.id,
-                          effectiveProjectStatus,
-                        ) === "done"
-                      );
-                    }
-                    return child.status === "done";
-                  }).length;
+                        : currentIsCancellationGroup
+                          ? getCancellationGroupVisualStatus(
+                              effectiveCancellationPhase,
+                            )
+                          : group.status;
 
                   const totalCount = groupChildren.length;
                   const isJobCreationGroup =
@@ -1575,8 +1986,19 @@ function JobProgressCard({
                       currentIsManageEndOfWorkGroup,
                       startOfWorkDone,
                       effectiveProjectStatus,
+                      effectiveCancellationPhase,
                     ),
                   );
+
+                  // Count done from the effective child statuses — the same
+                  // values that drive the rendered "Completed/Working on it"
+                  // pills below — so the ring fill always matches what the
+                  // user is looking at. (Reading child.status directly used
+                  // to leave the ring at 0% even when a child like Manage
+                  // Downpayment was already marked Completed in its row.)
+                  const doneCount = siblingStatuses.filter(
+                    (status) => status === "done",
+                  ).length;
 
                   return (
                     <div
@@ -1720,6 +2142,10 @@ function JobProgressCard({
                                 currentIsManageEndOfWorkGroup &&
                                 Boolean(END_OF_WORK_STEP_BY_ID[child.id]);
 
+                              const isCancellationChild =
+                                currentIsCancellationGroup &&
+                                isCancellationStepId(child.id);
+
                               const effectiveChildStatus: StepVisualStatus =
                                 isProjectKickoff && startOfWorkDone
                                   ? "done"
@@ -1730,7 +2156,12 @@ function JobProgressCard({
                                           child.id,
                                           effectiveProjectStatus,
                                         )
-                                      : child.status;
+                                      : isCancellationChild
+                                        ? getCancellationStepVisualStatus(
+                                            child.id as CancellationStepId,
+                                            effectiveCancellationPhase,
+                                          )
+                                        : child.status;
 
                               const dim = effectiveChildStatus === "done";
                               const previousSibling =
@@ -2019,9 +2450,61 @@ function JobProgressCard({
                                                     child.id ===
                                                     "invoice-generation"
                                                   ) {
-                                                    router.push(
-                                                      `/admin/projects/invoice-generation?projectId=${effectiveProjectId}`,
+                                                    if (!effectiveProjectId) {
+                                                      return;
+                                                    }
+                                                    const id =
+                                                      encodeURIComponent(
+                                                        effectiveProjectId,
+                                                      );
+                                                    // Only show the
+                                                    // "Generating..."
+                                                    // modal during the
+                                                    // very first
+                                                    // visit — i.e.
+                                                    // status is
+                                                    // exactly
+                                                    // "invoice_pending"
+                                                    // (no PDF saved
+                                                    // yet, no client
+                                                    // signature
+                                                    // collected). For
+                                                    // every later
+                                                    // status the
+                                                    // invoice has
+                                                    // already been
+                                                    // generated and
+                                                    // the destination
+                                                    // page reads the
+                                                    // signed PDF
+                                                    // straight from
+                                                    // the bucket — no
+                                                    // regeneration,
+                                                    // no signature
+                                                    // loss.
+                                                    if (
+                                                      effectiveProjectStatus !==
+                                                      "invoice_pending"
+                                                    ) {
+                                                      router.push(
+                                                        `/admin/projects/invoice-generation?projectId=${effectiveProjectId}`,
+                                                      );
+                                                      return;
+                                                    }
+
+                                                    setGeneratingInvoiceOpen(
+                                                      true,
                                                     );
+                                                    void fetch(
+                                                      `/api/invoice/html?projectId=${id}`,
+                                                      { method: "HEAD" },
+                                                    )
+                                                      .catch(() => null)
+                                                      .finally(() => {
+                                                        router.push(
+                                                          `/admin/projects/invoice-generation?projectId=${effectiveProjectId}`,
+                                                        );
+                                                      });
                                                     return;
                                                   }
 
@@ -2083,6 +2566,142 @@ function JobProgressCard({
                                                 child.id
                                                   ? "Updating..."
                                                   : action.label}
+                                              </button>
+                                            );
+                                          })()}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : isCancellationChild ? (
+                                    <div className="w-full rounded-lg px-3 py-3 pl-9 pr-3 hover:bg-gray-50 dark:hover:bg-slate-800/70">
+                                      <div className="flex items-start gap-3 md:grid md:grid-cols-12 md:items-center md:gap-3">
+                                        <div className="shrink-0 md:col-span-2">
+                                          <div className="relative flex w-10 items-center justify-center">
+                                            <span className="relative z-10 grid place-items-center rounded-full bg-white p-0.5 dark:bg-slate-900">
+                                              <StepIcon
+                                                status={effectiveChildStatus}
+                                              />
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        <div className="min-w-0 flex-1 md:col-span-4">
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <div
+                                              className={[
+                                                "truncate text-sm font-medium",
+                                                dim
+                                                  ? "text-gray-300"
+                                                  : "text-gray-800 dark:text-slate-200",
+                                              ].join(" ")}>
+                                              {child.title}
+                                            </div>
+                                            <StatusLabelTag
+                                              item={child}
+                                              status={effectiveChildStatus}
+                                              dim={dim}
+                                            />
+                                          </div>
+                                        </div>
+                                        <div className="hidden md:col-span-3 md:block" />
+                                        <div className="ml-auto shrink-0 md:col-span-3 md:ml-0 md:flex md:justify-end">
+                                          {(() => {
+                                            const stepId = child.id as CancellationStepId;
+                                            const stepConfig =
+                                              CANCELLATION_STEP_BY_ID[stepId];
+                                            if (!stepConfig) return null;
+
+                                            // Only the active substep gets a
+                                            // clickable button — done substeps
+                                            // already happened, pending substeps
+                                            // wait their turn.
+                                            //
+                                            // Exception: the Review step stays
+                                            // re-openable after it's marked
+                                            // done, so the admin can still
+                                            // look back at the review summary.
+                                            // The modal hides its action
+                                            // button automatically when the
+                                            // cancellation phase has moved past
+                                            // "review", so the re-opened view
+                                            // is read-only.
+                                            const isActiveStep =
+                                              effectiveChildStatus === "active";
+                                            const isDoneStep =
+                                              effectiveChildStatus === "done";
+                                            const isReviewStep =
+                                              stepId === "cancellation-review";
+                                            const isViewableDoneStep =
+                                              isReviewStep && isDoneStep;
+
+                                            const busy =
+                                              advancingCancellationStep === stepId;
+                                            const buttonDisabled =
+                                              !effectiveProjectId ||
+                                              (!isActiveStep && !isViewableDoneStep) ||
+                                              !canManageCancellation ||
+                                              Boolean(
+                                                advancingCancellationStep,
+                                              );
+
+                                            return (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  if (
+                                                    !isActiveStep &&
+                                                    !isViewableDoneStep
+                                                  )
+                                                    return;
+                                                  if (stepId === "cancellation-review") {
+                                                    setCancellationReviewModalOpen(
+                                                      true,
+                                                    );
+                                                    return;
+                                                  }
+                                                  if (stepId === "cancellation-payment") {
+                                                    setCancellationPaymentModalOpen(
+                                                      true,
+                                                    );
+                                                    return;
+                                                  }
+                                                  if (stepId === "cancellation-document") {
+                                                    if (effectiveProjectId) {
+                                                      router.push(
+                                                        `/admin/projects/cancellation-agreement-generation?projectId=${encodeURIComponent(
+                                                          effectiveProjectId,
+                                                        )}`,
+                                                      );
+                                                    }
+                                                    return;
+                                                  }
+                                                  if (stepId === "cancellation-employee") {
+                                                    setCancellationEmployeeModalOpen(
+                                                      true,
+                                                    );
+                                                    return;
+                                                  }
+                                                  if (stepId === "cancellation-conclude") {
+                                                    setCancellationConcludeConfirmOpen(
+                                                      true,
+                                                    );
+                                                    return;
+                                                  }
+                                                }}
+                                                disabled={buttonDisabled}
+                                                className={[
+                                                  "shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                                                  buttonDisabled
+                                                    ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600"
+                                                    : "border-[#00c065]/25 bg-[#00c065]/10 text-[#008f4a] hover:border-[#00c065]/40 hover:bg-[#00c065]/15",
+                                                ].join(" ")}>
+                                                {busy
+                                                  ? "Updating..."
+                                                  : isViewableDoneStep
+                                                    ? "See more"
+                                                    : isDoneStep
+                                                      ? "Done"
+                                                      : stepConfig.activeLabel}
                                               </button>
                                             );
                                           })()}
@@ -2562,33 +3181,29 @@ function JobProgressCard({
       <ProjectReviewModal
         open={reviewModalOpen}
         onClose={() => setReviewModalOpen(false)}
-        summary={reviewSummary}
+        // Mirror the cancellation-flow review: only show subtasks the team
+        // actually finished. Pending or in-flight subtasks (and the main
+        // tasks / employees attached to them only) drop out so the review
+        // doesn't include work that never completed.
+        summary={filterReviewSummaryToCompletedOnly(reviewSummary)}
         actionLabel={getReviewModalActionLabel(effectiveProjectStatus)}
         actionDisabled={Boolean(updatingEndOfWorkStepId) || !effectiveProjectId}
         onAction={
           getReviewModalActionLabel(effectiveProjectStatus)
             ? () => {
-                const action = getEndOfWorkAction(
+                // "Complete Review" always advances directly to
+                // invoice_pending. When status is `in_progress` we
+                // skip the intermediate `review_pending` step (which
+                // used to require a separate "Start Review" click)
+                // because the modal already shows the full review
+                // summary — there's nothing the user does in between.
+                handleEndOfWorkStepAction(
                   "review-and-final-checks",
-                  effectiveProjectStatus,
+                  "invoice_pending",
+                  "Review completed",
+                  "Project moved to invoice generation.",
                 );
-
-                if (
-                  action?.nextStatus &&
-                  action.successTitle &&
-                  action.successDescription
-                ) {
-                  handleEndOfWorkStepAction(
-                    "review-and-final-checks",
-                    action.nextStatus,
-                    action.successTitle,
-                    action.successDescription,
-                  );
-
-                  if (action.nextStatus !== "review_pending") {
-                    setReviewModalOpen(false);
-                  }
-                }
+                setReviewModalOpen(false);
               }
             : null
         }
@@ -2636,32 +3251,682 @@ function JobProgressCard({
           via the shared end-of-work handler and closes this modal. */}
       {concludeConfirmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="mx-4 w-full max-w-sm rounded-md bg-white p-6 shadow-2xl dark:bg-slate-900">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100">
-              Conclude this project?
-            </h3>
-            <p className="mt-2 text-sm text-gray-600 dark:text-slate-400">
-              Marking the project as completed wraps up the job and locks
-              its workflow. This can't be undone.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
+          <div className="mx-4 w-full max-w-sm overflow-hidden rounded-md bg-white shadow-2xl dark:bg-slate-900">
+            <div
+              className="h-1.5 w-full"
+              style={{ backgroundColor: GREEN }}
+              aria-hidden
+            />
+            <div className="p-5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                Conclude this project?
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-gray-600 dark:text-slate-400">
+                Marking the project as completed wraps up the job and locks
+                its workflow. This can't be undone.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConcludeConfirmOpen(false)}
+                  disabled={updatingEndOfWorkStepId === "conclude-job"}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/70">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmConcludeJob}
+                  disabled={updatingEndOfWorkStepId === "conclude-job"}
+                  className="rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: GREEN }}>
+                  {updatingEndOfWorkStepId === "conclude-job"
+                    ? "Concluding..."
+                    : "Yes, conclude"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* === CANCELLATION WRAP-UP MODALS ====================================
+          These mirror the post-work end-of-work modals but for a cancelled
+          project. Each one bumps `cancellation_phase` forward by one step
+          via /api/planning/advanceCancellationPhase when the admin
+          confirms. The Document Management modal is the heaviest piece —
+          it embeds the Cancellation Agreement preview/sign flow.
+      */}
+
+      <ProjectReviewModal
+        open={cancellationReviewModalOpen}
+        onClose={() => setCancellationReviewModalOpen(false)}
+        // Same modal as the end-of-work review, but the summary is
+        // filtered to only the work that actually executed before
+        // cancellation. Pending subtasks (and the main tasks / employees
+        // attached to them only) drop out so the admin doesn't end up
+        // signing off on work that never happened.
+        summary={filterReviewSummaryToCompletedOnly(reviewSummary)}
+        actionLabel={
+          effectiveCancellationPhase === "review"
+            ? advancingCancellationStep === "cancellation-review"
+              ? "Saving..."
+              : "Mark reviewed"
+            : null
+        }
+        actionDisabled={
+          advancingCancellationStep === "cancellation-review" ||
+          effectiveCancellationPhase !== "review"
+        }
+        onAction={
+          effectiveCancellationPhase === "review"
+            ? async () => {
+                const ok = await advanceCancellationPhase(
+                  "cancellation-review",
+                  "review",
+                );
+                if (ok) {
+                  setCancellationReviewModalOpen(false);
+                  toast.success("Review complete", {
+                    description: "Moved on to the cancellation agreement.",
+                  });
+                }
+              }
+            : null
+        }
+      />
+
+      {/* Blocking "Generating invoice..." overlay shown after See More
+          is clicked AND no invoice exists yet for this project. The
+          modal stays mounted until the router.push to the invoice
+          page unmounts the dashboard. Non-dismissible. */}
+      {generatingInvoiceOpen ? (
+        <div
+          className="fixed inset-0 z-80 flex items-center justify-center bg-slate-900/45 px-4 backdrop-blur-[2px] dark:bg-black/55"
+          role="dialog"
+          aria-modal="true"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="w-full max-w-xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="h-1.5 w-full" style={{ backgroundColor: GREEN }} aria-hidden />
+            <div className="flex flex-col items-center gap-4 px-8 py-10 text-center">
+              <span className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[#00c065] dark:bg-[#00c065]/15 dark:text-emerald-300">
+                <Loader2 className="h-7 w-7 animate-spin" />
+              </span>
+              <div className="space-y-2">
+                <div className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+                  Generating invoice document
+                </div>
+                <div className="mx-auto max-w-md text-sm leading-6 text-gray-500 dark:text-slate-400">
+                  Building the invoice preview from your project's tasks,
+                  materials, and totals. You'll land on the invoice page
+                  once it's ready — please don't close this page.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {cancellationPaymentModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            {/* Green accent strip — matches the DownpaymentModal so both
+                cancellation/regular payment modals read as part of the
+                same workflow lane. */}
+            <div className="h-1 w-full" style={{ backgroundColor: GREEN }} aria-hidden />
+            {/* Header with faint green wash + X close — mirrors
+                DownpaymentModal exactly. */}
+            <div
+              className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-slate-700"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(0,192,101,0.08) 0%, rgba(0,192,101,0) 100%)",
+              }}
+            >
+              <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100">
+                Payment Management
+              </h3>
               <button
                 type="button"
-                onClick={() => setConcludeConfirmOpen(false)}
-                disabled={updatingEndOfWorkStepId === "conclude-job"}
-                className="rounded-md border border-gray-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800 text-sm font-semibold text-gray-700 dark:text-slate-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/70 disabled:opacity-50">
-                Cancel
+                onClick={() => setCancellationPaymentModalOpen(false)}
+                disabled={advancingCancellationStep === "cancellation-payment"}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <X className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                onClick={handleConfirmConcludeJob}
-                disabled={updatingEndOfWorkStepId === "conclude-job"}
-                className="rounded-md px-4 py-2 text-sm font-semibold text-white transition-colors disabled:opacity-50 hover:opacity-90"
-                style={{ backgroundColor: GREEN }}>
-                {updatingEndOfWorkStepId === "conclude-job"
-                  ? "Concluding..."
-                  : "Yes, conclude"}
-              </button>
+            </div>
+
+            {/* Body — instalment tracker. Total to Settle is read-only
+                (|cancellation_balance|). Paid + Needed update after each
+                Add so the running progress is always visible. Input
+                Payment is the only editable field; Add records the new
+                instalment, Confirm finalises once Paid covers Total. */}
+            {(() => {
+              const totalToSettle =
+                typeof cancellationBalance === "number"
+                  ? Math.abs(cancellationBalance)
+                  : 0;
+              const inputAmount = parseCurrencyInput(inputSettlement);
+              const prospectiveTotal = savedSettlement + inputAmount;
+              const neededAfterSaved = Math.max(
+                0,
+                totalToSettle - savedSettlement,
+              );
+              const neededAfterInput = Math.max(
+                0,
+                totalToSettle - prospectiveTotal,
+              );
+              // Project that cancelled with zero balance can finalise
+              // immediately; everyone else needs the prospective total
+              // to reach the absolute settlement amount.
+              const meetsTotal =
+                totalToSettle <= 0 || prospectiveTotal >= totalToSettle;
+              const canAdd = inputAmount > 0 && !meetsTotal;
+              const canConfirm = meetsTotal;
+              const isBusy = addingSettlement || confirmingSettlement;
+              const refundLabel =
+                typeof cancellationBalance === "number" &&
+                cancellationBalance > 0
+                  ? "Refund to Client"
+                  : typeof cancellationBalance === "number" &&
+                      cancellationBalance < 0
+                    ? "Bill Client"
+                    : "Settlement";
+
+              return (
+                <>
+                  <div className="space-y-5 px-5 py-5">
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600 dark:text-slate-400">
+                        Total to Settle ({refundLabel})
+                      </label>
+                      <div className="flex h-10 items-center overflow-hidden rounded-md border border-gray-200 bg-gray-50 dark:border-slate-700 dark:bg-slate-800">
+                        <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500 dark:border-slate-700 dark:text-slate-400">
+                          $AUD
+                        </span>
+                        <span
+                          className={[
+                            "flex-1 px-3 text-sm font-semibold",
+                            typeof cancellationBalance === "number" &&
+                            cancellationBalance > 0
+                              ? "text-emerald-700 dark:text-emerald-300"
+                              : typeof cancellationBalance === "number" &&
+                                  cancellationBalance < 0
+                                ? "text-rose-700 dark:text-rose-300"
+                                : "text-gray-700 dark:text-slate-200",
+                          ].join(" ")}>
+                          {totalToSettle.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600 dark:text-slate-400">
+                        Paid Settlement
+                      </label>
+                      <div className="flex h-10 items-center overflow-hidden rounded-md border border-gray-200 bg-gray-50 dark:border-slate-700 dark:bg-slate-800">
+                        <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500 dark:border-slate-700 dark:text-slate-400">
+                          $AUD
+                        </span>
+                        <span className="flex-1 px-3 text-sm text-gray-700 dark:text-slate-200">
+                          {savedSettlement.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600 dark:text-slate-400">
+                        Needed Settlement
+                      </label>
+                      <div className="flex h-10 items-center overflow-hidden rounded-md border border-gray-200 bg-gray-50 dark:border-slate-700 dark:bg-slate-800">
+                        <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500 dark:border-slate-700 dark:text-slate-400">
+                          $AUD
+                        </span>
+                        <span className="flex-1 px-3 text-sm text-gray-700 dark:text-slate-200">
+                          {neededAfterSaved.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-gray-600 dark:text-slate-400">
+                        Input Payment
+                      </label>
+                      <div
+                        className="flex h-10 items-center overflow-hidden rounded-md border border-gray-200 bg-white focus-within:ring-2 dark:border-slate-700 dark:bg-slate-900"
+                        style={{ ["--tw-ring-color" as any]: GREEN }}>
+                        <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500 dark:border-slate-700 dark:text-slate-400">
+                          $AUD
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={inputSettlement}
+                          onChange={(e) =>
+                            setInputSettlement(
+                              formatCurrencyInput(e.target.value),
+                            )
+                          }
+                          placeholder="Enter new instalment"
+                          disabled={
+                            isBusy ||
+                            !effectiveProjectId ||
+                            totalToSettle <= 0
+                          }
+                          className="flex-1 bg-transparent px-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-100"
+                        />
+                      </div>
+                      {totalToSettle <= 0 ? (
+                        <p className="mt-2 text-[11px] text-gray-500 dark:text-slate-400">
+                          Nothing to collect — the cancellation balance is
+                          already zero. Click <strong>Mark settled</strong>{" "}
+                          to advance to employee management.
+                        </p>
+                      ) : inputAmount > 0 && !meetsTotal ? (
+                        <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+                          Adding this brings the total to{" "}
+                          {prospectiveTotal.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          — {neededAfterInput.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          still needed to reach{" "}
+                          {totalToSettle.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                          . Click <strong>Add</strong> to record this
+                          instalment, or <strong>Notify Client</strong> to
+                          remind them of the remainder.
+                        </p>
+                      ) : inputAmount > 0 && meetsTotal ? (
+                        <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">
+                          Adding this brings the total to{" "}
+                          {prospectiveTotal.toLocaleString("en-AU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          — covers the full settlement. Click{" "}
+                          <strong>Mark settled</strong> to lock it in.
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-[11px] text-gray-500 dark:text-slate-400">
+                          Record each instalment as it comes in.{" "}
+                          <strong>Mark settled</strong> unlocks once the
+                          total is met.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Footer — plain white background + larger buttons,
+                      matching DownpaymentModal. */}
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!effectiveProjectId || cancellationPaymentNotifying)
+                          return;
+                        try {
+                          setCancellationPaymentNotifying(true);
+                          const res = await fetch(
+                            "/api/planning/notifyCancellationPayment",
+                            {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                projectId: effectiveProjectId,
+                                balance: cancellationBalance,
+                                earnedRevenue: cancellationEarnedRevenue,
+                                earnedCost: cancellationEarnedCost,
+                              }),
+                            },
+                          );
+                          const data = await res.json().catch(() => null);
+                          if (!res.ok) {
+                            throw new Error(
+                              [data?.error, data?.details]
+                                .filter(Boolean)
+                                .join(": ") || "Failed to notify client.",
+                            );
+                          }
+                          setCancellationPaymentNotified(true);
+                          toast.success("Client notified", {
+                            description:
+                              "A settlement reminder was posted in the project conversation.",
+                          });
+                          window.setTimeout(
+                            () => setCancellationPaymentNotified(false),
+                            10_000,
+                          );
+                        } catch (error) {
+                          toast.error(
+                            error instanceof Error
+                              ? error.message
+                              : "Failed to notify client.",
+                          );
+                        } finally {
+                          setCancellationPaymentNotifying(false);
+                        }
+                      }}
+                      disabled={
+                        cancellationPaymentNotifying ||
+                        cancellationPaymentNotified ||
+                        isBusy ||
+                        Boolean(advancingCancellationStep) ||
+                        !effectiveProjectId
+                      }
+                      className="mr-auto inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {cancellationPaymentNotifying ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : cancellationPaymentNotified ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      {cancellationPaymentNotified
+                        ? "Client notified"
+                        : "Notify Client"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCancellationPaymentModalOpen(false)}
+                      disabled={isBusy || Boolean(advancingCancellationStep)}
+                      className="rounded-md border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Go Back
+                    </button>
+                    {canConfirm ? (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!effectiveProjectId || isBusy) return;
+                          const newTotal = Math.max(
+                            savedSettlement,
+                            prospectiveTotal,
+                          );
+                          try {
+                            setConfirmingSettlement(true);
+                            const res = await fetch(
+                              "/api/planning/manageCancellationSettlement",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  projectId: effectiveProjectId,
+                                  settled: newTotal,
+                                  finalize: true,
+                                }),
+                              },
+                            );
+                            const data = await res.json().catch(() => null);
+                            if (!res.ok) {
+                              throw new Error(
+                                [data?.error, data?.details]
+                                  .filter(Boolean)
+                                  .join(": ") ||
+                                  "Failed to confirm settlement.",
+                              );
+                            }
+                            setSavedSettlement(newTotal);
+                            setInputSettlement("");
+                            setCancellationPhaseOverride("employee");
+                            setCancellationPaymentModalOpen(false);
+                            toast.success("Settlement recorded", {
+                              description: "Moved on to employee management.",
+                            });
+                            onRefresh?.();
+                          } catch (error) {
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : "Failed to confirm settlement.",
+                            );
+                          } finally {
+                            setConfirmingSettlement(false);
+                          }
+                        }}
+                        disabled={
+                          isBusy ||
+                          !effectiveProjectId ||
+                          effectiveCancellationPhase !== "payment"
+                        }
+                        className="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ backgroundColor: GREEN }}
+                      >
+                        {confirmingSettlement ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : null}
+                        {confirmingSettlement ? "Confirming..." : "Mark settled"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!effectiveProjectId || !canAdd || isBusy)
+                            return;
+                          const newTotal = prospectiveTotal;
+                          const addedThisRound = inputAmount;
+                          try {
+                            setAddingSettlement(true);
+                            const res = await fetch(
+                              "/api/planning/manageCancellationSettlement",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  projectId: effectiveProjectId,
+                                  settled: newTotal,
+                                  finalize: false,
+                                }),
+                              },
+                            );
+                            const data = await res.json().catch(() => null);
+                            if (!res.ok) {
+                              throw new Error(
+                                [data?.error, data?.details]
+                                  .filter(Boolean)
+                                  .join(": ") ||
+                                  "Failed to save partial settlement.",
+                              );
+                            }
+                            setSavedSettlement(newTotal);
+                            setInputSettlement("");
+                            toast.success("Partial settlement recorded.", {
+                              description: `$AUD ${addedThisRound.toLocaleString(
+                                "en-AU",
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )} added — $AUD ${newTotal.toLocaleString(
+                                "en-AU",
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )} of $AUD ${totalToSettle.toLocaleString(
+                                "en-AU",
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )} now collected.`,
+                            });
+                            onRefresh?.();
+                          } catch (error) {
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : "Failed to save partial settlement.",
+                            );
+                          } finally {
+                            setAddingSettlement(false);
+                          }
+                        }}
+                        disabled={!canAdd || isBusy || !effectiveProjectId}
+                        className="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ backgroundColor: GREEN }}
+                      >
+                        {addingSettlement ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : null}
+                        {addingSettlement ? "Adding..." : "Add"}
+                      </button>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      ) : null}
+
+      <EmployeeManagementModal
+        key={`cancellation-${effectiveProjectId || "no-project"}-${String(
+          cancellationEmployeeModalOpen,
+        )}`}
+        open={cancellationEmployeeModalOpen}
+        // Filter to only show finished work (status "done" or "late") —
+        // tasks that were pending or got marked "cancelled" by the
+        // cancel flow shouldn't appear on a performance review since
+        // the employee never actually did them.
+        employees={cancellationEmployeeReviewItems}
+        loading={loadingDetails}
+        saving={Boolean(advancingCancellationStep)}
+        onClose={() => setCancellationEmployeeModalOpen(false)}
+        onFinish={async (payload) => {
+          // Reuse the existing per-employee save handler so each
+          // employee's review hits the same DB rows. When the last
+          // employee is recorded, advance the cancellation phase
+          // instead of flipping project status (the project is
+          // already cancelled).
+          await handleEmployeeManagementFinish({
+            ...payload,
+            // Suppress the end-of-work status transition baked into
+            // the original handler — we only want the per-employee
+            // performance row to land.
+            isLastEmployee: false,
+          });
+          if (payload.isLastEmployee) {
+            const ok = await advanceCancellationPhase(
+              "cancellation-employee",
+              "employee",
+            );
+            if (ok) {
+              setCancellationEmployeeModalOpen(false);
+              toast.success("Employee review recorded", {
+                description: "Moved on to conclude job.",
+              });
+            }
+          }
+        }}
+      />
+
+      {cancellationConcludeConfirmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-sm overflow-hidden rounded-md bg-white shadow-2xl dark:bg-slate-900">
+            <div
+              className="h-1.5 w-full"
+              style={{ backgroundColor: GREEN }}
+              aria-hidden
+            />
+            <div className="p-5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                Conclude this project?
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-gray-600 dark:text-slate-400">
+                This wraps up the post-cancel workflow. The dashboard
+                will mark the project as fully closed-out. Review,
+                settlement, and document records remain on file.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCancellationConcludeConfirmOpen(false)}
+                  disabled={advancingCancellationStep === "cancellation-conclude"}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/70">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await advanceCancellationPhase(
+                      "cancellation-conclude",
+                      "conclude",
+                    );
+                    if (ok) {
+                      // Cancellation wrap-up done. Tear down the
+                      // project's conversation threads same as the
+                      // normal completed flow so the client and
+                      // recipient don't keep seeing a stale
+                      // thread for a closed project.
+                      if (effectiveProjectId) {
+                        try {
+                          const cleanupResponse = await fetch(
+                            "/api/planning/deleteProjectConversations",
+                            {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                projectId: effectiveProjectId,
+                              }),
+                            },
+                          );
+                          if (!cleanupResponse.ok) {
+                            const cleanupBody = await cleanupResponse
+                              .json()
+                              .catch(() => null);
+                            console.error(
+                              "deleteProjectConversations failed:",
+                              cleanupBody?.error ??
+                                cleanupResponse.statusText,
+                            );
+                          }
+                        } catch (cleanupError) {
+                          console.error(
+                            "deleteProjectConversations error:",
+                            cleanupError,
+                          );
+                        }
+                      }
+                      setCancellationConcludeConfirmOpen(false);
+                      toast.success("Project closed out", {
+                        description: "The cancellation wrap-up is complete.",
+                      });
+                    }
+                  }}
+                  disabled={
+                    advancingCancellationStep === "cancellation-conclude" ||
+                    effectiveCancellationPhase !== "conclude"
+                  }
+                  className="rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: GREEN }}>
+                  {advancingCancellationStep === "cancellation-conclude"
+                    ? "Closing..."
+                    : "Yes, conclude"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
