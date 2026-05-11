@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Loader2, Plus, Trash2, Variable as VariableIcon, X } from "lucide-react";
 
 import {
@@ -38,6 +38,14 @@ type AddFormulaModalProps = {
   // It creates the formula first, then loops through the variables
   // and POSTs each with the new formula_template_id.
   onSubmit: (payload: AddFormulaSubmitPayload) => void;
+  // When the modal is opened from a surface-aware context (eg the
+  // Add Main Task flow with a surface already picked), the parent
+  // can seed the expression with the surface key and queue a
+  // matching variable so the new formula is wired to that surface
+  // out of the gate. Applied only when the modal opens; the admin
+  // can edit or remove them before saving.
+  initialFormulaExpression?: string;
+  initialVariables?: PendingVariable[];
 };
 
 const initialState: EstimationFormulaTemplatePayload = {
@@ -69,6 +77,8 @@ export default function AddFormulaModal({
   subTasks,
   onClose,
   onSubmit,
+  initialFormulaExpression,
+  initialVariables,
 }: AddFormulaModalProps) {
   const [formState, setFormState] =
     useState<EstimationFormulaTemplatePayload>(initialState);
@@ -76,6 +86,24 @@ export default function AddFormulaModal({
   const [variableDraft, setVariableDraft] =
     useState<PendingVariable>(emptyVariableDraft);
   const [variableFormOpen, setVariableFormOpen] = useState(false);
+
+  // Re-apply seeded values every time the modal opens. State doesn't
+  // reset between openings on its own, so without this the seeded
+  // expression/variables would only land on the first open.
+  useEffect(() => {
+    if (!open) return;
+    setFormState({
+      ...initialState,
+      formulaExpression: initialFormulaExpression ?? "",
+    });
+    setVariables(initialVariables ?? []);
+    setVariableDraft(emptyVariableDraft);
+    setVariableFormOpen(false);
+    // initialFormulaExpression/initialVariables changing while the
+    // modal is open shouldn't blow away mid-edit state, so only
+    // depend on `open`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const filteredSubTasks = subTasks.filter(
     (item) => item.main_task_id === formState.relatedMainTaskId,

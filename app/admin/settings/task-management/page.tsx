@@ -643,9 +643,52 @@ export default function TaskManagementSettingsPage() {
 
       mergeSavedMainTasks([savedMainTask]);
       setSelectedMainTaskId(savedMainTask.main_task_id);
+
+      // Persist the formula attachment as a material_estimation_rule
+      // row linking the new main_task to the selected formula. Without
+      // this, the dropdown choice was silently lost. Duration formulas
+      // bind to sub_tasks (not main_tasks) so they can't be linked at
+      // main-task creation time; we surface a warning in that case.
+      let linkSummary = `Surface: ${input.surfaceKey}`;
+      try {
+        const ruleResponse = await fetch(
+          "/api/planning/material-estimation-rule",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mainTaskId: savedMainTask.main_task_id,
+              formulaTemplateId: input.formulaTemplateId,
+              materialName: input.name,
+              minimumQuantity: 0,
+              isActive: input.isActive,
+            }),
+          },
+        );
+        const ruleBody = await ruleResponse.json().catch(() => null);
+        if (!ruleResponse.ok) {
+          throw new Error(
+            [ruleBody?.error, ruleBody?.details]
+              .filter(Boolean)
+              .join(" - ") || "Failed to link formula.",
+          );
+        }
+        linkSummary = `Linked to formula. Surface: ${input.surfaceKey}.`;
+      } catch (linkError) {
+        // Main task is already saved, so don't fail the whole flow.
+        // Warn the user so they can re-link in Edit Estimations.
+        const message =
+          linkError instanceof Error
+            ? linkError.message
+            : "Could not attach the selected formula.";
+        toast.error("Formula link failed.", {
+          description: `${message} The main task was still created. Wire the formula manually from Edit Estimations.`,
+        });
+      }
+
       setAddMainTaskOpen(false);
       toast.success("Main task created.", {
-        description: `Linked to formula ${input.formulaTemplateId.slice(0, 8)} via surface ${input.surfaceKey}.`,
+        description: linkSummary,
       });
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to create main task."));

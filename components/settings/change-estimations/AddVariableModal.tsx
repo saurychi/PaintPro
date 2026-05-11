@@ -20,12 +20,24 @@ type AddVariableModalProps = {
   saving: boolean;
   onClose: () => void;
   onSubmit: (payload: EstimationFormulaVariablePayload) => void;
+  // Optional pre-fills for the add path. Surface-aware callers pass
+  // the selected surface_key / label / unit so the new variable
+  // starts wired to that surface and the formula's expression can
+  // pick it up by name. Ignored when mode is "edit".
+  defaultVariableKey?: string;
+  defaultLabel?: string;
+  defaultUnit?: string;
 };
 
 function buildInitialState(
   mode: "add" | "edit",
   variable: EstimationFormulaVariable | null,
   defaultFormulaTemplateId: string | null,
+  seed: {
+    defaultVariableKey?: string;
+    defaultLabel?: string;
+    defaultUnit?: string;
+  },
 ): EstimationFormulaVariablePayload {
   if (mode === "edit" && variable) {
     return {
@@ -42,12 +54,12 @@ function buildInitialState(
 
   return {
     formulaTemplateId: defaultFormulaTemplateId ?? "",
-    variableKey: "",
-    label: "",
+    variableKey: seed.defaultVariableKey ?? "",
+    label: seed.defaultLabel ?? "",
     description: "",
     dataType: "number",
     defaultValue: "",
-    unit: "",
+    unit: seed.defaultUnit ?? "",
     isRequired: true,
   };
 }
@@ -61,9 +73,16 @@ export default function AddVariableModal({
   saving,
   onClose,
   onSubmit,
+  defaultVariableKey,
+  defaultLabel,
+  defaultUnit,
 }: AddVariableModalProps) {
   const [formState, setFormState] = useState<EstimationFormulaVariablePayload>(
-    buildInitialState(mode, variable, defaultFormulaTemplateId),
+    buildInitialState(mode, variable, defaultFormulaTemplateId, {
+      defaultVariableKey,
+      defaultLabel,
+      defaultUnit,
+    }),
   );
 
   if (!open) return null;

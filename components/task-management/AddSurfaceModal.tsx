@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { Check, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { supabase } from "@/lib/supabaseClient";
-
 type Unit = "m2" | "m" | "count";
 
 type Props = {
@@ -148,16 +146,28 @@ export default function AddSurfaceModal({ open, onCreated, onClose }: Props) {
 
     try {
       setSaving(true);
-      const { error } = await supabase.from("surface_scale_presets").insert({
-        surface_key: trimmedKey,
-        label: trimmedLabel,
-        unit,
-        small_label: "Small",
-        medium_label: "Medium",
-        large_label: "Large",
-        ...numbers,
+      // Goes through the service-role API route so RLS on
+      // surface_scale_presets cannot silently swallow the insert.
+      const response = await fetch("/api/planning/surface-scale-preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          surface_key: trimmedKey,
+          label: trimmedLabel,
+          unit,
+          small_label: "Small",
+          medium_label: "Medium",
+          large_label: "Large",
+          ...numbers,
+        }),
       });
-      if (error) throw error;
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          [body?.error, body?.details].filter(Boolean).join(" - ") ||
+            "Failed to create surface.",
+        );
+      }
       toast.success("Surface created.");
       onCreated(trimmedKey);
       onClose();
@@ -171,7 +181,7 @@ export default function AddSurfaceModal({ open, onCreated, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
+    <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
         <div className="h-1.5 w-full shrink-0 bg-[#00c065]" />
 
