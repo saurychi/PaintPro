@@ -977,16 +977,10 @@ export default function StaffMessages() {
                           <div className="absolute bottom-full right-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 min-w-[200px]">
                             <button
                               onClick={() => handleOpenMeasureGenerator(msg)}
-                              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2 whitespace-nowrap"
                             >
-                              <Ruler className="h-3.5 w-3.5 text-[#00c065]" />
-                              <span>
-                                Open in Measure Generator
-                                <span className="ml-1 text-[10px] text-gray-400">
-                                  ({incomingSurfaces.length} surface
-                                  {incomingSurfaces.length === 1 ? "" : "s"})
-                                </span>
-                              </span>
+                              <Ruler className="h-3.5 w-3.5 shrink-0 text-[#00c065]" />
+                              <span>Open in Measure Generator</span>
                             </button>
                           </div>
                         )}

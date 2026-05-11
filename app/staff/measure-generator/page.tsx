@@ -275,42 +275,44 @@ export default function MeasureGeneratorPage() {
     return map;
   }, [options]);
 
-  // First-pass hydration: once presets are loaded, replay any persisted
-  // state (filtering to keys that still exist in the DB), then merge in
-  // anything new the handoff brought along. Runs exactly once.
+  // First-pass hydration: once presets are loaded, decide whether to
+  // resume from localStorage or hard-reset from the messages-page
+  // handoff. A handoff means the staff just clicked "Open in Measure
+  // Generator" on a specific message, so we wipe any previous work and
+  // seed fresh rows from that message's surfaces with no measurements
+  // entered yet. Without a handoff, we replay whatever was persisted.
+  // Runs exactly once.
   useEffect(() => {
     if (presetsLoading) return;
     if (hydrated) return;
 
-    const persisted = readPersistedState();
-    const persistedRows = (persisted?.rows ?? []).filter((row) =>
-      byKey.has(row.surfaceKey),
-    );
-
-    let seedRows = persistedRows;
     if (pendingHandoff && Array.isArray(pendingHandoff.surfaceKeys)) {
-      const existing = new Set(persistedRows.map((r) => r.surfaceKey));
-      const incoming = pendingHandoff.surfaceKeys
-        .filter((key) => byKey.has(key) && !existing.has(key))
+      const seedRows = pendingHandoff.surfaceKeys
+        .filter((key) => byKey.has(key))
         .map((key) => makeRow(key, presets));
-      seedRows = [...persistedRows, ...incoming];
+      setRows(seedRows);
+      setSourceMessage(pendingHandoff.sourceMessage ?? "");
+      setEditedMessage("");
+      setIsDetached(false);
+      clearPersistedState();
+    } else {
+      const persisted = readPersistedState();
+      const persistedRows = (persisted?.rows ?? []).filter((row) =>
+        byKey.has(row.surfaceKey),
+      );
+      if (persisted?.sourceMessage) setSourceMessage(persisted.sourceMessage);
+      if (typeof persisted?.editedMessage === "string") {
+        setEditedMessage(persisted.editedMessage);
+      }
+      if (typeof persisted?.isDetached === "boolean") {
+        setIsDetached(persisted.isDetached);
+      }
+      setRows(persistedRows);
     }
 
-    if (persisted?.sourceMessage && !sourceMessage) {
-      setSourceMessage(persisted.sourceMessage);
-    }
-
-    if (typeof persisted?.editedMessage === "string") {
-      setEditedMessage(persisted.editedMessage);
-    }
-    if (typeof persisted?.isDetached === "boolean") {
-      setIsDetached(persisted.isDetached);
-    }
-
-    setRows(seedRows);
     setPendingHandoff(null);
     setHydrated(true);
-  }, [presetsLoading, hydrated, pendingHandoff, byKey, presets, sourceMessage]);
+  }, [presetsLoading, hydrated, pendingHandoff, byKey, presets]);
 
   // Persist rows + banner + textarea state on every change once we've
   // hydrated, so a refresh or tab close mid-job doesn't wipe the work.
