@@ -20,6 +20,23 @@ export function suppressNewMessageToast(): () => void {
   };
 }
 
+// Optional override for the toast's "Open" action. Pages that already
+// own a messages UI (e.g. the basic-details StaffMessageModal) can
+// register a handler so clicking "Open" pops that modal instead of
+// navigating to the messages page. Latest registration wins; the
+// returned disposer clears the handler if it's still the active one.
+let customOpenHandler: (() => void) | null = null;
+export function registerNewMessageOpenHandler(
+  handler: () => void,
+): () => void {
+  customOpenHandler = handler;
+  return () => {
+    if (customOpenHandler === handler) {
+      customOpenHandler = null;
+    }
+  };
+}
+
 // Drives both the sidebar Messages badge AND the toast notifications fired
 // when a new message arrives somewhere outside the current view.
 //
@@ -242,7 +259,18 @@ export function useMessagesUnread(messagesPathPrefix: string) {
               description: preview,
               action: {
                 label: "Open",
-                onClick: () => routerRef.current.push(prefix),
+                onClick: () => {
+                  // Prefer a page-registered handler (e.g. the
+                  // basic-details StaffMessageModal opener) so the
+                  // admin doesn't get yanked away from their in-flight
+                  // wizard step. Fall back to the messages page when
+                  // no page owns this toast.
+                  if (customOpenHandler) {
+                    customOpenHandler();
+                  } else {
+                    routerRef.current.push(prefix);
+                  }
+                },
               },
             });
           }

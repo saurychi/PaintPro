@@ -43,8 +43,17 @@ export default function StaffPageShell({
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
 
-      {/* Body */}
-      <div className={cn("mt-4 min-h-0 flex-1 sm:mt-6", bodyClassName)}>
+      {/* Body — smaller top margin when there's no subtitle so the title
+          doesn't float in a sea of whitespace; full breathing room when
+          a subtitle is present (the helper text needs the larger
+          separator to read as a distinct section). */}
+      <div
+        className={cn(
+          subtitle ? "mt-4 sm:mt-6" : "mt-3 sm:mt-4",
+          "min-h-0 flex-1",
+          bodyClassName,
+        )}
+      >
         {children}
       </div>
     </div>
