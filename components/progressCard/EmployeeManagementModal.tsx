@@ -30,6 +30,8 @@ type Props = {
   onFinish: (payload: EmployeeManagementFinishPayload) => Promise<void> | void;
 };
 
+type SectionView = "tasks" | "rating";
+
 const ratingColumns: Array<{ key: EmployeePerformanceRatingValue; label: string }> = [
   { key: "great", label: "Great" },
   { key: "good", label: "Good" },
@@ -96,13 +98,17 @@ export default function EmployeeManagementModal({
   onFinish,
 }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [note, setNote] = useState("");
   const [rating, setRating] = useState<EmployeePerformanceRatingState>({
     timeEfficiency: "",
     workQuality: "",
     teamwork: "",
     workEthic: "",
   });
+  // Single section now toggles between the task log and the rating
+  // grid so the modal stays inside its own bounds without outer
+  // scroll. Default to "tasks" so the admin reviews work history
+  // before scoring.
+  const [view, setView] = useState<SectionView>("tasks");
   // Track which employees the admin has already saved a review for in
   // this session. Without this gate, "Next" lets the admin skip past
   // unrated employees and the unrated ones never have their performance
@@ -117,12 +123,10 @@ export default function EmployeeManagementModal({
   // the final phase-advance, not per-employee writes).
   const [internalSaving, setInternalSaving] = useState(false);
   const isSaving = saving || internalSaving;
-  // Remember each saved review (rating + note) so navigating back to a
-  // previously-saved employee restores their inputs instead of dropping
-  // them on the floor. Without this, the form state was a single
-  // {rating, note} that got blanked on every nav.
+  // Remember each saved rating so navigating back to a previously-
+  // saved employee restores their inputs instead of dropping them.
   const [savedReviews, setSavedReviews] = useState<
-    Map<string, { rating: EmployeePerformanceRatingState; note: string }>
+    Map<string, EmployeePerformanceRatingState>
   >(() => new Map());
 
   // Reset session state when the modal is re-opened so a fresh review
@@ -134,7 +138,7 @@ export default function EmployeeManagementModal({
     setActiveIndex(0);
     setSubmittedUserIds(new Set());
     setSavedReviews(new Map());
-    setNote("");
+    setView("tasks");
     setRating({
       timeEfficiency: "",
       workQuality: "",
@@ -165,7 +169,6 @@ export default function EmployeeManagementModal({
   );
 
   function resetReviewForm() {
-    setNote("");
     setRating({
       timeEfficiency: "",
       workQuality: "",
@@ -185,8 +188,7 @@ export default function EmployeeManagementModal({
     }
     const saved = savedReviews.get(employee.userId);
     if (saved) {
-      setNote(saved.note);
-      setRating(saved.rating);
+      setRating(saved);
     } else {
       resetReviewForm();
     }
@@ -197,6 +199,10 @@ export default function EmployeeManagementModal({
     const newIndex = activeIndex - 1;
     setActiveIndex(newIndex);
     loadReviewForIndex(newIndex);
+    // Default each employee back to the task view so the admin
+    // doesn't accidentally rate before seeing what the new person
+    // actually did.
+    setView("tasks");
   }
 
   function goNext() {
@@ -204,6 +210,7 @@ export default function EmployeeManagementModal({
     const newIndex = activeIndex + 1;
     setActiveIndex(newIndex);
     loadReviewForIndex(newIndex);
+    setView("tasks");
   }
 
   async function handleFinish() {
@@ -219,19 +226,19 @@ export default function EmployeeManagementModal({
       setInternalSaving(true);
       await onFinish({
         employeeId: activeEmployee.userId,
-        note,
+        // Notes were removed from the UI; pass an empty string so the
+        // existing endpoint signature keeps working without a parallel
+        // backend change.
+        note: "",
         rating,
         isLastEmployee: isLastEmployeeSubmit,
       });
 
-      // Snapshot the review so navigating back restores these values
+      // Snapshot the rating so navigating back restores these values
       // instead of an empty form.
       setSavedReviews((prev) => {
         const next = new Map(prev);
-        next.set(activeEmployee.userId, {
-          rating: { ...rating },
-          note,
-        });
+        next.set(activeEmployee.userId, { ...rating });
         return next;
       });
 
@@ -269,7 +276,7 @@ export default function EmployeeManagementModal({
       }}
     >
       <div
-        className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl"
+        className="flex h-[92vh] w-full max-w-6xl min-h-0 flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="h-1.5 w-full shrink-0 bg-[#00c065]" />
@@ -280,7 +287,7 @@ export default function EmployeeManagementModal({
               Employee Management
             </h2>
             <p className="mt-1 text-[11px] text-gray-500">
-              Review employee work, record notes, and submit post-project ratings.
+              Review employee work and submit post-project ratings.
             </p>
           </div>
 
@@ -309,8 +316,11 @@ export default function EmployeeManagementModal({
           </div>
         </div>
 
+        {/* Body. NO outer scroll — the inner section is the only
+            scrollable region. Aside and main share the remaining
+            height with min-h-0 so they can shrink as needed. */}
         {loading ? (
-          <div className="flex min-h-[520px] items-center justify-center">
+          <div className="flex min-h-0 flex-1 items-center justify-center">
             <div className="text-center">
               <Loader2 className="mx-auto h-6 w-6 animate-spin text-gray-500" />
               <p className="mt-3 text-xs text-gray-500">
@@ -319,7 +329,7 @@ export default function EmployeeManagementModal({
             </div>
           </div>
         ) : !activeEmployee ? (
-          <div className="flex min-h-[520px] items-center justify-center px-6 text-center">
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
             <div>
               <UserRound className="mx-auto h-9 w-9 text-gray-300" />
               <p className="mt-3 text-xs font-semibold text-gray-900">
@@ -331,98 +341,127 @@ export default function EmployeeManagementModal({
             </div>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-            <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
-              <aside className="min-w-0">
-                <div className="rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex flex-col items-center text-center">
-                    <div className="h-32 w-32 overflow-hidden rounded-full border border-gray-200 bg-gray-50">
-                      {activeEmployee.profileImageUrl ? (
-                        <img
-                          src={activeEmployee.profileImageUrl}
-                          alt={activeEmployee.username}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-gray-300">
-                          <UserRound className="h-12 w-12" />
-                        </div>
-                      )}
-                    </div>
-
-                    <h3 className="mt-4 text-sm font-semibold text-gray-900">
-                      {activeEmployee.username}
-                    </h3>
-
-                    {activeEmployee.role ? (
-                      <span className="mt-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        {activeEmployee.role}
-                      </span>
-                    ) : null}
+          <div className="grid min-h-0 flex-1 gap-5 px-6 py-5 lg:grid-cols-[280px_1fr]">
+            <aside className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+              <div className="shrink-0 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col items-center text-center">
+                  <div className="h-28 w-28 overflow-hidden rounded-full border border-gray-200 bg-gray-50">
+                    {activeEmployee.profileImageUrl ? (
+                      <img
+                        src={activeEmployee.profileImageUrl}
+                        alt={activeEmployee.username}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-gray-300">
+                        <UserRound className="h-10 w-10" />
+                      </div>
+                    )}
                   </div>
 
-                  <div className="mt-5 space-y-3 rounded-md border border-gray-100 bg-gray-50 p-3">
-                    <div className="flex gap-2 text-[11px] text-gray-600">
-                      <Mail className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
-                      <span className="min-w-0 break-words">
-                        {activeEmployee.email || "No email"}
-                      </span>
-                    </div>
+                  <h3 className="mt-3 text-sm font-semibold text-gray-900">
+                    {activeEmployee.username}
+                  </h3>
 
-                    <div className="flex gap-2 text-[11px] text-gray-600">
-                      <Phone className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
-                      <span>{activeEmployee.phone || "No phone"}</span>
-                    </div>
-
-                    <div className="text-[11px] text-gray-600">
-                      <span className="font-semibold text-gray-800">
-                        Date Joined:
-                      </span>{" "}
-                      {activeEmployee.dateJoined
-                        ? formatDateTime(activeEmployee.dateJoined)
-                        : "—"}
-                    </div>
-                  </div>
+                  {activeEmployee.role ? (
+                    <span className="mt-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      {activeEmployee.role}
+                    </span>
+                  ) : null}
                 </div>
 
-                <div className="mt-4 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-semibold text-gray-900">Notes</p>
-                  <textarea
-                    value={note}
-                    onChange={(event) => setNote(event.target.value)}
-                    placeholder="Add a note about this employee's work..."
-                    className="mt-3 min-h-[100px] w-full resize-none rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-900 outline-none transition focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
-                  />
-                </div>
-
-                <div className="mt-4 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-semibold text-gray-900">
-                    Salary / Pay Estimate
-                  </p>
-                  <p className="mt-3 text-lg font-bold text-[#00c065]">
-                    {formatCurrency(activeEmployee.salaryAmount)}
-                  </p>
-                </div>
-              </aside>
-
-              <main className="min-w-0 space-y-5">
-                <section className="rounded-md border border-gray-200 bg-white shadow-sm">
-                  <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
-                    <div>
-                      <h3 className="text-xs font-semibold text-gray-900">
-                        Tasks
-                      </h3>
-                      <p className="mt-1 text-[11px] text-gray-500">
-                        {completedTaskCount} of {totalTaskCount} tasks completed.
-                      </p>
-                    </div>
-
-                    <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[10px] font-semibold text-gray-600">
-                      {activeIndex + 1} / {employees.length}
+                <div className="mt-4 space-y-2.5 rounded-md border border-gray-100 bg-gray-50 p-3">
+                  <div className="flex gap-2 text-[11px] text-gray-600">
+                    <Mail className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
+                    <span className="min-w-0 wrap-break-word">
+                      {activeEmployee.email || "No email"}
                     </span>
                   </div>
 
-                  <div className="max-h-[260px] overflow-y-auto px-5 py-3">
+                  <div className="flex gap-2 text-[11px] text-gray-600">
+                    <Phone className="mt-0.5 h-3 w-3 shrink-0 text-gray-400" />
+                    <span>{activeEmployee.phone || "No phone"}</span>
+                  </div>
+
+                  <div className="text-[11px] text-gray-600">
+                    <span className="font-semibold text-gray-800">
+                      Date Joined:
+                    </span>{" "}
+                    {activeEmployee.dateJoined
+                      ? formatDateTime(activeEmployee.dateJoined)
+                      : "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="shrink-0 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold text-gray-900">
+                  Salary / Pay Estimate
+                </p>
+                <p className="mt-2 text-lg font-bold text-[#00c065]">
+                  {formatCurrency(activeEmployee.salaryAmount)}
+                </p>
+              </div>
+            </aside>
+
+            {/* Single section with a Tasks / Rating toggle. Flex
+                column with min-h-0 so the body region can scroll
+                independently while the header stays fixed. */}
+            <section className="flex min-h-0 min-w-0 flex-col rounded-md border border-gray-200 bg-white shadow-sm">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-3.5">
+                <div className="min-w-0">
+                  <h3 className="text-xs font-semibold text-gray-900">
+                    Performance Review
+                  </h3>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    {view === "tasks"
+                      ? `${completedTaskCount} of ${totalTaskCount} tasks completed.`
+                      : "Rate the employee's post-project performance."}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  <div
+                    className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5"
+                    role="tablist"
+                    aria-label="Performance view"
+                  >
+                    {(
+                      [
+                        { key: "tasks", label: "Tasks" },
+                        { key: "rating", label: "Rating" },
+                      ] as Array<{ key: SectionView; label: string }>
+                    ).map((tab) => {
+                      const active = view === tab.key;
+                      return (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => setView(tab.key)}
+                          className={[
+                            "inline-flex h-7 items-center rounded-sm px-3 text-[11px] font-semibold transition",
+                            active
+                              ? "bg-white text-gray-900 shadow-sm"
+                              : "text-gray-500 hover:text-gray-700",
+                          ].join(" ")}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[10px] font-semibold text-gray-600">
+                    {activeIndex + 1} / {employees.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                {view === "tasks" ? (
+                  <>
                     <div className="hidden grid-cols-12 gap-3 border-b border-gray-100 pb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 md:grid">
                       <div className="col-span-2">Status</div>
                       <div className="col-span-4">Task</div>
@@ -474,80 +513,67 @@ export default function EmployeeManagementModal({
                         ))
                       )}
                     </div>
-                  </div>
-                </section>
+                  </>
+                ) : (
+                  <div className="min-w-[560px]">
+                    <div className="grid grid-cols-[1.4fr_repeat(4,1fr)] border-b border-gray-100 pb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      <div>Performance Criteria</div>
+                      {ratingColumns.map((column) => (
+                        <div key={column.key} className="text-center">
+                          {column.label}
+                        </div>
+                      ))}
+                    </div>
 
-                <section className="rounded-md border border-gray-200 bg-white shadow-sm">
-                  <div className="border-b border-gray-100 px-5 py-4">
-                    <h3 className="text-xs font-semibold text-gray-900">
-                      Rating
-                    </h3>
-                    <p className="mt-1 text-[11px] text-gray-500">
-                      Rate the employee’s post-project performance.
-                    </p>
-                  </div>
-
-                  <div className="overflow-x-auto px-5 py-4">
-                    <div className="min-w-[560px]">
-                      <div className="grid grid-cols-[1.4fr_repeat(4,1fr)] border-b border-gray-100 pb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                        <div>Performance Criteria</div>
-                        {ratingColumns.map((column) => (
-                          <div key={column.key} className="text-center">
-                            {column.label}
+                    <div className="divide-y divide-gray-100">
+                      {ratingRows.map((row) => (
+                        <div
+                          key={row.key}
+                          className="grid grid-cols-[1.4fr_repeat(4,1fr)] items-center py-3"
+                        >
+                          <div className="text-xs font-medium text-gray-700">
+                            {row.label}
                           </div>
-                        ))}
-                      </div>
 
-                      <div className="divide-y divide-gray-100">
-                        {ratingRows.map((row) => (
-                          <div
-                            key={row.key}
-                            className="grid grid-cols-[1.4fr_repeat(4,1fr)] items-center py-3"
-                          >
-                            <div className="text-xs font-medium text-gray-700">
-                              {row.label}
-                            </div>
+                          {ratingColumns.map((column) => {
+                            const selected = rating[row.key] === column.key;
 
-                            {ratingColumns.map((column) => {
-                              const selected = rating[row.key] === column.key;
-
-                              return (
-                                <label
-                                  key={column.key}
-                                  className="flex cursor-pointer items-center justify-center"
-                                >
-                                  <input
-                                    type="radio"
-                                    name={row.key}
-                                    value={column.key}
-                                    checked={selected}
-                                    onChange={() =>
-                                      setRating((prev) => ({
-                                        ...prev,
-                                        [row.key]: column.key,
-                                      }))
-                                    }
-                                    className="sr-only"
-                                  />
-                                  <span
-                                    className={[
-                                      "h-4 w-4 rounded-full border transition",
-                                      selected
-                                        ? "border-[#00c065] bg-[#00c065] ring-4 ring-[#00c065]/15"
-                                        : "border-gray-300 bg-white hover:border-[#00c065]",
-                                    ].join(" ")}
-                                  />
-                                </label>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
+                            return (
+                              <label
+                                key={column.key}
+                                className="flex cursor-pointer items-center justify-center"
+                              >
+                                <input
+                                  type="radio"
+                                  name={`${activeEmployee.userId}-${row.key}`}
+                                  value={column.key}
+                                  checked={selected}
+                                  onChange={() =>
+                                    setRating((prev) => ({
+                                      ...prev,
+                                      [row.key]: column.key,
+                                    }))
+                                  }
+                                  className="sr-only"
+                                />
+                                <span
+                                  className={[
+                                    "h-4 w-4 rounded-full border transition",
+                                    selected
+                                      ? "border-[#00c065] bg-[#00c065] ring-4 ring-[#00c065]/15"
+                                      : "border-gray-300 bg-white hover:border-[#00c065]",
+                                  ].join(" ")}
+                                />
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </section>
-              </main>
-            </div>
+                )}
+              </div>
+            </section>
           </div>
         )}
 
