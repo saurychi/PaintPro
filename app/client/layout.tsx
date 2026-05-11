@@ -21,6 +21,7 @@ type ProjectAccessRow = {
   project_id: string
   project_code: string | null
   client_id: string | null
+  status: string | null
 }
 
 type ClientProfileRow = {
@@ -48,12 +49,19 @@ async function getProjectAccessSidebarUser(
 ): Promise<SidebarUser | null> {
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .select("project_id, project_code, client_id")
+    .select("project_id, project_code, client_id, status")
     .eq("project_id", projectId)
     .maybeSingle<ProjectAccessRow>()
 
   if (projectError) throw projectError
   if (!project) return null
+
+  // Completed projects revoke code-based client access — same gate as
+  // /api/auth/client-access. The caller redirects to /auth/signin when
+  // this returns null.
+  if (String(project.status ?? "").trim().toLowerCase() === "completed") {
+    return null
+  }
 
   if (!project.client_id) {
     return {
@@ -112,7 +120,13 @@ export default async function ClientLayout({ children }: { children: ReactNode }
     const clientProjectId = cookieStore.get(CLIENT_COOKIE)?.value
     if (!clientProjectId) redirect("/auth/signin")
     const guestSidebarUser = await getProjectAccessSidebarUser(clientProjectId)
-    if (!guestSidebarUser) redirect("/auth/signin")
+    if (!guestSidebarUser) {
+      // Project is missing or completed — drop the cookie so the
+      // client lands cleanly on the sign-in page instead of bouncing
+      // back through here on the next request.
+      cookieStore.delete(CLIENT_COOKIE)
+      redirect("/auth/signin")
+    }
     return (
       <ClientShellClient
         role="client"
