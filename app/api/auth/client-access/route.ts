@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from("projects")
-      .select("project_id, project_code")
+      .select("project_id, project_code, status")
       .eq("project_code", projectCode)
       .maybeSingle()
 
@@ -26,6 +26,17 @@ export async function POST(request: NextRequest) {
 
     if (!data) {
       return NextResponse.json({ error: "Project code not found." }, { status: 404 })
+    }
+
+    // Completed projects are archive-state — block code sign-in so old
+    // codes can't be reused to peek at a closed-out project. The admin
+    // dashboard already treats completed as terminal; this keeps the
+    // client surface in sync.
+    if (String(data.status ?? "").trim().toLowerCase() === "completed") {
+      return NextResponse.json(
+        { error: "This project has been completed and is no longer accessible." },
+        { status: 403 },
+      )
     }
 
     const response = NextResponse.json({
