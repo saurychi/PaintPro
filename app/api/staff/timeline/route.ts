@@ -4,6 +4,12 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin"
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const userId = searchParams.get("userId")?.trim()
+  // Optional date-range filter applied to sub-tasks: keep tasks
+  // whose scheduled_start_datetime falls within [start, end] when
+  // both are provided. When either is omitted the filter is skipped
+  // for that side, matching how the dashboard report does it.
+  const startParam = searchParams.get("start")?.trim() || null
+  const endParam = searchParams.get("end")?.trim() || null
 
   if (!userId) return NextResponse.json({ error: "Missing userId." }, { status: 400 })
 
@@ -23,12 +29,17 @@ export async function GET(req: Request) {
     )
 
     // 2. Sub-task schedule details
-    const { data: subTasks, error: subTaskError } = await supabaseAdmin
+    let subTaskQuery = supabaseAdmin
       .from("project_sub_task")
       .select(
         "project_sub_task_id, project_task_id, sub_task_id, scheduled_start_datetime, scheduled_end_datetime, estimated_hours, status",
       )
       .in("project_sub_task_id", subTaskIds)
+
+    if (startParam) subTaskQuery = subTaskQuery.gte("scheduled_start_datetime", startParam)
+    if (endParam) subTaskQuery = subTaskQuery.lte("scheduled_start_datetime", endParam)
+
+    const { data: subTasks, error: subTaskError } = await subTaskQuery
 
     if (subTaskError) return NextResponse.json({ error: subTaskError.message }, { status: 500 })
     if (!subTasks || subTasks.length === 0) return NextResponse.json({ projects: [] })
