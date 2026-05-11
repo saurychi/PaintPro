@@ -24,6 +24,7 @@ import {
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import ScheduleSkeleton from "@/components/schedule/ScheduleSkeleton";
 import UnavailableDayModal, {
   type UnavailableDayFormValue,
 } from "@/components/schedule/UnavailableDayModal";
@@ -31,6 +32,10 @@ import UnavailableBlockDetailModal from "@/components/schedule/UnavailableBlockD
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 import { useProjectNow } from "@/lib/time/useProjectNow";
+import {
+  getProjectRoute as resolveProjectRoute,
+  normalizeProjectStatus,
+} from "@/lib/planning/projectRoute";
 import {
   buildTimelineSegmentEvents,
   timelineSegmentClassName,
@@ -1066,78 +1071,16 @@ export default function AdminSchedule() {
     await deleteUnavailableDay(day);
   }
 
+  // Same status → route table the projects list uses, so clicking a
+  // calendar event lands the admin on whatever surface that status
+  // belongs on (e.g. downpayment_pending → dashboard with the modal
+  // pre-opened, in_progress → dashboard with this project pre-selected).
+  // See lib/planning/projectRoute.ts.
   function getProjectRoute(projectId: string, rawStatus: string) {
-    const status = String(rawStatus || "")
-      .trim()
-      .toLowerCase();
-
-    if (
-      status === "main_task_pending" ||
-      status === "draft" ||
-      status === "pending"
-    ) {
-      return `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "sub_task_pending") {
-      return `/admin/job-creation/sub-task-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "materials_pending") {
-      return `/admin/job-creation/materials-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "equipment_pending") {
-      return `/admin/job-creation/equipment-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "schedule_pending") {
-      return `/admin/job-creation/project-schedule?projectId=${projectId}`;
-    }
-
-    if (status === "employee_assignment_pending") {
-      return `/admin/job-creation/employee-assignment?projectId=${projectId}`;
-    }
-
-    if (status === "cost_estimation_pending") {
-      return `/admin/job-creation/cost-estimation?projectId=${projectId}`;
-    }
-
-    if (status === "overview_pending") {
-      return `/admin/job-creation/overview?projectId=${projectId}`;
-    }
-
-    if (status === "quotation_pending") {
-      return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
-    }
-
-    if (
-      status === "ready_to_start" ||
-      status === "in_progress" ||
-      status === "review_pending" ||
-      status === "invoice_pending" ||
-      status === "payment_pending" ||
-      status === "employee_management_pending" ||
-      status === "conclude_job_pending" ||
-      status === "ongoing" ||
-      status === "active"
-    ) {
-      return `/admin/projects`;
-    }
-
-    if (status === "completed" || status === "done") {
-      return `/admin/report`;
-    }
-
-    if (status === "cancelled") {
-      return `/admin/projects`;
-    }
-
-    if (status === "cancelled") {
-      return `/admin/schedule`;
-    }
-
-    return `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
+    return resolveProjectRoute(
+      projectId,
+      normalizeProjectStatus(rawStatus),
+    );
   }
 
   return (
@@ -1575,14 +1518,7 @@ export default function AdminSchedule() {
 
             <div className="px-2.5 py-2 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
               {loading ? (
-                <div className="flex h-64 items-center justify-center lg:h-full">
-                  <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
-                    <Loader2 className="h-5 w-5 animate-spin text-gray-700 dark:text-slate-200" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-slate-300">
-                      Loading schedule...
-                    </span>
-                  </div>
-                </div>
+                <ScheduleSkeleton />
               ) : (
                 <div className="grid grid-cols-12 gap-3 lg:h-full lg:min-h-0">
                   <div className="col-span-12 flex flex-col rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/25 lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">

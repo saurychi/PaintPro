@@ -670,18 +670,51 @@ export default function ChangeEstimationsSettingsPage() {
     }
   }, [editingFormula, formulas]);
 
-  async function handleCreateFormula(
-    payload: EstimationFormulaTemplatePayload,
-  ) {
+  async function handleCreateFormula(input: {
+    formula: EstimationFormulaTemplatePayload;
+    variables: Array<
+      Omit<EstimationFormulaVariablePayload, "formulaTemplateId">
+    >;
+  }) {
     setIsSavingFormula(true);
 
     try {
-      const formula = await saveFormulaTemplate({ payload });
+      const formula = await saveFormulaTemplate({ payload: input.formula });
+      const newFormulaId = formula?.formula_template_id;
+
+      // Persist any variables the admin queued up in the modal. They
+      // arrive without a formula_template_id; we attach the new
+      // formula's id and POST each one. Continue past per-variable
+      // errors so a single bad row doesn't strand the formula save.
+      if (newFormulaId && input.variables.length > 0) {
+        const variableErrors: string[] = [];
+        for (const variable of input.variables) {
+          try {
+            await saveFormulaVariable({
+              payload: { ...variable, formulaTemplateId: newFormulaId },
+            });
+          } catch (error: unknown) {
+            variableErrors.push(
+              `${variable.variableKey}: ${getErrorMessage(error, "save failed")}`,
+            );
+          }
+        }
+        if (variableErrors.length > 0) {
+          toast.error("Some variables failed to save.", {
+            description: variableErrors.join("; "),
+          });
+        }
+      }
+
       await refreshData({
-        preferredFormulaId: formula?.formula_template_id ?? null,
+        preferredFormulaId: newFormulaId ?? null,
       });
       setIsAddFormulaOpen(false);
-      toast.success("Formula created.");
+      toast.success(
+        input.variables.length > 0
+          ? `Formula created with ${input.variables.length} variable${input.variables.length === 1 ? "" : "s"}.`
+          : "Formula created.",
+      );
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Failed to create formula."));
     } finally {
@@ -918,7 +951,7 @@ export default function ChangeEstimationsSettingsPage() {
       <main className="flex min-h-screen flex-col overflow-y-auto bg-gray-50 dark:bg-gray-950 xl:h-screen xl:min-h-0 xl:overflow-hidden">
         <div className="shrink-0 px-4 py-3 sm:px-6">
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-            Change Estimations
+            Edit Estimations
           </h1>
         </div>
 
@@ -1419,8 +1452,8 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
         </div>
       </div>
 
-      <aside className="grid gap-3 xl:min-h-0 xl:grid-rows-[minmax(0,0.64fr)_minmax(0,0.36fr)]">
-        <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0">
+      <aside className="flex flex-col xl:min-h-0">
+        <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0 xl:flex-1">
           <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1474,7 +1507,7 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
               </button>
             </div>
 
-            <div className="grid gap-2 xl:min-h-0 xl:flex-1 xl:grid-rows-[auto_minmax(0,1fr)]">
+            <div className="grid gap-2 xl:min-h-0 xl:flex-1 xl:grid-rows-[auto_auto_minmax(0,1fr)]">
               <div>
                 <label className="text-[11px] font-semibold text-gray-900 dark:text-white">
                   Formula Expression
@@ -1487,182 +1520,76 @@ const FormulaTemplatesSection = memo(function FormulaTemplatesSection({
                 />
               </div>
 
-              <div className="grid min-h-0 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(210px,0.8fr)]">
-                <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-100 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-800/50">
-                  <p className="mb-2 text-[11px] font-semibold text-gray-900 dark:text-white">
-                    Preview Values
-                  </p>
-
-                  {previewFields.length > 0 ? (
-                    <div className="min-h-[100px] space-y-2 overflow-y-auto pr-1 xl:min-h-0 xl:flex-1">
-                      {previewFields.map((variable) => (
-                        <PreviewInput
-                          key={variable.key}
-                          label={variable.key}
-                          meta={
-                            variable.source === "measurement"
-                              ? `${variable.label} • built-in measurement`
-                              : variable.label
-                          }
-                          value={
-                            previewValues[variable.key] ?? variable.defaultValue
-                          }
-                          onChange={(nextValue) =>
-                            onPreviewValueChange(variable.key, nextValue)
-                          }
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-2 text-center text-[11px] text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-                      Select a formula.
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-green-200 bg-green-50 p-2.5 dark:border-green-800 dark:bg-green-950/50">
-                  {calculatedPreviewResult ? (
-                    <>
-                      <p className="text-[11px] font-medium text-green-700 dark:text-green-400">
-                        {calculatedPreviewResult.title}
+              {/* Calculated result — promoted to the top of the
+                  preview stack so the Estimated Duration / output is
+                  the first thing visible after Calculate. Preview
+                  Values sit below in a two-column grid. */}
+              <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-green-200 bg-green-50 p-2.5 dark:border-green-800 dark:bg-green-950/50">
+                {calculatedPreviewResult ? (
+                  <>
+                    <p className="text-[11px] font-medium text-green-700 dark:text-green-400">
+                      {calculatedPreviewResult.title}
+                    </p>
+                    <div className="mt-1 flex min-w-0 items-baseline gap-1.5">
+                      <p className="truncate text-2xl font-semibold leading-none text-green-800 dark:text-green-300">
+                        {calculatedPreviewResult.label}
                       </p>
-                      <div className="mt-1 flex min-w-0 items-baseline gap-1.5">
-                        <p className="truncate text-2xl font-semibold leading-none text-green-800 dark:text-green-300">
-                          {calculatedPreviewResult.label}
-                        </p>
-                        {calculatedPreviewResult.unit ? (
-                          <span className="shrink-0 text-xs font-medium text-green-700 dark:text-green-400">
-                            {calculatedPreviewResult.unit}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-0.5 overflow-auto text-[11px] text-green-700 dark:text-green-400">
-                        {calculatedPreviewResult.error ??
-                          calculatedPreviewResult.detail}
-                      </p>
-                    </>
-                  ) : selectedFormula ? (
-                    <PreviewResultReady formula={selectedFormula} />
-                  ) : (
-                    <PreviewResultPlaceholder />
-                  )}
-                </div>
+                      {calculatedPreviewResult.unit ? (
+                        <span className="shrink-0 text-xs font-medium text-green-700 dark:text-green-400">
+                          {calculatedPreviewResult.unit}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 overflow-auto text-[11px] text-green-700 dark:text-green-400">
+                      {calculatedPreviewResult.error ??
+                        calculatedPreviewResult.detail}
+                    </p>
+                  </>
+                ) : selectedFormula ? (
+                  <PreviewResultReady formula={selectedFormula} />
+                ) : (
+                  <PreviewResultPlaceholder />
+                )}
               </div>
-            </div>
-          </div>
-        </div>
 
-        <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0">
-          <div className="shrink-0 border-b border-gray-200 p-3 dark:border-gray-800">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Variables
-                </h2>
-                <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                  {selectedFormula
-                    ? `Default values for ${selectedFormula.name}.`
-                    : "Select a formula to manage its variables."}
+              {/* Preview Values — now sits at the bottom under the
+                  result and lays its inputs out in two columns so
+                  many-variable formulas fit without scrolling. */}
+              <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-100 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-800/50">
+                <p className="mb-2 text-[11px] font-semibold text-gray-900 dark:text-white">
+                  Preview Values
                 </p>
-              </div>
 
-              <button
-                type="button"
-                onClick={onOpenAddVariable}
-                disabled={!selectedFormula}
-                className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-[11px] font-medium text-gray-700 transition-all duration-150 hover:bg-gray-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add
-              </button>
+                {previewFields.length > 0 ? (
+                  <div className="grid min-h-[100px] grid-cols-1 gap-x-2 gap-y-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:min-h-0 xl:flex-1">
+                    {previewFields.map((variable) => (
+                      <PreviewInput
+                        key={variable.key}
+                        label={variable.key}
+                        meta={
+                          variable.source === "measurement"
+                            ? `${variable.label} • built-in measurement`
+                            : variable.label
+                        }
+                        value={
+                          previewValues[variable.key] ?? variable.defaultValue
+                        }
+                        onChange={(nextValue) =>
+                          onPreviewValueChange(variable.key, nextValue)
+                        }
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-2 text-center text-[11px] text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+                    Select a formula.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-
-          <div className="min-h-[180px] overflow-hidden xl:min-h-0 xl:flex-1">
-            {selectedFormula?.variables.length ? (
-              <div className="h-full divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
-                {selectedFormula.variables.map((variable) => {
-                  const deleting =
-                    deletingVariableId === variable.formula_variable_id;
-
-                  return (
-                    <div
-                      key={variable.formula_variable_id}
-                      className="grid gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 md:grid-cols-[minmax(0,1fr)_auto]"
-                    >
-                      <div className="min-w-0">
-                        <h3 className="truncate text-xs font-semibold text-gray-900 dark:text-white">
-                          {variable.label}
-                        </h3>
-                        <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
-                          {variable.variable_key}
-                        </p>
-
-                        {variable.description ? (
-                          <p className="mt-1 line-clamp-1 text-[11px] text-gray-500 dark:text-gray-400">
-                            {variable.description}
-                          </p>
-                        ) : null}
-
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400">
-                            {variable.data_type}
-                          </span>
-                          <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-                            {variable.is_required ? "Required" : "Optional"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-2">
-                        <div className="min-w-[150px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-right dark:border-gray-700 dark:bg-gray-800">
-                          <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-200">
-                            {variable.default_value || "-"}
-                            {variable.unit ? (
-                              <span className="ml-1 text-xs font-medium text-gray-500 dark:text-gray-400">
-                                {variable.unit}
-                              </span>
-                            ) : null}
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => onOpenEditVariable(variable)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-all duration-150 hover:bg-white hover:shadow-sm active:scale-[0.96] dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => onDeleteVariable(variable)}
-                          disabled={deleting}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-all duration-150 hover:bg-white hover:shadow-sm active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
-                        >
-                          {deleting ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <EmptyOverviewState
-                title={selectedFormula ? "No variables yet" : "No formula selected"}
-                description={
-                  selectedFormula
-                    ? "Add variables for this formula."
-                    : "Pick a formula from the list."
-                }
-              />
-            )}
-          </div>
         </div>
+
       </aside>
     </>
   );
