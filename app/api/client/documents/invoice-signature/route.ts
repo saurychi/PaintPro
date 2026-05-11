@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
+import type { BrowserContext } from "playwright-core";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureBucket } from "@/lib/supabase/ensureBucket";
+import { getPdfBrowser } from "@/lib/server/pdfBrowser";
+
+// Dynamic import below — same reason as the cancellation-agreement
+// signature endpoint: Turbopack's static graph doesn't like a route.ts
+// statically importing from another route.ts.
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function dataUrlToBuffer(dataUrl: string) {
   const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
@@ -110,23 +117,61 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const safeProjectCode = sanitizeFileName(project.project_code || projectId);
 
-    const clientSignaturePath = `project-documents/${projectId}/invoice-client-signature.png`;
     const invoicePdfPath = `invoices/${projectId}/invoice-${safeProjectCode}.pdf`;
     const invoiceFileName = `invoice-${safeProjectCode}.pdf`;
 
-    await ensureBucket("signatures");
     await ensureBucket("documents");
 
-    const { error: uploadSignatureError } = await supabaseAdmin.storage
-      .from("signatures")
-      .upload(clientSignaturePath, signatureBuffer, {
-        contentType: "image/png",
+    // Render the signed invoice HTML *in memory* — client signature
+    // rides along as an inline data URL so the raw PNG never reaches
+    // the signatures bucket.
+    const clientSignatureDataUrl = `data:${mimeType};base64,${signatureBuffer.toString("base64")}`;
+
+    const { renderInvoiceHtml } = await import(
+      "../../../invoice/html/route"
+    );
+    const html = await renderInvoiceHtml({
+      projectId,
+      origin,
+      clientSignatureDataUrl,
+      clientSignedName: signedName,
+    });
+
+    let context: BrowserContext | null = null;
+    let pdfBuffer: Buffer;
+    try {
+      const browser = await getPdfBrowser();
+      context = await browser.newContext();
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "networkidle" });
+      await page.emulateMedia({ media: "screen" });
+      const pdfBytes = await page.pdf({
+        format: "A4",
+        printBackground: true,
+        margin: {
+          top: "12mm",
+          right: "12mm",
+          bottom: "12mm",
+          left: "12mm",
+        },
+      });
+      pdfBuffer = Buffer.from(pdfBytes);
+    } finally {
+      if (context) {
+        await context.close().catch(() => {});
+      }
+    }
+
+    const { error: uploadPdfError } = await supabaseAdmin.storage
+      .from("documents")
+      .upload(invoicePdfPath, pdfBuffer, {
+        contentType: "application/pdf",
         upsert: true,
       });
 
-    if (uploadSignatureError) {
+    if (uploadPdfError) {
       throw new Error(
-        `Failed to upload signature image to "signatures" bucket: ${uploadSignatureError.message}`,
+        `Failed to upload signed PDF to "documents" bucket: ${uploadPdfError.message}`,
       );
     }
 
@@ -151,9 +196,11 @@ export async function POST(request: Request) {
           storage_path: invoicePdfPath,
           file_name: invoiceFileName,
           file_mime_type: "application/pdf",
+          file_size_bytes: pdfBuffer.byteLength,
           signed_at: now,
           signed_name: signedName,
-          client_signature_path: clientSignaturePath,
+          // Never set — raw client signature is not persisted anywhere.
+          client_signature_path: null,
           updated_at: now,
         })
         .eq("document_id", documentId);
@@ -172,9 +219,10 @@ export async function POST(request: Request) {
             storage_path: invoicePdfPath,
             file_name: invoiceFileName,
             file_mime_type: "application/pdf",
+            file_size_bytes: pdfBuffer.byteLength,
             signed_at: now,
             signed_name: signedName,
-            client_signature_path: clientSignaturePath,
+            client_signature_path: null,
             created_at: now,
             updated_at: now,
           })
@@ -185,45 +233,6 @@ export async function POST(request: Request) {
 
       documentId = insertedDocument.document_id;
     }
-
-    const pdfResponse = await fetch(
-      `${origin}/api/invoice/pdf?projectId=${encodeURIComponent(projectId)}`,
-      { cache: "no-store" },
-    );
-
-    if (!pdfResponse.ok) {
-      const pdfError = await pdfResponse.json().catch(() => null);
-
-      throw new Error(
-        [pdfError?.error, pdfError?.details].filter(Boolean).join(": ") ||
-          "Failed to generate signed invoice PDF.",
-      );
-    }
-
-    const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
-
-    const { error: uploadPdfError } = await supabaseAdmin.storage
-      .from("documents")
-      .upload(invoicePdfPath, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-
-    if (uploadPdfError) {
-      throw new Error(
-        `Failed to upload signed PDF to "documents" bucket: ${uploadPdfError.message}`,
-      );
-    }
-
-    const { error: updateSizeError } = await supabaseAdmin
-      .from("project_documents")
-      .update({
-        file_size_bytes: pdfBuffer.byteLength,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("document_id", documentId);
-
-    if (updateSizeError) throw updateSizeError;
 
     // Client just signed the invoice but the admin still needs to
     // confirm "Proceed to Payment" before money is owed — park the
@@ -245,7 +254,6 @@ export async function POST(request: Request) {
       documentId,
       signedName,
       signedAt: now,
-      clientSignaturePath,
       invoicePdfPath,
     });
   } catch (error: any) {

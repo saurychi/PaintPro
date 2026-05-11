@@ -1,29 +1,26 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Check,
   ChevronRight,
   Copy,
   Download,
   FilePlus2,
-  FileText,
   Key,
+  LayoutDashboard,
   Loader2,
   PlayCircle,
+  RefreshCw,
   Send,
   Trash2,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import { ensureWizardCacheHydrated, setCachedStep } from "@/lib/wizardCache";
+import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import CancelProjectModal from "@/components/project-cancellation/CancelProjectModal";
 
 type StatusType = "Not yet Approved" | "Approved";
 
@@ -35,6 +32,7 @@ type ProjectOverviewResponse = {
     description: string | null;
     site_address: string | null;
     status: string | null;
+    scheduled_start_datetime: string | null;
     estimated_budget: number | null;
     estimated_cost: number | null;
     estimated_profit: number | null;
@@ -65,8 +63,8 @@ export default function JobQuotation() {
 
   const [status, setStatus] = useState<StatusType>("Not yet Approved");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [savingDocument, setSavingDocument] = useState(false);
   const [notifyingClient, setNotifyingClient] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [startingProgress, setStartingProgress] = useState(false);
@@ -79,12 +77,12 @@ export default function JobQuotation() {
   const [generatingQuotation, setGeneratingQuotation] = useState(false);
   const [grantingAccess, setGrantingAccess] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [cancelInput, setCancelInput] = useState("");
-  const [cancelling, setCancelling] = useState(false);
-  // Two-stage confirmation: "form" collects the typed project code, then
-  // switches to "confirm" for an explicit are-you-sure step before the
-  // delete actually fires.
-  const [cancelStage, setCancelStage] = useState<"form" | "confirm">("form");
+  // Hook into the simulated project clock so "Proceed to Downpayment"
+  // can also fast-forward the dashboard's workday to the moment this
+  // project is scheduled to start — that way the JobProgressCard lands
+  // on the right project and the downpayment modal opens against a
+  // realistic clock instead of whatever the previous reference was.
+  const { saveReferenceIso } = useProjectTimeReference();
   // Cache-busting token appended to the iframe src to force a reload after
   // (re)generation without dropping focus / scroll.
   const [previewVersion, setPreviewVersion] = useState(0);
@@ -123,8 +121,8 @@ export default function JobQuotation() {
     }
   }
 
-  useEffect(() => {
-    async function loadProject() {
+  const loadProject = useCallback(
+    async (mode: "initial" | "refresh" = "initial") => {
       await ensureWizardCacheHydrated(projectId);
 
       if (!projectId) {
@@ -133,10 +131,12 @@ export default function JobQuotation() {
       }
 
       try {
-        setLoading(true);
+        if (mode === "refresh") setRefreshing(true);
+        else setLoading(true);
 
         const response = await fetch(
           `/api/planning/getProjectOverview?projectId=${encodeURIComponent(projectId)}`,
+          { cache: "no-store" },
         );
 
         const data = (await response.json()) as ProjectOverviewResponse & {
@@ -178,11 +178,25 @@ export default function JobQuotation() {
         toast.error(error?.message || "Failed to load quotation project data.");
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
-    }
+    },
+    [projectId],
+  );
 
-    loadProject();
-  }, [projectId]);
+  useEffect(() => {
+    void loadProject("initial");
+  }, [loadProject]);
+
+  async function handleRefreshDetails() {
+    if (refreshing || loading) return;
+    await loadProject("refresh");
+    // Force the iframe to re-fetch the PDF from the bucket. If the client
+    // just signed, the bucket now holds the signed version — without
+    // bumping the cache-busting token the browser would keep showing the
+    // unsigned copy it already has.
+    setPreviewVersion((v) => v + 1);
+  }
 
   // Probe the bucket endpoint to see whether a quotation PDF actually exists
   // for this project. We do this with a HEAD request via fetch so we don't
@@ -236,51 +250,6 @@ export default function JobQuotation() {
     }
   }
 
-  async function handleSaveQuotationDocument() {
-    if (!projectId || !project || savingDocument) return;
-
-    try {
-      setSavingDocument(true);
-
-      const response = await fetch("/api/quotation/save-document", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          projectId,
-          projectCode: project.project_code,
-          projectTitle: project.title,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to save quotation document.",
-        );
-      }
-
-      toast.success(
-        data?.mode === "updated"
-          ? "Quotation document updated in Documents."
-          : "Quotation document saved to Documents.",
-        {
-          description:
-            data?.source === "signed-pdf-bucket"
-              ? "The signed PDF from the documents bucket was saved."
-              : "The rendered HTML preview was saved.",
-        },
-      );
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to save quotation document.");
-    } finally {
-      setSavingDocument(false);
-    }
-  }
-
   async function handleDownloadPdf() {
     if (!projectId) return;
 
@@ -326,46 +295,29 @@ export default function JobQuotation() {
 
     setStartingProgress(true);
     setOptimisticProjectStatus(projectId, "downpayment_pending");
-    toast.success("Project moved to downpayment.", {
-      description: "Heading back to your dashboard.",
-    });
-    router.push("/admin");
+
+    // Fast-forward the simulated workday clock to whenever this project
+    // is scheduled to start. The dashboard reads the cookie via
+    // useProjectTimeReference, so by the time the redirect lands the
+    // JobProgressCard is already viewing "today = the project's start
+    // day" — handy when multiple projects share a calendar day, since
+    // we also pass projectId so the auto-select picks this one.
+    if (project?.scheduled_start_datetime) {
+      saveReferenceIso(project.scheduled_start_datetime);
+    }
+
+    // Dashboard params do three jobs:
+    //  • projectId  → JobProgressCard pre-selects this project even
+    //    when there are other projects on the same workday.
+    //  • openDownpayment → JobProgressCard opens the downpayment modal
+    //    as soon as it mounts so the admin lands directly on the
+    //    next-action surface.
+    const id = encodeURIComponent(projectId);
+    router.push(`/admin?projectId=${id}&openDownpayment=${id}`);
+
     void updateProjectStatus("downpayment_pending").catch((error: any) => {
       toast.error(error?.message || "Failed to update project status.");
     });
-  }
-
-  async function handleCancelProject() {
-    if (!projectId || cancelling) return;
-    if ((project?.project_code ?? "").trim() !== cancelInput.trim()) return;
-
-    try {
-      setCancelling(true);
-      const response = await fetch("/api/planning/deleteProject", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          projectCode: cancelInput.trim(),
-        }),
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details, data?.hint]
-            .filter(Boolean)
-            .join(" — ") || "Failed to cancel project.",
-        );
-      }
-
-      toast.success("Project cancelled and deleted.");
-      router.push("/admin/projects");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to cancel project.");
-      setCancelling(false);
-    }
   }
 
   async function handleGrantAccess() {
@@ -562,8 +514,24 @@ export default function JobQuotation() {
             </div>
 
             <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-                Quotation Details
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+                  Quotation Details
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRefreshDetails}
+                  disabled={refreshing || loading}
+                  title="Refresh quotation details"
+                  aria-label="Refresh quotation details"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700">
+                  <RefreshCw
+                    className={[
+                      "h-3.5 w-3.5",
+                      refreshing || loading ? "animate-spin" : "",
+                    ].join(" ")}
+                  />
+                </button>
               </div>
 
               {loading ? (
@@ -637,50 +605,84 @@ export default function JobQuotation() {
                   can advance the project to downpayment from here. Doing so
                   moves on to the dashboard so the next stage is visible. */}
               {project?.status === "client_quotation_done" ? (
-                <button
-                  type="button"
-                  onClick={handleStartProgress}
-                  disabled={startingProgress || !projectId}
-                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-[#00c065] text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#00a054] hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {startingProgress ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Starting...
-                    </>
-                  ) : (
-                    <>
-                      <PlayCircle className="h-4 w-4" />
-                      Start Progress
-                    </>
-                  )}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleStartProgress}
+                    disabled={startingProgress || !projectId}
+                    className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-[#00c065] text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#00a054] hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {startingProgress ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="h-4 w-4" />
+                        Proceed to Downpayment
+                      </>
+                    )}
+                  </button>
+
+                  {/* Optional escape hatch: admin may want to hop to the
+                      dashboard without advancing the project status
+                      (e.g. to check on something else first). Doesn't
+                      flip the workday clock or open any modal — just a
+                      plain navigation back to /admin. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = encodeURIComponent(projectId);
+                      router.push(`/admin?projectId=${id}`);
+                    }}
+                    disabled={!projectId || startingProgress}
+                    className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-[13px] font-semibold text-slate-700 transition-all duration-200 hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                    Go to Dashboard
+                  </button>
+                </>
               ) : null}
 
-              {/* Only surface "Save to Documents" once the client has signed
-                  the quotation. Both quotation_pending and
-                  grant_access_quotation are pre-signature states — saving
-                  then would persist the unsigned preview. */}
+              {/* Quotation flow is done once the project advances to
+                  downpayment_pending (and everything past it). Surface a
+                  Go to Dashboard CTA so the admin can hop straight to the
+                  jobProgressCard / dashboard view of the live project
+                  instead of getting stuck on this finished page. The
+                  query param picks the matching modal trigger so the
+                  next-action modal pops automatically on landing —
+                  otherwise the admin lands on the dashboard but has to
+                  click Manage themselves. */}
               {project &&
               project.status !== "quotation_pending" &&
-              project.status !== "grant_access_quotation" ? (
+              project.status !== "grant_access_quotation" &&
+              project.status !== "client_quotation_done" ? (
                 <button
                   type="button"
-                  onClick={handleSaveQuotationDocument}
-                  disabled={savingDocument || !projectId}
-                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[13px] font-semibold text-[#047857] transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:border-emerald-400/50 dark:hover:bg-emerald-500/25"
-                >
-                  {savingDocument ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="h-4 w-4" />
-                      Save to Documents
-                    </>
-                  )}
+                  onClick={() => {
+                    const id = encodeURIComponent(projectId);
+                    let href = `/admin?projectId=${id}`;
+                    switch (project.status) {
+                      case "downpayment_pending":
+                        href = `/admin?openDownpayment=${id}`;
+                        break;
+                      case "ready_to_start":
+                        href = `/admin?openKickoff=${id}`;
+                        break;
+                      case "payment_pending":
+                        href = `/admin?openPayment=${id}`;
+                        break;
+                      // Other statuses (in_progress, review_pending,
+                      // etc.) don't have a dedicated dashboard modal,
+                      // so we just snap to the project and let the
+                      // admin take it from there.
+                    }
+                    router.push(href);
+                  }}
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-[#00c065] text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#00a054] hover:shadow-md active:translate-y-0">
+                  <LayoutDashboard className="h-4 w-4" />
+                  Go to Dashboard
                 </button>
               ) : null}
 
@@ -781,12 +783,8 @@ export default function JobQuotation() {
                 project.status === "grant_access_quotation") ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setCancelInput("");
-                    setCancelStage("form");
-                    setCancelOpen(true);
-                  }}
-                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 text-[13px] font-semibold text-red-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-100 hover:shadow-sm active:translate-y-0 dark:border-red-500/35 dark:bg-red-500/15 dark:text-red-300 dark:hover:border-red-400/50 dark:hover:bg-red-500/25"
+                  onClick={() => setCancelOpen(true)}
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-rose-200 bg-rose-50 text-[13px] font-semibold text-rose-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-rose-300 hover:bg-rose-100 hover:shadow-sm active:translate-y-0 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-300 dark:hover:border-rose-400/50 dark:hover:bg-rose-500/25"
                 >
                   <Trash2 className="h-4 w-4" />
                   Cancel Project
@@ -835,152 +833,17 @@ export default function JobQuotation() {
           </button>
         </div>
 
-        <Dialog
+        <CancelProjectModal
           open={cancelOpen}
-          onOpenChange={(open) => {
-            // Block close while the delete request is in flight.
-            if (cancelling) return;
-            setCancelOpen(open);
-            if (!open) {
-              setCancelInput("");
-              setCancelStage("form");
-            }
+          projectId={projectId}
+          projectCode={project?.project_code ?? null}
+          projectStatus={project?.status ?? null}
+          onClose={() => setCancelOpen(false)}
+          onDone={() => {
+            setCancelOpen(false);
+            router.push("/admin/projects");
           }}
-        >
-          <DialogContent className="max-w-md gap-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-0 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="h-1 w-full bg-red-500" aria-hidden />
-
-            <div className="px-5 pt-5 pb-3">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-[15px] font-semibold text-slate-900 dark:text-slate-100">
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400">
-                    <Trash2 className="h-4 w-4" />
-                  </span>
-                  {cancelStage === "form"
-                    ? "Cancel and delete this project?"
-                    : "Are you absolutely sure?"}
-                </DialogTitle>
-              </DialogHeader>
-            </div>
-
-            {cancelStage === "form" ? (
-              <div className="space-y-3 px-5 text-[13px] leading-5 text-slate-700 dark:text-slate-300">
-                <p>
-                  This will{" "}
-                  <span className="font-semibold text-red-700 dark:text-red-400">
-                    permanently delete the entire project
-                  </span>
-                  , including wizard data, schedule, employee assignments,
-                  materials, the quotation PDF, and all uploaded documents in
-                  the storage bucket. This action cannot be undone.
-                </p>
-
-                <p>
-                  To confirm, type the project code{" "}
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                    {project?.project_code ?? "(no code)"}
-                  </span>{" "}
-                  below:
-                </p>
-
-                <input
-                  type="text"
-                  autoFocus
-                  value={cancelInput}
-                  onChange={(e) => setCancelInput(e.target.value)}
-                  placeholder="Type project code"
-                  disabled={cancelling}
-                  className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-[13px] text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                />
-              </div>
-            ) : (
-              <div className="space-y-3 px-5 text-[13px] leading-5 text-slate-700 dark:text-slate-300">
-                <p>
-                  You are about to delete{" "}
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                    {project?.project_code ?? "(no code)"}
-                  </span>
-                  .
-                </p>
-                <p className="text-red-700 dark:text-red-400">
-                  Once you click &ldquo;Yes, delete project&rdquo; the project
-                  and all of its bucket files will be removed and cannot be
-                  recovered.
-                </p>
-              </div>
-            )}
-
-            <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3 dark:border-slate-700 dark:bg-slate-900/60">
-              {cancelStage === "form" ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (cancelling) return;
-                      setCancelOpen(false);
-                      setCancelInput("");
-                      setCancelStage("form");
-                    }}
-                    disabled={cancelling}
-                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Keep project
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCancelStage("confirm")}
-                    disabled={
-                      !project?.project_code ||
-                      cancelInput.trim() !== project.project_code.trim()
-                    }
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Continue
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (cancelling) return;
-                      setCancelStage("form");
-                    }}
-                    disabled={cancelling}
-                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Go back
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCancelProject}
-                    disabled={
-                      cancelling ||
-                      !project?.project_code ||
-                      cancelInput.trim() !== project.project_code.trim()
-                    }
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {cancelling ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Deleting...
-                      </>
-                    ) : (
-                      <>
-                        <Trash2 className="h-4 w-4" />
-                        Yes, delete project
-                      </>
-                    )}
-                  </button>
-                </>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+        />
       </div>
 
       <style jsx global>{`

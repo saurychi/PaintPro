@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
+import type { BrowserContext } from "playwright-core";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureBucket } from "@/lib/supabase/ensureBucket";
+import { getPdfBrowser } from "@/lib/server/pdfBrowser";
+
+// Dynamic import below — same reason as the other signature endpoints:
+// Turbopack's static graph doesn't like a route.ts statically importing
+// from another route.ts.
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function dataUrlToBuffer(dataUrl: string) {
   const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
@@ -28,8 +35,6 @@ function sanitizeFileName(value: string) {
 
 export async function POST(request: Request) {
   try {
-    const url = new URL(request.url);
-    const origin = url.origin;
     const body = await request.json();
 
     const projectId =
@@ -119,30 +124,61 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const safeProjectCode = sanitizeFileName(project.project_code || projectId);
 
-    const clientSignaturePath = `project-documents/${projectId}/quotation-client-signature.png`;
-    // Signed quotation PDFs live in the shared "documents" bucket alongside
-    // invoices, namespaced under "quotations/<projectId>/..." to mirror the
-    // "invoices/<projectId>/..." prefix used for invoice PDFs.
     const quotationStorageBucket = "documents";
     const quotationPdfPath = `quotations/${projectId}/quotation-${safeProjectCode}.pdf`;
     const quotationFileName = `quotation-${safeProjectCode}.pdf`;
 
-    // Ensure both buckets exist before any upload, so a fresh Supabase
-    // project doesn't error with a generic "Bucket not found" partway
-    // through. ensureBucket no-ops if the bucket is already there.
-    await ensureBucket("signatures");
     await ensureBucket(quotationStorageBucket);
 
-    const { error: uploadSignatureError } = await supabaseAdmin.storage
-      .from("signatures")
-      .upload(clientSignaturePath, signatureBuffer, {
-        contentType: "image/png",
+    // Render signed quotation HTML in memory and turn it into a PDF
+    // via Playwright. The client signature is inlined as a data URL —
+    // it never gets uploaded to the signatures bucket.
+    const clientSignatureDataUrl = `data:${mimeType};base64,${signatureBuffer.toString("base64")}`;
+
+    const { renderQuotationHtml } = await import(
+      "../../../quotation/html/route"
+    );
+    const html = await renderQuotationHtml({
+      projectId,
+      clientSignatureDataUrl,
+      clientSignedName: signedName,
+    });
+
+    let context: BrowserContext | null = null;
+    let pdfBuffer: Buffer;
+    try {
+      const browser = await getPdfBrowser();
+      context = await browser.newContext();
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "networkidle" });
+      await page.emulateMedia({ media: "screen" });
+      const pdfBytes = await page.pdf({
+        format: "A4",
+        printBackground: true,
+        margin: {
+          top: "12mm",
+          right: "12mm",
+          bottom: "12mm",
+          left: "12mm",
+        },
+      });
+      pdfBuffer = Buffer.from(pdfBytes);
+    } finally {
+      if (context) {
+        await context.close().catch(() => {});
+      }
+    }
+
+    const { error: uploadPdfError } = await supabaseAdmin.storage
+      .from(quotationStorageBucket)
+      .upload(quotationPdfPath, pdfBuffer, {
+        contentType: "application/pdf",
         upsert: true,
       });
 
-    if (uploadSignatureError) {
+    if (uploadPdfError) {
       throw new Error(
-        `Failed to upload signature image to "signatures" bucket: ${uploadSignatureError.message}`,
+        `Failed to upload signed PDF to "${quotationStorageBucket}" bucket: ${uploadPdfError.message}`,
       );
     }
 
@@ -167,9 +203,11 @@ export async function POST(request: Request) {
           storage_path: quotationPdfPath,
           file_name: quotationFileName,
           file_mime_type: "application/pdf",
+          file_size_bytes: pdfBuffer.byteLength,
           signed_at: now,
           signed_name: signedName,
-          client_signature_path: clientSignaturePath,
+          // Never set — raw client signature is not persisted anywhere.
+          client_signature_path: null,
           updated_at: now,
         })
         .eq("document_id", documentId);
@@ -188,9 +226,10 @@ export async function POST(request: Request) {
             storage_path: quotationPdfPath,
             file_name: quotationFileName,
             file_mime_type: "application/pdf",
+            file_size_bytes: pdfBuffer.byteLength,
             signed_at: now,
             signed_name: signedName,
-            client_signature_path: clientSignaturePath,
+            client_signature_path: null,
             created_at: now,
             updated_at: now,
           })
@@ -201,45 +240,6 @@ export async function POST(request: Request) {
 
       documentId = insertedDocument.document_id;
     }
-
-    const pdfResponse = await fetch(
-      `${origin}/api/quotation/pdf?projectId=${encodeURIComponent(projectId)}`,
-      { cache: "no-store" },
-    );
-
-    if (!pdfResponse.ok) {
-      const pdfError = await pdfResponse.json().catch(() => null);
-
-      throw new Error(
-        [pdfError?.error, pdfError?.details].filter(Boolean).join(": ") ||
-          "Failed to generate signed quotation PDF.",
-      );
-    }
-
-    const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
-
-    const { error: uploadPdfError } = await supabaseAdmin.storage
-      .from(quotationStorageBucket)
-      .upload(quotationPdfPath, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-
-    if (uploadPdfError) {
-      throw new Error(
-        `Failed to upload signed PDF to "${quotationStorageBucket}" bucket: ${uploadPdfError.message}`,
-      );
-    }
-
-    const { error: updateSizeError } = await supabaseAdmin
-      .from("project_documents")
-      .update({
-        file_size_bytes: pdfBuffer.byteLength,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("document_id", documentId);
-
-    if (updateSizeError) throw updateSizeError;
 
     // Mark the project as "client signed, awaiting project manager". The
     // admin still has to advance to downpayment_pending from their side once
@@ -261,7 +261,6 @@ export async function POST(request: Request) {
       documentId,
       signedName,
       signedAt: now,
-      clientSignaturePath,
       quotationPdfPath,
     });
   } catch (error: any) {

@@ -33,6 +33,12 @@ export async function POST(request: Request) {
       typeof body?.projectId === "string" ? body.projectId.trim() : "";
     const projectCode =
       typeof body?.projectCode === "string" ? body.projectCode.trim() : "";
+    // Optional — lets the caller specify whether the notification is
+    // for a quotation or an invoice. The message text differs (the
+    // next admin step is different in each case). Defaults to
+    // "quotation" so existing callers keep their original behavior.
+    const documentType =
+      body?.documentType === "invoice" ? "invoice" : "quotation";
 
     if (!projectId) {
       return NextResponse.json(
@@ -155,12 +161,18 @@ export async function POST(request: Request) {
       }
     }
 
-    const label =
-      project.project_code?.trim() || project.title?.trim() || "the quotation";
+    const projectLabel =
+      project.project_code?.trim() ||
+      project.title?.trim() ||
+      `the ${documentType}`;
+    const nextStepText =
+      documentType === "invoice"
+        ? "Please review and advance the project to the payment step when ready."
+        : "Please review and advance the project to the downpayment step when ready.";
     const messageBody = [
       `[System notification]`,
-      `The client has signed and approved ${label}.`,
-      `Please review and advance the project to the downpayment step when ready.`,
+      `The client has signed and approved ${projectLabel}'s ${documentType}.`,
+      nextStepText,
     ].join(" ");
 
     // Attribute the message to the client (via client_id, with sender_id

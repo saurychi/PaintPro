@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUpDown,
   Check,
@@ -342,7 +342,14 @@ function PreviewContent({ file }: { file: ClientDocument }) {
 
 export default function ClientDocumentsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { projectId } = useClientProject();
+  // `?openType=QTE|INV` deep-link from the pending-documents page's
+  // "Go to file" button. We auto-open the newest matching document
+  // once after files load. Tracked via a ref so we don't re-open
+  // every time the file list refreshes.
+  const openTypeParam = (searchParams.get("openType") || "").toUpperCase();
+  const handledOpenTypeRef = useRef<string | null>(null);
 
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [files, setFiles] = useState<ClientDocument[]>([]);
@@ -420,6 +427,33 @@ export default function ClientDocumentsPage() {
     void loadDocuments();
   }, [loadDocuments]);
 
+  // Auto-open the newest file of the requested type when arriving via
+  // a deep link like `/client/documents?openType=QTE`. Only fires once
+  // per param (handledOpenTypeRef) so a manual navigation away and
+  // back doesn't re-open the preview.
+  useEffect(() => {
+    if (!openTypeParam) return;
+    if (handledOpenTypeRef.current === openTypeParam) return;
+    if (loading) return;
+    if (files.length === 0) return;
+
+    const allowedTypes = ["INV", "PAY", "RCP", "QTE"] as const;
+    if (!(allowedTypes as readonly string[]).includes(openTypeParam)) return;
+
+    const matchingFiles = files
+      .filter((file) => file.type === (openTypeParam as DocType))
+      .sort(
+        (a, b) =>
+          new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime(),
+      );
+
+    const target = matchingFiles[0];
+    if (!target) return;
+
+    handledOpenTypeRef.current = openTypeParam;
+    setPreviewFile(target);
+  }, [openTypeParam, files, loading]);
+
   const countsByType = useMemo(() => {
     const counts: Record<DocType, number> = { INV: 0, PAY: 0, RCP: 0, QTE: 0 };
     for (const file of files) counts[file.type] += 1;
@@ -440,12 +474,15 @@ export default function ClientDocumentsPage() {
     return `${Math.max(1, Math.round(total / 1024))} MB`;
   }, [files]);
 
+  // Receipts (RCP) and Payroll (PAY) folders intentionally hidden — the
+  // client portal only surfaces documents the client interacts with
+  // (quotations and invoices). Internal-only doc types stay in the
+  // type metadata so a stray uploaded file can still render with its
+  // pill, but they don't get folder cards or filter checkboxes here.
   const folders = useMemo(
     () => [
       { id: "QTE" as const, name: typeMeta.QTE.folderName, type: "QTE" as const, count: countsByType.QTE },
       { id: "INV" as const, name: typeMeta.INV.folderName, type: "INV" as const, count: countsByType.INV },
-      { id: "RCP" as const, name: typeMeta.RCP.folderName, type: "RCP" as const, count: countsByType.RCP },
-      { id: "PAY" as const, name: typeMeta.PAY.folderName, type: "PAY" as const, count: countsByType.PAY },
     ],
     [countsByType],
   );
@@ -666,8 +703,6 @@ export default function ClientDocumentsPage() {
                       {([
                         ["QTE", filterQTE, setFilterQTE],
                         ["INV", filterINV, setFilterINV],
-                        ["RCP", filterRCP, setFilterRCP],
-                        ["PAY", filterPAY, setFilterPAY],
                       ] as const).map(([type, checked, setChecked]) => (
                         <label
                           key={type}

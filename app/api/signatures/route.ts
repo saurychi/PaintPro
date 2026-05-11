@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     }
 
     const { data: signedData, error: signedError } = await supabaseAdmin.storage
-      .from("signatures")
+      .from("project-signatures")
       .createSignedUrl(profile.signature_url, 60);
 
     if (signedError) throw signedError;
@@ -127,10 +127,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const signaturePath = `admin-signatures/${user.id}.png`;
+    // Flat layout — the bucket only stores admin/manager signatures, one
+    // per user, keyed on their auth id. No nested folder needed since
+    // the bucket name itself ("project-signatures") scopes the contents.
+    const signaturePath = `${user.id}.png`;
 
     const { error: uploadError } = await supabaseAdmin.storage
-      .from("signatures")
+      .from("project-signatures")
       .upload(signaturePath, buffer, {
         contentType: "image/png",
         upsert: true,
@@ -150,7 +153,7 @@ export async function POST(request: Request) {
     if (updateError) throw updateError;
 
     const { data: signedData, error: signedError } = await supabaseAdmin.storage
-      .from("signatures")
+      .from("project-signatures")
       .createSignedUrl(signaturePath, 60);
 
     if (signedError) throw signedError;

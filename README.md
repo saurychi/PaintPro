@@ -25,17 +25,6 @@ PaintPro authentication uses Supabase Auth for login, sessions, and passwords, w
 - /auth/invite - Route used to validate whether a user is invited or already recognized by the system.
 - /auth/pending - Older pending route that remains in the codebase but is not the primary first-login path in the current flow.
 
-#Database Functions
-- custom_access_token_hook - Adds user_role into the JWT by reading public.users.role, which supports JWT-based row-level security checks.
-handle_new_auth_user - Runs after a new auth user is created and inserts the matching public.users row when there is a matching pending invite, using the invite’s role and setting the user status to pending.
-- has_pending_invite - Checks whether a given email still has a pending invite and is used to detect whether onboarding is still required.
-- is_invited - Returns true if an email already exists in public.users or still exists in public.invites with status = 'pending'.
-- finalize_onboarding - Completes first-login onboarding by updating the user profile, setting status = 'active', and consuming the pending invite.
-- set_updated_at - Generic helper used to maintain updated_at timestamps.
-
-#Trigger
-- on_auth_user_created - An AFTER INSERT trigger on auth.users that runs handle_new_auth_user() to automatically create the application profile row for invited users.
-
 #Policies
 public.users has RLS enabled and contains the main auth-related policies for profile access and updates. Current policies allow users to read their own row, allow admins to read all users, allow managers to read non-admin users, allow users to update their own row, and allow admins or managers to update staff and client rows.
 
@@ -49,9 +38,6 @@ Users can view all other users - Broad select policy that currently allows any a
 
 public.invites also has RLS enabled, but it currently has no direct table policies. Invite-related access is instead controlled through security definer functions such as is_invited, has_pending_invite, handle_new_auth_user, and finalize_onboarding.
 
-#Security Definer Functions
-finalize_onboarding, handle_new_auth_user, has_pending_invite, and is_invited are all SECURITY DEFINER, which is important because public.invites has RLS enabled and no direct policies. This means invite and onboarding logic is intentionally handled through controlled database functions instead of normal client-side table access.
-
 #Current Staff Flow
 Admin invites a staff user, the invited auth account gets a public.users row through handle_new_auth_user(), and that row starts with status = 'pending'. On first login, the app sends the user through /auth/setup-profile, and finalize_onboarding is what changes the user to active and removes the pending invite.
 
@@ -64,43 +50,51 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 #SQL Structure
 
 ##Users
-- id
-- username
-- email
-- phone
-- role
-- specialty
-- status
-- profile_image_url
-- hourly_wage
-- signature_url
-- signature_updated_at
-- created_at
-- updated_at
+- id (uuid, PK, FK -> auth.users.id)
+- role (text, NOT NULL, default 'client', CHECK in [client, staff, manager, admin])
+- status (text, NOT NULL, default 'active', CHECK in [active, inactive, pending])
+- username (text, NOT NULL, UNIQUE)
+- phone (text, UNIQUE, nullable)
+- email (text, UNIQUE, nullable)
+- profile_image_url (text, nullable)
+- specialty (jsonb, nullable)
+- hourly_wage (numeric, NOT NULL, default 0, CHECK >= 0)
+- signature_url (text, nullable)
+- signature_updated_at (timestamptz, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Projects
-- project_id
-- project_code
-- title
-- description
-- site_address
-- scheduled_start_datetime
-- scheduled_end_datetime
-- status
-- priority
-- estimated_budget
-- estimated_cost
-- estimated_profit (generated: estimated_budget - estimated_cost)
-- materials_cost
-- labor_cost
-- markup_rate
-- downpayment
-- dimensions (jsonb)
-- notes
-- created_at
-- updated_at
-- client_id (clients.client_id)
-- created_by (users.id, admin)
+- project_id (uuid, PK, default gen_random_uuid())
+- project_code (text, NOT NULL, UNIQUE)
+- title (text, NOT NULL)
+- description (text, nullable)
+- site_address (text, nullable)
+- scheduled_start_datetime (timestamptz, nullable)
+- scheduled_end_datetime (timestamptz, nullable)
+- status (text, NOT NULL, default 'draft', CHECK against the lifecycle list below)
+- priority (text, NOT NULL, default 'normal', CHECK in [low, normal, high, urgent])
+- estimated_budget (numeric, NOT NULL, default 0)
+- estimated_cost (numeric, NOT NULL, default 0)
+- estimated_profit (numeric, default `estimated_budget - estimated_cost`)
+- materials_cost (numeric, NOT NULL, default 0)
+- labor_cost (numeric, NOT NULL, default 0)
+- markup_rate (numeric, NOT NULL, default 30)
+- downpayment (numeric, NOT NULL, default 0)
+- dimensions (jsonb, nullable)
+- notes (text, nullable)
+- client_id (uuid, NOT NULL, FK -> clients.client_id)
+- created_by (uuid, NOT NULL, FK -> users.id, admin)
+- cancelled_at (timestamptz, nullable)
+- cancelled_by (uuid, nullable, FK -> users.id)
+- cancelled_from_status (text, nullable)
+- cancellation_earned_cost (numeric, nullable)
+- cancellation_earned_revenue (numeric, nullable)
+- cancellation_balance (numeric, nullable)
+- cancellation_phase (text, nullable, CHECK in [review, payment, document, employee, conclude, done])
+- cancellation_settled (numeric, default 0)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Project Status Lifecycle
 - main_task_pending - Admin is assigning the main tasks for the project.
@@ -120,6 +114,7 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - review_pending - Project work is done and awaiting review.
 - invoice_pending - Invoice generation is pending.
 - invoice_agreement_pending - Invoice has been sent and is awaiting client agreement/signature.
+- invoice_signed - Client has signed the invoice; admin still needs to advance to payment.
 - payment_pending - Final payment is pending.
 - employee_management_pending - Employee performance, payroll, or management wrap-up is pending.
 - conclude_job_pending - Final job conclusion step is pending.
@@ -127,302 +122,286 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - cancelled - Project was cancelled.
 
 ##Clients
-- client_id
-- full_name
-- phone
-- email
-- address
-- notes
-- created_at
-- updated_at
+- client_id (uuid, PK, default gen_random_uuid())
+- full_name (text, NOT NULL)
+- phone (text, nullable)
+- email (text, nullable)
+- address (text, nullable)
+- notes (text, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Project_Task
-- project_task_id
-- project_id
-- main_task_id
+- project_task_id (uuid, PK, default gen_random_uuid())
+- project_id (uuid, NOT NULL, FK -> projects.project_id)
+- main_task_id (uuid, NOT NULL, FK -> main_task.main_task_id)
+- sort_order (integer, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##MainTask
-- main_task_id
-- name
-- is_active
-- default_sort_order
-- replaced_by_main_task_id
-- created_at
-- updated_at
+- main_task_id (uuid, PK, default gen_random_uuid())
+- name (text, NOT NULL, UNIQUE)
+- is_active (boolean, NOT NULL, default true)
+- default_sort_order (integer, NOT NULL, default 0)
+- replaced_by_main_task_id (uuid, nullable, FK -> main_task.main_task_id)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##SubTask
-- sub_task_id
-- main_task_id
-- description
-- is_active
-- replaced_by_sub_task_id
-- default_equipment
-- default_materials
-- default_sort_order
-- created_at
-- updated_at
+- sub_task_id (uuid, PK, default gen_random_uuid())
+- main_task_id (uuid, NOT NULL, FK -> main_task.main_task_id)
+- description (text, nullable)
+- is_active (boolean, NOT NULL, default true)
+- replaced_by_sub_task_id (uuid, nullable, FK -> sub_task.sub_task_id)
+- default_equipment (jsonb, nullable)
+- default_materials (jsonb, nullable)
+- default_sort_order (integer, NOT NULL, default 0)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Project_SubTask
-- project_sub_task_id
-- project_task_id
-- sub_task_id
-- estimated_hours
-- equipments_used (jsonb)
-- status
-- sort_order
-- notes
-- scheduled_start_datetime
-- scheduled_end_datetime
-- actual_start_datetime
-- actual_end_datetime
-- created_at
-- updated_at
+- project_sub_task_id (uuid, PK, default gen_random_uuid())
+- project_task_id (uuid, NOT NULL, FK -> project_task.project_task_id)
+- sub_task_id (uuid, NOT NULL, FK -> sub_task.sub_task_id)
+- estimated_hours (numeric, NOT NULL, default 0)
+- equipments_used (jsonb, NOT NULL, default '[]')
+- status (text, NOT NULL, default 'pending')
+- sort_order (integer, NOT NULL, default 0)
+- notes (text, nullable)
+- scheduled_start_datetime (timestamptz, nullable)
+- scheduled_end_datetime (timestamptz, nullable)
+- actual_start_datetime (timestamptz, nullable)
+- actual_end_datetime (timestamptz, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Tag
-- tag_id
-- parent_id (self tag)
-- tag_name
-- color
-- created_at
-- updated_at
+- tag_id (uuid, PK, default gen_random_uuid())
+- parent_id (uuid, nullable, FK -> tag.tag_id)
+- tag_name (text, NOT NULL, UNIQUE)
+- color (text, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Supplier
-- supplier_id
-- supplier_name
-- color
-- created_at
-- updated_at
+- supplier_id (uuid, PK, default gen_random_uuid())
+- supplier_name (text, NOT NULL, UNIQUE)
+- color (text, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Materials
-- material_id
-- tag_id
-- supplier_id
-- location_id
-- name
-- unit
-- unit_cost
-- reorder_point
-- needed_stock
-- current_in_stock
-- status
-- date_purchased
-- notes
-- created_at
-- updated_at
+- material_id (uuid, PK, default gen_random_uuid())
+- tag_id (uuid, nullable, FK -> tag.tag_id)
+- supplier_id (uuid, nullable, FK -> supplier.supplier_id)
+- location_id (uuid, nullable, FK -> location.location_id)
+- name (text, NOT NULL)
+- unit (text, NOT NULL)
+- unit_cost (numeric, NOT NULL, default 0)
+- reorder_point (integer, NOT NULL, default 0)
+- needed_stock (integer, NOT NULL, default 0)
+- current_in_stock (integer, NOT NULL, default 0)
+- status (varchar, default 'Active')
+- date_purchased (date, nullable)
+- notes (text, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##Equipment
-- equipment_id
-- tag_id
-- supplier_id
-- location_id
-- name
-- unit
-- status
-- notes
-- created_at
-- updated_at
+- equipment_id (uuid, PK, default gen_random_uuid())
+- tag_id (uuid, nullable, FK -> tag.tag_id)
+- supplier_id (uuid, nullable, FK -> supplier.supplier_id)
+- location_id (uuid, nullable, FK -> location.location_id)
+- name (text, NOT NULL)
+- unit (varchar, nullable)
+- status (varchar, NOT NULL, default 'Available')
+- notes (text, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##project_task_material
-- project_task_material_id
-- project_task_id
-- material_id
-- estimated_quantity
-- estimated_cost
-- created_at
-- updated_at
+- project_task_material_id (uuid, PK, default gen_random_uuid())
+- project_task_id (uuid, NOT NULL, FK -> project_task.project_task_id)
+- material_id (uuid, NOT NULL, FK -> materials.material_id)
+- estimated_quantity (numeric, NOT NULL, default 0)
+- estimated_cost (numeric, NOT NULL, default 0)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##staff_unavailability
-- unavailability_id
-- user_id
-- start_datetime
-- end_datetime
-- reason
-- created_at
-- updated_at
+- unavailability_id (uuid, PK, default gen_random_uuid())
+- user_id (uuid, NOT NULL, FK -> users.id)
+- start_datetime (timestamptz, NOT NULL)
+- end_datetime (timestamptz, NOT NULL)
+- reason (text, nullable)
+- status (text, default 'pending')
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##conversations
-- id
-- project_id (nullable; null for direct DM conversations)
-- direct_pair_key (nullable; identifies a direct DM pair)
-- created_at
-- updated_at
+- id (uuid, PK, default gen_random_uuid())
+- project_id (uuid, nullable, FK -> projects.project_id; null for direct DM conversations)
+- direct_pair_key (text, nullable; identifies a direct DM pair)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##conversation_participants
-- conversation_id (PK part)
-- user_id (PK part)
-- joined_at
-- last_read_at
+- conversation_id (uuid, NOT NULL, FK -> conversations.id, PK part)
+- user_id (uuid, NOT NULL, FK -> users.id, PK part)
+- joined_at (timestamptz, NOT NULL, default now())
+- last_read_at (timestamptz, default now())
 
 ##messages
-- id
-- conversation_id
-- sender_id (users.id, nullable)
-- client_id (clients.client_id, nullable)
-- content
-- created_at
+- id (uuid, PK, default gen_random_uuid())
+- conversation_id (uuid, NOT NULL, FK -> conversations.id)
+- sender_id (uuid, nullable, FK -> users.id)
+- client_id (uuid, nullable, FK -> clients.client_id)
+- content (text, NOT NULL)
+- created_at (timestamptz, NOT NULL, default now())
 
 ##project_schedule
-- project_schedule_id
-- project_id
-- start_datetime
-- end_datetime
-- status
-- notes
-- created_at
-- updated_at
+- project_schedule_id (uuid, PK, default gen_random_uuid())
+- project_id (uuid, NOT NULL, FK -> projects.project_id)
+- start_datetime (timestamptz, NOT NULL)
+- end_datetime (timestamptz, NOT NULL)
+- status (text, NOT NULL, default 'scheduled', CHECK in [scheduled, in_progress, completed, cancelled, rescheduled])
+- notes (text, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##project_sub_task_staff
-- project_sub_task_staff_id
-- project_sub_task_id
-- user_id
-- role
-- assignment_status
-- created_at
-- updated_at
+- project_sub_task_staff_id (uuid, PK, default gen_random_uuid())
+- project_sub_task_id (uuid, NOT NULL, FK -> project_sub_task.project_sub_task_id)
+- user_id (uuid, NOT NULL, FK -> users.id)
+- role (text, nullable)
+- assignment_status (text, default 'assigned')
+- created_at (timestamptz, default now())
+- updated_at (timestamptz, default now())
 
 ##surface_scale_presets
-- surface_key
-- label
-- unit
-- small_min
-- small_max
-- small_suggested
-- small_label
-- medium_min
-- medium_max
-- medium_suggested
-- medium_label
-- large_min
-- large_max
-- large_suggested
-- large_label
-- created_at
-- updated_at
+- surface_key (text, PK)
+- label (text, NOT NULL)
+- unit (text, NOT NULL, CHECK in [m2, m, count])
+- small_min (numeric, NOT NULL)
+- small_max (numeric, NOT NULL)
+- small_suggested (numeric, NOT NULL)
+- small_label (text, NOT NULL)
+- medium_min (numeric, NOT NULL)
+- medium_max (numeric, NOT NULL)
+- medium_suggested (numeric, NOT NULL)
+- medium_label (text, NOT NULL)
+- large_min (numeric, NOT NULL)
+- large_max (numeric, NOT NULL)
+- large_suggested (numeric, NOT NULL)
+- large_label (text, NOT NULL)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##project_documents
-- document_id
-- project_id
-- client_id
-- document_type
-- document_status
-- storage_bucket
-- storage_path
-- file_name
-- file_mime_type
-- file_size_bytes
-- signed_at
-- signed_name
-- signed_ip
-- client_signature_path
-- created_by
-- created_at
-- updated_at
+- document_id (uuid, PK, default gen_random_uuid())
+- project_id (uuid, NOT NULL, FK -> projects.project_id)
+- client_id (uuid, nullable, FK -> clients.client_id)
+- document_type (text, NOT NULL, CHECK in [quotation, invoice, cancellation_agreement, completion_acceptance, report])
+- document_status (text, NOT NULL, default 'draft', CHECK in [draft, generated, sent, signed, approved, rejected, paid, void])
+- storage_bucket (text, NOT NULL, default 'documents')
+- storage_path (text, NOT NULL)
+- file_name (text, nullable)
+- file_mime_type (text, default 'application/pdf')
+- file_size_bytes (bigint, nullable)
+- signed_at (timestamptz, nullable)
+- signed_name (text, nullable)
+- signed_ip (text, nullable)
+- client_signature_path (text, nullable)
+- created_by (uuid, nullable, FK -> users.id)
+- created_at (timestamptz, default now())
+- updated_at (timestamptz, default now())
 
 ##employee_performance
-- employee_performance_id
-- project_id
-- user_id
-- time_efficiency
-- work_quality
-- teamwork
-- work_ethic
-- note
-- salary_amount
-- total_estimated_hours
-- hourly_wage
-- reviewed_by
-- reviewed_at
-- created_at
-- updated_at
+- employee_performance_id (uuid, PK, default gen_random_uuid())
+- project_id (uuid, NOT NULL, FK -> projects.project_id)
+- user_id (uuid, NOT NULL, FK -> users.id)
+- time_efficiency (text, NOT NULL, CHECK in [great, good, bad, awful])
+- work_quality (text, NOT NULL, CHECK in [great, good, bad, awful])
+- teamwork (text, NOT NULL, CHECK in [great, good, bad, awful])
+- work_ethic (text, NOT NULL, CHECK in [great, good, bad, awful])
+- note (text, nullable)
+- salary_amount (numeric, NOT NULL, default 0)
+- total_estimated_hours (numeric, NOT NULL, default 0)
+- hourly_wage (numeric, NOT NULL, default 0)
+- reviewed_by (uuid, nullable, FK -> users.id)
+- reviewed_at (timestamptz, default now())
+- created_at (timestamptz, default now())
+- updated_at (timestamptz, default now())
 
 ##task_duration_rules
-- duration_rule_id
-- main_task_id
-- sub_task_id
-- formula_template_id
-- minimum_hours
-- is_active
-- created_at
-- updated_at
+- duration_rule_id (uuid, PK, default gen_random_uuid())
+- main_task_id (uuid, NOT NULL, FK -> main_task.main_task_id)
+- sub_task_id (uuid, NOT NULL, UNIQUE, FK -> sub_task.sub_task_id)
+- formula_template_id (uuid, nullable, FK -> formula_templates.formula_template_id)
+- minimum_hours (numeric, NOT NULL, default 0.25)
+- is_active (boolean, NOT NULL, default true)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##material_estimation_rules
-- material_rule_id
-- main_task_id
-- sub_task_id
-- material_name
-- formula_template_id
-- minimum_quantity
-- is_active
-- created_at
-- updated_at
+- material_rule_id (uuid, PK, default gen_random_uuid())
+- main_task_id (uuid, NOT NULL, FK -> main_task.main_task_id)
+- sub_task_id (uuid, nullable, FK -> sub_task.sub_task_id)
+- material_name (text, NOT NULL)
+- formula_template_id (uuid, nullable, FK -> formula_templates.formula_template_id)
+- minimum_quantity (numeric, NOT NULL, default 0)
+- is_active (boolean, NOT NULL, default true)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##formula_templates
-- formula_template_id
-- formula_key
-- name
-- description
-- formula_expression
-- formula_scope
-- is_active
-- created_at
-- updated_at
+- formula_template_id (uuid, PK, default gen_random_uuid())
+- formula_key (text, NOT NULL, UNIQUE)
+- name (text, NOT NULL)
+- description (text, nullable)
+- formula_scope (text, NOT NULL, CHECK in [duration, material, labor, schedule])
+- formula_expression (text, NOT NULL)
+- is_active (boolean, NOT NULL, default true)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##formula_variables
-- formula_variable_id
-- formula_template_id
-- variable_key
-- label
-- description
-- data_type
-- default_value
-- unit
-- is_required
-- created_at
-- updated_at
+- formula_variable_id (uuid, PK, default gen_random_uuid())
+- formula_template_id (uuid, NOT NULL, FK -> formula_templates.formula_template_id)
+- variable_key (text, NOT NULL)
+- label (text, NOT NULL)
+- description (text, nullable)
+- data_type (text, NOT NULL, default 'number', CHECK = 'number')
+- default_value (numeric, NOT NULL, default 0)
+- unit (text, nullable)
+- is_required (boolean, NOT NULL, default true)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##unavailable_days
-- unavailable_day_id
-- blocked_date
-- reason
-- block_type
-- notes
-- is_active
-- created_at
-- updated_at
+- unavailable_day_id (uuid, PK, default gen_random_uuid())
+- reason (text, NOT NULL)
+- block_type (text, NOT NULL, CHECK in [company_blackout, manual_block, maintenance, holiday, other])
+- blocked_start_datetime (timestamptz, NOT NULL)
+- blocked_end_datetime (timestamptz, NOT NULL)
+- is_active (boolean, NOT NULL, default true)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())
 
 ##invites
-- id
-- email (unique)
-- role (client/staff/manager)
-- status (pending/used/revoked)
-- created_at
-- used_at
+- id (uuid, PK, default gen_random_uuid())
+- email (text, NOT NULL, UNIQUE)
+- role (text, NOT NULL, CHECK in [client, staff, manager])
+- status (text, NOT NULL, default 'pending', CHECK in [pending, used, revoked])
+- created_at (timestamptz, NOT NULL, default now())
+- used_at (timestamptz, nullable)
 
 ##location
-- location_id
-- name
-- address
-- parent_tag_id (tag.tag_id)
-- color
-- created_at
-- updated_at
-
-##document_folders
-- folder_id
-- name
-- is_archived
-- created_at
-- updated_at
-
-##documents
-- document_id
-- folder_id (document_folders.folder_id, nullable)
-- document_type (INV/PAY/RCP/QTE)
-- title
-- content
-- content_type (default 'text/plain')
-- original_filename
-- created_by
-- is_archived
-- created_at
-- updated_at
+- location_id (uuid, PK, default gen_random_uuid())
+- name (varchar, NOT NULL)
+- address (varchar, nullable)
+- parent_tag_id (uuid, nullable, FK -> tag.tag_id)
+- color (varchar, nullable)
+- created_at (timestamptz, NOT NULL, default now())
+- updated_at (timestamptz, NOT NULL, default now())

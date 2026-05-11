@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  loadProjectCostEstimation,
+  CostEstimationLoadError,
+} from "@/lib/planning/loadProjectCostEstimation";
 
 type CostEstimationResponse = {
   project: {
@@ -141,7 +145,7 @@ async function getAdminSignatureInfo(projectId: string) {
   }
 
   const { data: fileData, error: downloadError } = await supabaseAdmin.storage
-    .from("signatures")
+    .from("project-signatures")
     .download(signaturePath);
 
   if (downloadError || !fileData) {
@@ -222,7 +226,7 @@ async function getClientQuotationSignatureInfo(projectId: string) {
   }
 
   const { data: fileData, error: downloadError } = await supabaseAdmin.storage
-    .from("signatures")
+    .from("project-signatures")
     .download(signaturePath);
 
   if (downloadError || !fileData) {
@@ -246,45 +250,69 @@ async function getClientQuotationSignatureInfo(projectId: string) {
   };
 }
 
-export async function GET(request: Request) {
-  try {
-    const url = new URL(request.url);
-    const projectId = url.searchParams.get("projectId")?.trim() || "";
-    const markupRate = url.searchParams.get("markupRate")?.trim() || "30";
+/**
+ * Render-only helper. Same role as renderCancellationAgreementHtml —
+ * lets the signature endpoint pass the freshly-drawn client signature
+ * inline so the raw image never lands in storage.
+ */
+export async function renderQuotationHtml(args: {
+  projectId: string;
+  markupRate?: string;
+  /** Inline client signature data URL — bypasses storage lookup. */
+  clientSignatureDataUrl?: string;
+  clientSignedName?: string;
+}): Promise<string> {
+  const {
+    projectId,
+    markupRate = "30",
+    clientSignatureDataUrl,
+    clientSignedName,
+  } = args;
 
-    if (!projectId) {
-      return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
-    }
+  if (!projectId) {
+    throw new Error("Missing projectId.");
+  }
 
-    const origin = url.origin;
+  let data: CostEstimationResponse;
+  let adminSignatureInfo: Awaited<ReturnType<typeof getAdminSignatureInfo>>;
+  let clientQuotationSignatureInfo: Awaited<
+    ReturnType<typeof getClientQuotationSignatureInfo>
+  >;
 
-    const estimationResponse = await fetch(
-      `${origin}/api/planning/getProjectCostEstimation?projectId=${encodeURIComponent(
-        projectId,
-      )}&markupRate=${encodeURIComponent(markupRate)}`,
-      { cache: "no-store" },
-    );
+  const [estimation, adminSig, clientSig] = await Promise.all([
+    loadProjectCostEstimation(projectId, markupRate),
+    getAdminSignatureInfo(projectId),
+    // Skip the storage lookup entirely when the caller supplied a
+    // signature inline — saves a round-trip and ensures the in-memory
+    // signature is what gets rendered.
+    clientSignatureDataUrl
+      ? Promise.resolve({
+          signatureDataUrl: clientSignatureDataUrl,
+          signedName: clientSignedName ?? null,
+        })
+      : getClientQuotationSignatureInfo(projectId),
+  ]);
+  data = estimation as CostEstimationResponse;
+  adminSignatureInfo = adminSig;
+  clientQuotationSignatureInfo = clientSig;
 
-    const data = (await estimationResponse.json()) as CostEstimationResponse;
-
-    if (!estimationResponse.ok) {
-      return NextResponse.json(
-        {
-          error: data?.error || "Failed to load quotation data.",
-          details: data?.details || null,
-        },
-        { status: 500 },
-      );
-    }
-
-    const project = data.project;
-    const client = data.client;
-    const mainTasks = Array.isArray(data.mainTasks) ? data.mainTasks : [];
-    const summary = data.summary;
-
-    const adminSignatureInfo = await getAdminSignatureInfo(projectId);
-    const clientQuotationSignatureInfo =
-      await getClientQuotationSignatureInfo(projectId);
+  const project = data.project;
+  const client = data.client;
+  const mainTasks = Array.isArray(data.mainTasks) ? data.mainTasks : [];
+  const summary = data.summary;
+  // If we used the inline override but didn't get an explicit signedName,
+  // fall back to the client's full name so the rendered signature card
+  // still has a person attached to it.
+  if (
+    clientSignatureDataUrl &&
+    !clientQuotationSignatureInfo.signedName &&
+    client?.full_name
+  ) {
+    clientQuotationSignatureInfo = {
+      ...clientQuotationSignatureInfo,
+      signedName: client.full_name,
+    };
+  }
 
     const html = `
 <!DOCTYPE html>
@@ -626,6 +654,24 @@ export async function GET(request: Request) {
 </html>
     `;
 
+  return html;
+}
+
+// Thin GET wrapper — serves the iframe preview. The signature endpoint
+// bypasses this and calls renderQuotationHtml directly with the
+// client's signature inlined.
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const projectId = url.searchParams.get("projectId")?.trim() || "";
+    const markupRate = url.searchParams.get("markupRate")?.trim() || "30";
+
+    if (!projectId) {
+      return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
+    }
+
+    const html = await renderQuotationHtml({ projectId, markupRate });
+
     return new Response(html, {
       status: 200,
       headers: {
@@ -633,11 +679,17 @@ export async function GET(request: Request) {
         "Cache-Control": "no-store",
       },
     });
-  } catch (error: any) {
+  } catch (err: unknown) {
+    if (err instanceof CostEstimationLoadError) {
+      return NextResponse.json(
+        { error: err.message, details: err.details ?? null },
+        { status: err.status },
+      );
+    }
     return NextResponse.json(
       {
         error: "Unexpected server error.",
-        details: error?.message ?? "Unknown error",
+        details: err instanceof Error ? err.message : "Unknown error",
       },
       { status: 500 },
     );

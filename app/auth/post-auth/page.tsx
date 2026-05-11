@@ -126,7 +126,13 @@ export default function PostAuthPage() {
   return (
     <div className="min-h-svh flex items-center justify-center bg-white px-6 dark:bg-slate-950">
       <div className="flex flex-col items-center gap-4 text-center">
-        <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[#00c065] animate-spin dark:border-slate-500 dark:border-t-[#00c065]" />
+        {/* Per-side border colors so the green "head" (border-top) can't
+            be overridden by the shorthand `dark:border-slate-500` rule.
+            In Tailwind v4 / Turbopack the shorthand sometimes outranks
+            the directional `border-t-*` in the dark variant, which
+            killed the spinning indicator and made the spinner look
+            stuck. Splitting it into r/b/l + t keeps the colors stable. */}
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-r-gray-200 border-b-gray-200 border-l-gray-200 border-t-[#00c065] dark:border-r-slate-600 dark:border-b-slate-600 dark:border-l-slate-600 dark:border-t-[#00c065]" />
         <p className="text-sm text-gray-600 dark:text-slate-400">Setting up your session...</p>
         {err ? <p className="text-sm font-semibold text-red-600 dark:text-red-400">{err}</p> : null}
       </div>

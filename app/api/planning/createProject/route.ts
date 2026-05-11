@@ -904,14 +904,32 @@ export async function POST(req: Request) {
         subTask.scheduledEndDatetime ??
         null;
 
+      const assignedEmployees = normalizeAssignedEmployees(subTask);
+
+      // Default equipment quantity to the number of assigned employees:
+      // if a subtask needs ladders and has 2 employees on it, two ladders
+      // should be reserved by default. Only applies when the incoming
+      // quantity is at the default 1 — if the admin explicitly bumped a
+      // single shared item up (e.g. one scaffold for the whole crew),
+      // we honor that. `Math.max(1, ...)` keeps a sensible floor when no
+      // employees have been assigned yet.
+      const defaultEquipmentQuantity = Math.max(1, assignedEmployees.length);
+      const normalizedEquipment = normalizeEquipmentUsageForStorage(
+        subTask.equipment,
+      ).map((entry) =>
+        entry.quantity <= 1
+          ? { ...entry, quantity: defaultEquipmentQuantity }
+          : entry,
+      );
+
       subTaskPlans.push({
         matchedSubTask,
         subTaskTitle: subTask.title,
         estimatedHours,
-        equipmentPayload: normalizeEquipmentUsageForStorage(subTask.equipment),
+        equipmentPayload: normalizedEquipment,
         subTaskScheduledStart,
         subTaskScheduledEnd,
-        assignedEmployees: normalizeAssignedEmployees(subTask),
+        assignedEmployees,
         materials: subTask.materials,
       });
     }

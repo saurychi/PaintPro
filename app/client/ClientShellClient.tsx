@@ -84,15 +84,40 @@ function ClientPendingDocumentBadge() {
 
     void refresh()
 
-    // Re-check periodically so the badge clears once the client signs and
-    // the project advances to the next status. Also re-runs on every route
-    // change inside the client portal (pathname dep) so the badge is current
-    // immediately after signing instead of waiting for the next interval tick.
-    const interval = window.setInterval(refresh, 60_000)
+    // Tighter poll than the original 60s so a status flip from the admin
+    // (e.g. they just clicked "Notify") shows up within ~15s without the
+    // user touching anything. The body of the request is tiny, so the
+    // bandwidth cost is negligible.
+    const interval = window.setInterval(refresh, 15_000)
+
+    // When the user comes back to the tab after working elsewhere, refresh
+    // immediately instead of waiting for the next interval tick. Common
+    // case: client had this tab open, switched to email, admin notified
+    // them, they switch back → badge appears instantly.
+    function handleVisibility() {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    // Cross-component refresh signal — the dashboard's "Refresh" button on
+    // the Pending Documents card dispatches this event so the sidebar
+    // badge re-fetches in the same gesture.
+    function handleManualRefresh() {
+      void refresh()
+    }
+    window.addEventListener(
+      "paintpro:refresh-pending-docs",
+      handleManualRefresh,
+    )
 
     return () => {
       cancelled = true
       window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener(
+        "paintpro:refresh-pending-docs",
+        handleManualRefresh,
+      )
     }
   }, [projectId, pathname])
 

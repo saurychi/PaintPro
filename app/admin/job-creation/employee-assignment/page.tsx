@@ -350,7 +350,26 @@ export default function EmployeeAssignmentPage() {
       // --- Load subtask assignment data (cache-first) ---
       const cachedSubTasks = getCachedSubTasks(projectId);
 
-      if (!forceRefresh && cachedSubTasks && cachedSubTasks.length > 0) {
+      // The cache is populated by sub-task-assignment with empty
+      // assignedEmployeeIds (it doesn't fetch staff assignments). If we
+      // short-circuit here on every visit, the user sees no employees on
+      // the first load and has to click Refresh to trigger the DB pull.
+      // Only short-circuit when the cache actually carries assignments
+      // — otherwise fall through to /api/planning/getProjectSubTaskStaff,
+      // which writes the assignments back into the cache below so future
+      // visits stay fast.
+      const cacheHasAssignments = (cachedSubTasks ?? []).some(
+        (st) =>
+          Array.isArray(st.assignedEmployeeIds) &&
+          st.assignedEmployeeIds.length > 0,
+      );
+
+      if (
+        !forceRefresh &&
+        cachedSubTasks &&
+        cachedSubTasks.length > 0 &&
+        cacheHasAssignments
+      ) {
         const groupedServices = buildGroupsFromCache(projectId, cachedSubTasks, loadedStaffUsers);
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));

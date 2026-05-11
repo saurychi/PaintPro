@@ -287,7 +287,7 @@ export default function SigninClient() {
             />
             <span className="text-3xl font-semibold text-gray-900 dark:text-slate-100">PaintPro</span>
           </div>
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-[#00c065] dark:border-slate-500 dark:border-t-[#00c065]" />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-r-gray-200 border-b-gray-200 border-l-gray-200 border-t-[#00c065] dark:border-r-slate-600 dark:border-b-slate-600 dark:border-l-slate-600 dark:border-t-[#00c065]" />
           <p className="text-sm text-gray-600 dark:text-slate-400">Checking your account...</p>
         </div>
       </div>

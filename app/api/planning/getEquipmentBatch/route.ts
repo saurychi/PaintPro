@@ -30,23 +30,27 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-// sub_task.default_equipment may carry uuids OR free-form names —
-// keep both ref shapes so the caller can fall back to name-based
-// lookup when an id isn't present.
+// sub_task.default_equipment may carry uuids OR free-form names — keep
+// every ref shape (id, equipment_id, name, title) so the caller can
+// fall back to name-based lookup when an id isn't present. Without
+// the name fallback, rows that only carry `{ name: "Hammer" }` (a
+// real shape we've found in older catalog rows) silently drop and
+// the project ends up with zero equipment even though the catalog
+// has equipment defined for those sub-tasks.
+function extractEquipmentRef(item: unknown): string {
+  if (typeof item === "string") return item.trim();
+  if (!isObj(item)) return "";
+  const fromEquipmentId =
+    typeof item.equipment_id === "string" ? item.equipment_id.trim() : "";
+  const fromId = typeof item.id === "string" ? item.id.trim() : "";
+  const fromName = typeof item.name === "string" ? item.name.trim() : "";
+  const fromTitle = typeof item.title === "string" ? item.title.trim() : "";
+  return fromEquipmentId || fromId || fromName || fromTitle || "";
+}
+
 function parseEquipmentRefs(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return uniqueStrings(
-      value.flatMap((item) => {
-        if (typeof item === "string") return [item.trim()];
-        if (isObj(item)) {
-          const fromEquipmentId =
-            typeof item.equipment_id === "string" ? item.equipment_id.trim() : "";
-          const fromId = typeof item.id === "string" ? item.id.trim() : "";
-          return [fromEquipmentId || fromId].filter(Boolean);
-        }
-        return [];
-      }),
-    );
+    return uniqueStrings(value.map(extractEquipmentRef));
   }
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -54,18 +58,7 @@ function parseEquipmentRefs(value: unknown): string[] {
     try {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) {
-        return uniqueStrings(
-          parsed.flatMap((item) => {
-            if (typeof item === "string") return [item.trim()];
-            if (isObj(item)) {
-              const fromEquipmentId =
-                typeof item.equipment_id === "string" ? item.equipment_id.trim() : "";
-              const fromId = typeof item.id === "string" ? item.id.trim() : "";
-              return [fromEquipmentId || fromId].filter(Boolean);
-            }
-            return [];
-          }),
-        );
+        return uniqueStrings(parsed.map(extractEquipmentRef));
       }
     } catch {
       return [];
