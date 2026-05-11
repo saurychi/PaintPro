@@ -491,6 +491,12 @@ export default function BasicDetails() {
   const [generatedTasks, setGeneratedTasks] = useState<GeneratedMainTask[]>([]);
   const [isGeneratingProjectName, setIsGeneratingProjectName] = useState(false);
 
+  // Manual mode skips the AI-driven description / surfaces / generated-tasks
+  // sections entirely. The admin provides only name + client + start date,
+  // then proceeds straight to main-task-assignment where they add tasks by
+  // hand. Persisted in the draft so reloads stay in the chosen mode.
+  const [manualMode, setManualMode] = useState(false);
+
   const [measurementRows, setMeasurementRows] = useState<MeasurementRow[]>([]);
   // Field keys that failed validation on the last Generate click. Used to
   // outline the offending inputs in red until the admin starts editing
@@ -593,6 +599,7 @@ export default function BasicDetails() {
         clearSelectedClientForm();
       }
       if (draft.assignmentDay) setAssignmentDay(draft.assignmentDay);
+      if (typeof draft.manualMode === "boolean") setManualMode(draft.manualMode);
       if (
         Array.isArray(draft.measurementRows) &&
         draft.measurementRows.length > 0
@@ -717,6 +724,7 @@ export default function BasicDetails() {
           assignmentDay,
           measurementRows,
           previewTasks,
+          manualMode,
         }),
       );
     } catch {
@@ -738,6 +746,7 @@ export default function BasicDetails() {
     assignmentDay,
     measurementRows,
     previewTasks,
+    manualMode,
   ]);
 
   const normalizedDimensions = useMemo(
@@ -1658,18 +1667,20 @@ export default function BasicDetails() {
         problems.push("Client phone");
       }
     }
-    if (!description.trim()) {
+    // Manual mode skips the description, generated tasks and measurement
+    // checks — the admin will populate tasks/materials on the next page.
+    if (!manualMode && !description.trim()) {
       nextErrors.add("description");
       problems.push("Project description");
     }
-    if (!previewTasks.length) {
+    if (!manualMode && !previewTasks.length) {
       nextErrors.add("previewTasks");
       problems.push("Generated tasks");
     }
-    if (!measurementRows.length) {
+    if (!manualMode && !measurementRows.length) {
       nextErrors.add("measurements");
       problems.push("At least one measurement");
-    } else {
+    } else if (!manualMode) {
       // Auto-recommended rows from "Generate Tasks" land with
       // `isMeasurementPending: true` and `estimatedValue: 0` until the
       // admin opens the measurements modal and fills them in. Without
@@ -1717,7 +1728,12 @@ export default function BasicDetails() {
       setSaving(true);
       setProjectCode(finalProjectCode);
 
-      const nextTasks = await generateProjectDraft(previewTasks);
+      // Manual mode ships an empty task list — the heavy AI generation step
+      // (durations, employee assignments, schedule layout) only runs for
+      // the AI flow.
+      const nextTasks: GeneratedMainTask[] = manualMode
+        ? []
+        : await generateProjectDraft(previewTasks);
 
       // The scheduler skips unavailable days (holidays + manual blocks) when
       // laying out subtasks, so trust its first-subtask start over the user's
@@ -2058,6 +2074,7 @@ export default function BasicDetails() {
     setAssignmentDay("monday");
     setMeasurementRows([]);
     setPreviewTasks([]);
+    setManualMode(false);
     toast.success("Draft cleared");
   }
 
@@ -2445,12 +2462,60 @@ export default function BasicDetails() {
                     </p>
                   </div>
                   <p className="mt-1 text-sm text-gray-600 dark:text-slate-400">
-                    Complete the setup before generating the next step.
+                    {manualMode
+                      ? "Manual mode: provide a name, client and start date, then add tasks on the next step."
+                      : "Complete the setup before generating the next step."}
                   </p>
                 </div>
 
-                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300">
-                  Draft Setup
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={manualMode}
+                    onClick={() => {
+                      setManualMode((prev) => {
+                        const next = !prev;
+                        // Clear any field errors that no longer apply when
+                        // entering manual mode — they'd otherwise leave red
+                        // outlines on hidden fields.
+                        if (next) {
+                          setFormErrors((errs) => {
+                            const cleaned = new Set(errs);
+                            cleaned.delete("description");
+                            cleaned.delete("measurements");
+                            cleaned.delete("previewTasks");
+                            return cleaned;
+                          });
+                        }
+                        return next;
+                      });
+                    }}
+                    className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition ${
+                      manualMode
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    }`}
+                    title="Skip AI generation. Only requires name, client and start date."
+                  >
+                    <span
+                      className={`relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors ${
+                        manualMode ? "bg-emerald-500" : "bg-gray-300 dark:bg-slate-600"
+                      }`}
+                      aria-hidden="true"
+                    >
+                      <span
+                        className={`absolute h-2.5 w-2.5 rounded-full bg-white shadow transition-transform ${
+                          manualMode ? "translate-x-3" : "translate-x-0.5"
+                        }`}
+                      />
+                    </span>
+                    Manual mode
+                  </button>
+
+                  <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300">
+                    Draft Setup
+                  </div>
                 </div>
               </div>
             </div>
@@ -2557,7 +2622,9 @@ export default function BasicDetails() {
                 </div>
 
                 <div
-                  className={`col-span-5 min-h-0 h-full rounded-2xl border bg-white p-3 shadow-sm dark:bg-slate-900 dark:shadow-black/20 ${
+                  className={`${
+                    manualMode ? "col-span-12" : "col-span-5"
+                  } min-h-0 h-full rounded-2xl border bg-white p-3 shadow-sm dark:bg-slate-900 dark:shadow-black/20 ${
                     hasFormError("client")
                       ? "border-red-400 dark:border-red-500"
                       : "border-gray-200 dark:border-slate-800"
@@ -2691,7 +2758,7 @@ export default function BasicDetails() {
                   </div>
                 </div>
 
-                <div className="col-span-7 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
+                <div className={`${manualMode ? "hidden" : "col-span-7"} min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm flex flex-col dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20`}>
                   <div className="mb-2 flex items-center gap-2">
                     <span
                       className="h-2 w-2 rounded-full"
@@ -2880,7 +2947,11 @@ export default function BasicDetails() {
                       }
                     }}
                   >
-                    {isBusy ? "Processing..." : "Generate"}
+                    {isBusy
+                      ? "Processing..."
+                      : manualMode
+                        ? "Continue"
+                        : "Generate"}
                   </button>
                 </div>
               </div>
