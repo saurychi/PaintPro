@@ -33,7 +33,10 @@ import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 import { useProjectNow } from "@/lib/time/useProjectNow";
-import { suppressNewMessageToast } from "@/lib/hooks/useMessagesUnread";
+import {
+  registerNewMessageOpenHandler,
+  suppressNewMessageToast,
+} from "@/lib/hooks/useMessagesUnread";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
@@ -489,6 +492,23 @@ export default function BasicDetails() {
   const [isGeneratingProjectName, setIsGeneratingProjectName] = useState(false);
 
   const [measurementRows, setMeasurementRows] = useState<MeasurementRow[]>([]);
+  // Field keys that failed validation on the last Generate click. Used to
+  // outline the offending inputs in red until the admin starts editing
+  // them — flagging gets cleared per-field on next change.
+  const [formErrors, setFormErrors] = useState<Set<string>>(() => new Set());
+  const hasFormError = (key: string) => formErrors.has(key);
+  const errorRing = (key: string) =>
+    hasFormError(key)
+      ? "border-red-400 focus:ring-red-300/50 dark:border-red-500 dark:focus:ring-red-500/30"
+      : "";
+  const clearFormError = (key: string) => {
+    setFormErrors((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  };
   const [measurementModalOpen, setMeasurementModalOpen] = useState(false);
   const [previewTasks, setPreviewTasks] = useState<PreviewMainTask[]>([]);
   const [isGeneratingTasks, setIsGeneratingTasks] = useState(false);
@@ -724,6 +744,21 @@ export default function BasicDetails() {
     () => rowsToProjectDimensions(measurementRows),
     [measurementRows],
   );
+
+  // True when there's at least one surface row whose value hasn't been
+  // filled in yet (auto-recommended rows from "Generate Tasks" land
+  // pending until the admin opens the measurement modal). Drives both
+  // the Generate button's disabled state and a clearer tooltip so the
+  // user knows WHY the button is greyed out.
+  const hasUnfilledMeasurements = useMemo(() => {
+    if (measurementRows.length === 0) return true;
+    return measurementRows.some(
+      (row) =>
+        row.isMeasurementPending ||
+        !Number.isFinite(row.estimatedValue) ||
+        row.estimatedValue <= 0,
+    );
+  }, [measurementRows]);
 
   const summaryChips = useMemo(() => {
     return measurementRows
@@ -1079,6 +1114,7 @@ export default function BasicDetails() {
     setClientPhone(client.phone ?? "");
     setAddress(client.address ?? "");
     setSelectedPhoneCountry(resolvePhoneCountry(client.phone));
+    clearFormError("client");
   }
 
   function handleClientSelect(clientId: string) {
@@ -1214,6 +1250,10 @@ export default function BasicDetails() {
       );
 
       setPreviewTasks(tasks);
+      // Mark previewTasks-related validation as resolved — admin just
+      // generated tasks, so the red flag on the Generate-tasks area
+      // (if any) should drop.
+      clearFormError("previewTasks");
 
       // Collect unique surface keys needed by the generated tasks
       const surfaceKeys: string[] = [];
@@ -1580,54 +1620,98 @@ export default function BasicDetails() {
     const cPhone = clientPhone.trim();
     const finalProjectCode = projectCode.trim() || generateProjectCode();
 
+    // Collect every problem at once instead of bailing on the first one
+    // so the admin can see and fix all missing details in one pass.
+    // `nextErrors` drives the red highlights below; `problems` is the
+    // ordered list of human-readable issues shown in the toast.
+    const nextErrors = new Set<string>();
+    const problems: string[] = [];
+
     if (!title) {
-      toast.error("Please enter a project name.");
-      return;
+      nextErrors.add("projectName");
+      problems.push("Project name");
     }
     if (!scheduledStartDatetime) {
-      toast.error("Please select a scheduled start date.");
-      return;
+      nextErrors.add("scheduledStart");
+      problems.push("Scheduled start date");
     }
     if (!selectedClientId) {
-      toast.error("Please choose an existing client or create a new one.");
-      return;
-    }
-    if (!siteAddress) {
-      toast.error(
-        "The selected client has no address. Update the client record or choose another client.",
-      );
-      return;
-    }
-    if (!cName) {
-      toast.error(
-        "The selected client has no name. Update the client record or choose another client.",
-      );
-      return;
-    }
-    if (!cEmail || !/^\S+@\S+\.\S+$/.test(cEmail)) {
-      toast.error(
-        "The selected client has an invalid email. Update the client record or choose another client.",
-      );
-      return;
-    }
-    if (!cPhone) {
-      toast.error(
-        "The selected client has no phone number. Update the client record or choose another client.",
-      );
-      return;
+      nextErrors.add("client");
+      problems.push("Client selection");
+    } else {
+      // A client is picked but their record is missing required fields —
+      // flag the client picker so the admin knows to switch / update.
+      if (!siteAddress) {
+        nextErrors.add("client");
+        problems.push("Client address");
+      }
+      if (!cName) {
+        nextErrors.add("client");
+        problems.push("Client name");
+      }
+      if (!cEmail || !/^\S+@\S+\.\S+$/.test(cEmail)) {
+        nextErrors.add("client");
+        problems.push("Valid client email");
+      }
+      if (!cPhone) {
+        nextErrors.add("client");
+        problems.push("Client phone");
+      }
     }
     if (!description.trim()) {
-      toast.error("Please enter a project description.");
-      return;
+      nextErrors.add("description");
+      problems.push("Project description");
     }
     if (!previewTasks.length) {
-      toast.error("Please generate tasks first by clicking Generate Tasks.");
-      return;
+      nextErrors.add("previewTasks");
+      problems.push("Generated tasks");
     }
     if (!measurementRows.length) {
-      toast.error("Please add at least one measurement.");
+      nextErrors.add("measurements");
+      problems.push("At least one measurement");
+    } else {
+      // Auto-recommended rows from "Generate Tasks" land with
+      // `isMeasurementPending: true` and `estimatedValue: 0` until the
+      // admin opens the measurements modal and fills them in. Without
+      // real values, dimensions are empty, durations can't be estimated,
+      // and downstream wizard steps end up half-populated.
+      const pendingRows = measurementRows.filter(
+        (row) => row.isMeasurementPending,
+      );
+      if (pendingRows.length > 0) {
+        nextErrors.add("measurements");
+        problems.push(
+          `${pendingRows.length} surface measurement${pendingRows.length === 1 ? "" : "s"} pending`,
+        );
+      }
+
+      // Defensive: even if rows aren't flagged pending, reject ones with
+      // a zero/non-positive value. Prevents projects from being saved
+      // with `dimensions.scaled[*].estimatedValue: 0` that bricks the
+      // duration formula at compute time.
+      const zeroRows = measurementRows.filter(
+        (row) =>
+          !Number.isFinite(row.estimatedValue) || row.estimatedValue <= 0,
+      );
+      if (zeroRows.length > 0) {
+        nextErrors.add("measurements");
+        problems.push(
+          `${zeroRows.length} measurement${zeroRows.length === 1 ? "" : "s"} with zero / empty value`,
+        );
+      }
+    }
+
+    if (problems.length > 0) {
+      setFormErrors(nextErrors);
+      toast.error("Please fill in the missing details before generating.", {
+        description: problems.join(" • "),
+      });
       return;
     }
+
+    // All clear — wipe the previous error state so any stale red
+    // outlines disappear before we kick off the generate flow.
+    setFormErrors(new Set());
 
     try {
       setSaving(true);
@@ -2013,7 +2097,12 @@ export default function BasicDetails() {
   function handleOpenSurfaceMsg() {
     setSurfaceMsgOpen(true);
     void handleSurfaceMsgProceed(false);
-    void loadStaffConversations(true, false);
+    // Force a fresh fetch on every open — the cached version may be
+    // stale if the admin sent messages from /admin/messages between
+    // opens of this modal. Show the spinner only if we don't already
+    // have anything to show.
+    const showSpinner = surfaceMsgConversations.length === 0;
+    void loadStaffConversations(showSpinner, true);
   }
 
   function handleOpenSurfaceMsgRecipientPicker() {
@@ -2130,6 +2219,31 @@ export default function BasicDetails() {
     };
   }, [surfaceMsgOpen]);
 
+  // Belt-and-braces refresh while the modal is open: same pattern as
+  // /admin/messages. Realtime is the primary signal, but the
+  // messages table may not be in the supabase_realtime publication or
+  // a channel can quietly drop — so we also refetch every 5s and on
+  // tab focus so the conversation list never lags behind the DB.
+  useEffect(() => {
+    if (!surfaceMsgOpen) return;
+
+    const interval = window.setInterval(() => {
+      void loadStaffConversationsRef.current(false);
+    }, 5_000);
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        void loadStaffConversationsRef.current(false);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [surfaceMsgOpen]);
+
   // While the StaffMessageModal is open the modal itself renders incoming
   // messages inline via the realtime listener above, so the global "New
   // message" toast from useMessagesUnread would just be noise. Suppress it
@@ -2138,6 +2252,15 @@ export default function BasicDetails() {
     if (!surfaceMsgOpen) return;
     return suppressNewMessageToast();
   }, [surfaceMsgOpen]);
+
+  // Hijack the toast's "Open" action while we're on this page so it pops
+  // the in-page StaffMessageModal instead of routing to /admin/messages.
+  // Keeps the admin in the wizard step they were working on.
+  useEffect(() => {
+    return registerNewMessageOpenHandler(() => {
+      setSurfaceMsgOpen(true);
+    });
+  }, []);
 
   async function handleSendSurfaceMsg() {
     if (!surfaceMsgEmployeeId || !surfaceMsgText.trim()) return;
@@ -2395,10 +2518,19 @@ export default function BasicDetails() {
 
                       <input
                         value={projectName}
-                        onChange={(e) => setProjectName(e.target.value)}
+                        onChange={(e) => {
+                          setProjectName(e.target.value);
+                          clearFormError("projectName");
+                        }}
                         placeholder="Enter project name"
-                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500`}
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}
+                        className={`h-9 w-full rounded-lg border ${BORDER} ${errorRing("projectName")} bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:ring-2 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500`}
+                        style={{
+                          ["--tw-ring-color" as any]: hasFormError(
+                            "projectName",
+                          )
+                            ? "#f87171"
+                            : ACCENT,
+                        }}
                       />
                     </div>
 
@@ -2410,7 +2542,7 @@ export default function BasicDetails() {
                       <button
                         type="button"
                         onClick={() => setIsScheduleCalendarOpen(true)}
-                        className={`h-9 w-full rounded-lg border ${BORDER} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700`}
+                        className={`h-9 w-full rounded-lg border ${BORDER} ${errorRing("scheduledStart")} bg-white px-3 text-left text-sm text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700`}
                       >
                         {scheduledStart || "Select start date"}
                       </button>
@@ -2424,7 +2556,13 @@ export default function BasicDetails() {
                   </div>
                 </div>
 
-                <div className="col-span-5 min-h-0 h-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
+                <div
+                  className={`col-span-5 min-h-0 h-full rounded-2xl border bg-white p-3 shadow-sm dark:bg-slate-900 dark:shadow-black/20 ${
+                    hasFormError("client")
+                      ? "border-red-400 dark:border-red-500"
+                      : "border-gray-200 dark:border-slate-800"
+                  }`}
+                >
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span
@@ -2573,10 +2711,19 @@ export default function BasicDetails() {
                       </label>
                       <textarea
                         value={description}
-                        onChange={(e) => setDescription(e.target.value)}
+                        onChange={(e) => {
+                          setDescription(e.target.value);
+                          clearFormError("description");
+                        }}
                         placeholder="Write a summary of the project scope (e.g. interior repaint of 3-bedroom house)"
-                        className={`flex-1 min-h-0 w-full resize-none rounded-lg border ${BORDER} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500`}
-                        style={{ ["--tw-ring-color" as any]: ACCENT }}
+                        className={`flex-1 min-h-0 w-full resize-none rounded-lg border ${BORDER} ${errorRing("description")} bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:ring-2 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500`}
+                        style={{
+                          ["--tw-ring-color" as any]: hasFormError(
+                            "description",
+                          )
+                            ? "#f87171"
+                            : ACCENT,
+                        }}
                       />
                       <button
                         type="button"
@@ -2612,7 +2759,11 @@ export default function BasicDetails() {
 
                     {/* Configured surfaces */}
                     <div
-                      className={`rounded-xl border ${BORDER} bg-gray-50 p-2 dark:bg-slate-800/60`}
+                      className={`rounded-xl border bg-gray-50 p-2 dark:bg-slate-800/60 ${
+                        hasFormError("measurements")
+                          ? "border-red-400 dark:border-red-500"
+                          : `${BORDER}`
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
@@ -2637,7 +2788,10 @@ export default function BasicDetails() {
                           ) : null}
                           <button
                             type="button"
-                            onClick={() => setMeasurementModalOpen(true)}
+                            onClick={() => {
+                              setMeasurementModalOpen(true);
+                              clearFormError("measurements");
+                            }}
                             className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-semibold text-white shadow-sm transition-all duration-200"
                             style={{ backgroundColor: ACCENT }}
                             onMouseEnter={(e) => {
@@ -2709,6 +2863,11 @@ export default function BasicDetails() {
                     className="w-[140px] rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
                     style={{ backgroundColor: ACCENT }}
                     onClick={handleSaveAndContinue}
+                    // Only disabled while the actual generation request
+                    // is in flight. Missing fields no longer block the
+                    // click — handleSaveAndContinue surfaces a toast +
+                    // red highlights so the admin sees what's wrong
+                    // instead of staring at a silently-disabled button.
                     disabled={isBusy}
                     onMouseEnter={(e) => {
                       if (!isBusy) {
@@ -2877,6 +3036,7 @@ export default function BasicDetails() {
         onClose={() => setIsScheduleCalendarOpen(false)}
         onSelectDate={(date) => {
           setScheduledStart(date);
+          clearFormError("scheduledStart");
           setIsScheduleCalendarOpen(false);
           toast.success("Scheduled start date selected.");
         }}

@@ -1,3 +1,5 @@
+import { workHoursBetween } from "@/lib/schedule/workHours";
+
 export const EMPLOYEE_PERFORMANCE_RATING_VALUES = [
   "great",
   "good",
@@ -238,12 +240,26 @@ export function buildEmployeeReviewItems(
         ) || null;
       const completedAt =
         readString(subTask.updated_at, subTask.updatedAt) || null;
-      const estimatedHours = readNumber(
+      let estimatedHours = readNumber(
         subTask.estimated_hours,
         subTask.estimatedHours,
         subTask.duration_hours,
         subTask.durationHours,
       );
+
+      // Fallback: derive hours from the scheduled window when the cost-
+      // estimation step never wrote estimated_hours (older projects, or
+      // schedules edited directly without re-running cost estimation).
+      // Without this the salary multiplier ends up as 0 × wage = $0 in
+      // the Employee Management modal, even though the task clearly had
+      // a planned duration.
+      if (estimatedHours <= 0 && scheduledStart && scheduledEnd) {
+        const startDate = new Date(scheduledStart);
+        const endDate = new Date(scheduledEnd);
+        if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())) {
+          estimatedHours = workHoursBetween(startDate, endDate);
+        }
+      }
       const timingLabel = getCompletionTimingLabel({
         rawStatus,
         scheduledStart: scheduledStart || "",
@@ -404,4 +420,32 @@ export function buildEmployeeReviewItems(
 
 export function uniqueEmployeeIdsFromReviewItems(items: EmployeeReviewItem[]) {
   return unique(items.map((item) => item.userId));
+}
+
+// For the post-cancel "Employee Management" step the admin only reviews
+// the work the employees actually finished — pending/missed subtasks
+// (which the cancel flow ends up marking "cancelled") never executed,
+// so they shouldn't show up on a performance review. Keeps tasks with
+// status "done" or "late" (both represent finished work, just with
+// different timing) and drops employees who have nothing left after
+// that filter.
+export function filterEmployeeReviewItemsToFinishedOnly(
+  items: EmployeeReviewItem[],
+): EmployeeReviewItem[] {
+  return items
+    .map((employee) => {
+      const finishedTasks = employee.tasks.filter(
+        (task) => task.status === "done" || task.status === "late",
+      );
+
+      // Keep the original totalEstimatedHours / salaryAmount as-is —
+      // recomputing would require per-task hours which this shape
+      // doesn't carry. The admin can edit the salary inline in the
+      // modal if it needs to be scaled down for cancelled work.
+      return {
+        ...employee,
+        tasks: finishedTasks,
+      };
+    })
+    .filter((employee) => employee.tasks.length > 0);
 }

@@ -9,6 +9,7 @@ import {
   type EstimationFormulaVariablePayload,
   ESTIMATION_VARIABLE_DATA_TYPES,
 } from "@/lib/estimationSettings";
+import { COMMON_UNITS } from "@/lib/commonUnits";
 
 type AddVariableModalProps = {
   open: boolean;
@@ -190,9 +191,8 @@ export default function AddVariableModal({
                   }))
                 }
               />
-              <Field
+              <SelectField
                 label="Unit"
-                placeholder="m2/hour"
                 value={formState.unit}
                 onChange={(value) =>
                   setFormState((current) => ({
@@ -200,6 +200,11 @@ export default function AddVariableModal({
                     unit: value,
                   }))
                 }
+                options={COMMON_UNITS.map((unit) => ({
+                  value: unit,
+                  label: unit,
+                }))}
+                placeholder="Select unit"
               />
 
               <SelectField

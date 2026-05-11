@@ -12,8 +12,10 @@ import type {
 } from "@fullcalendar/core";
 import type { DateClickArg } from "@fullcalendar/interaction";
 import { BriefcaseBusiness, CalendarDays, Loader2, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import ScheduleSkeleton from "@/components/schedule/ScheduleSkeleton";
 import type { ScheduleUnavailableDay } from "@/lib/schedule/unavailableDayTypes";
 import { useProjectNow } from "@/lib/time/useProjectNow";
 import {
@@ -227,6 +229,7 @@ function getUnavailableTypeLabel(day: ScheduleUnavailableDay) {
 }
 
 export default function ClientSchedule() {
+  const router = useRouter();
   const { now: projectNow, todayKey } = useProjectNow();
   const [projects, setProjects] = useState<ScheduleProject[]>([]);
 
@@ -802,14 +805,7 @@ export default function ClientSchedule() {
           <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:h-full lg:min-h-0 lg:overflow-hidden">
             <div className="p-3 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
               {loading ? (
-                <div className="flex items-center justify-center min-h-[40vh] lg:h-full">
-                  <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                    <Loader2 className="h-5 w-5 animate-spin text-gray-700" />
-                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      Loading schedule...
-                    </span>
-                  </div>
-                </div>
+                <ScheduleSkeleton />
               ) : (
                 <div className="grid grid-cols-12 gap-3 lg:h-full lg:min-h-0">
                   <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
@@ -1248,6 +1244,25 @@ export default function ClientSchedule() {
               </div>
 
               <div className="border-t border-gray-200 dark:border-slate-700 px-5 py-4 flex justify-end gap-3">
+                {selectedDate ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Snap the dashboard to the same workday the modal
+                      // is showing — no openDownpayment / openKickoff /
+                      // projectId hand-off, so the client can never trip
+                      // an admin-only modal or land on a job-creation
+                      // wizard from this navigation.
+                      const targetDate = selectedDate;
+                      setSelectedDate(null);
+                      router.push(
+                        `/client?date=${encodeURIComponent(targetDate)}`,
+                      );
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                    Go to dashboard
+                  </button>
+                ) : null}
                 <button
                   onClick={() => setSelectedDate(null)}
                   className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all duration-200"

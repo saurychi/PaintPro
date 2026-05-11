@@ -350,6 +350,19 @@ export default function ProjectSchedulePage() {
   const [unavailableBlocks, setUnavailableBlocks] = useState<
     UnavailableBlock[]
   >([]);
+  // Time blocks where staff assigned to THIS project are already booked on
+  // OTHER active projects. Rendered as grey background bands so the user
+  // can see WHY a calendar gap exists (instead of empty whitespace that
+  // looks like a scheduler bug).
+  type StaffBusyBlock = {
+    projectSubTaskId: string;
+    projectCode: string | null;
+    projectTitle: string | null;
+    subTaskTitle: string;
+    startDatetime: string;
+    endDatetime: string;
+  };
+  const [staffBusyBlocks, setStaffBusyBlocks] = useState<StaffBusyBlock[]>([]);
   // Tracks whether the unavailable-days fetch has finished, regardless of
   // whether it returned anything. The auto-normalize pass needs this signal
   // so it doesn't run before the blocked-day set is available (and end up
@@ -483,7 +496,14 @@ export default function ProjectSchedulePage() {
             });
 
             const groupedMap = new Map<string, ServiceGroup>();
-            // Also build CachedSubTask[] to store in cache
+            // Also build CachedSubTask[] to store in cache. Critical:
+            // preserve equipment that's already in the cache from a
+            // prior hydrate — the schedule API doesn't return it, so
+            // overwriting with `[]` here would wipe equipment for
+            // every subtask. Same pattern as buildSubTasksForCache.
+            const existingCacheById = new Map(
+              (getCachedSubTasks(projectId) ?? []).map((st) => [st.id, st]),
+            );
             const cachedSubTasks: CachedSubTask[] = [];
 
             for (const row of sortedRows) {
@@ -558,7 +578,13 @@ export default function ProjectSchedulePage() {
 
               group.children.push(step);
 
-              // Build the cached entry
+              // Build the cached entry. Equipment falls back to
+              // existing cache entry first (preserving createProject's
+              // saved equipment), THEN to row.equipments (legacy API
+              // shape that doesn't actually exist on this endpoint),
+              // THEN to []. Without the cache fallback, equipment was
+              // being silently wiped here.
+              const prevCached = existingCacheById.get(stepId);
               cachedSubTasks.push({
                 id: stepId,
                 subTaskId,
@@ -570,8 +596,12 @@ export default function ProjectSchedulePage() {
                 scheduledStartDatetime,
                 scheduledEndDatetime,
                 assignedEmployeeIds:
-                  row?.assignedEmployeeIds ?? row?.assigned_employee_ids ?? [],
-                equipments: row?.equipments ?? [],
+                  row?.assignedEmployeeIds ??
+                  row?.assigned_employee_ids ??
+                  prevCached?.assignedEmployeeIds ??
+                  [],
+                equipments:
+                  prevCached?.equipments ?? row?.equipments ?? [],
               });
             }
 
@@ -666,7 +696,13 @@ export default function ProjectSchedulePage() {
   }
 
   useEffect(() => {
-    loadSchedule();
+    // Always pull fresh schedule data from the DB on mount, not the
+    // session cache. The cache can lag the DB when the schedule was
+    // regenerated elsewhere in the wizard (e.g. an earlier conflict-fix
+    // pass on basic-details), and the cache short-circuit would render
+    // those stale times — making the user click Refresh to see the
+    // gap-free version. Cost: one extra fetch on every visit.
+    loadSchedule(true);
   }, [projectId]);
 
   useEffect(() => {
@@ -717,6 +753,35 @@ export default function ProjectSchedulePage() {
     }
     loadUnavailableDates();
   }, []);
+
+  // Pull busy slots for THIS project's assigned staff from other active
+  // projects, so the calendar can show a "Busy: PP-XXXX" overlay instead
+  // of an unexplained gap. Re-runs whenever the project changes.
+  useEffect(() => {
+    if (!projectId) {
+      setStaffBusyBlocks([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(
+      `/api/planning/getStaffBusyBlocks?projectId=${encodeURIComponent(projectId)}`,
+    )
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (Array.isArray(data?.busyBlocks)) {
+          setStaffBusyBlocks(data.busyBlocks);
+        }
+      })
+      .catch(() => {
+        // Non-fatal: timeline just won't show the overlay if this fails.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // Reset the one-shot normalize guard whenever a different project is
   // opened, so the new project's saved schedule gets its own pass.
@@ -963,8 +1028,30 @@ export default function ProjectSchedulePage() {
       });
     }
 
+    // Staff busy on other projects — render as grey background bands so
+    // the user sees WHY the scheduler skipped a slot. Hover/title gives
+    // the project code and subtask name.
+    for (const block of staffBusyBlocks) {
+      const label = block.projectCode
+        ? `Busy: ${block.projectCode} — ${block.subTaskTitle}`
+        : `Busy — ${block.subTaskTitle}`;
+      out.push({
+        id: `busy__${block.projectSubTaskId}`,
+        start: block.startDatetime,
+        end: block.endDatetime,
+        display: "background",
+        classNames: ["fc-staff-busy"],
+        title: label,
+        extendedProps: {
+          staffBusy: true,
+          projectCode: block.projectCode,
+          subTaskTitle: block.subTaskTitle,
+        },
+      });
+    }
+
     return out;
-  }, [services, unavailableDates, unavailableBlocks]);
+  }, [services, unavailableDates, unavailableBlocks, staffBusyBlocks]);
 
   // Tag unavailable days on both the column and header so the calendar
   // shows them red. We do this with class names instead of background
@@ -2012,6 +2099,31 @@ export default function ProjectSchedulePage() {
         }
         .schedule-calendar .fc .fc-bg-event.fc-partial-unavailable .fc-event-title {
           color: rgb(153, 27, 27);
+          font-size: 10px;
+          font-weight: 600;
+          padding: 2px 6px;
+          letter-spacing: 0.02em;
+          white-space: normal;
+        }
+        /* Staff busy on other projects — grey diagonal band so the user
+           can see why the scheduler skipped a slot. Distinct from the red
+           partial-unavailable band (admin-imposed) by colour and stripe
+           direction. */
+        .schedule-calendar .fc .fc-bg-event.fc-staff-busy {
+          background-color: rgba(100, 116, 139, 0.12) !important;
+          background-image: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 6px,
+            rgba(100, 116, 139, 0.28) 6px,
+            rgba(100, 116, 139, 0.28) 10px
+          );
+          opacity: 1 !important;
+          border-left: 3px solid rgb(100, 116, 139) !important;
+          border-radius: 0 !important;
+        }
+        .schedule-calendar .fc .fc-bg-event.fc-staff-busy .fc-event-title {
+          color: rgb(51, 65, 85);
           font-size: 10px;
           font-weight: 600;
           padding: 2px 6px;

@@ -329,40 +329,43 @@ export async function POST(request: Request) {
       );
     }
 
-    let cascadeShiftedCount = 0;
-    let cascadeDeltaMs = 0;
-    let cascadeWarning: string | null = null;
-
+    // Cascade runs in the background. Each subtask it shifts emits a
+    // project_sub_task UPDATE that the dashboard's realtime
+    // subscription patches in place — so the user sees the new times
+    // land within ~1s of the response, instead of waiting for the
+    // entire cascade to finish before getting "Done". For a project
+    // with many remaining subtasks the cascade can take 1-3s to
+    // chunk through; making it block the response was the main
+    // source of the perceived "Finishing..." lag.
     if (
       isCompleting &&
       originalScheduledEndDate &&
       existingSubTask.project_task_id
     ) {
-      // Always run the cascade when a subtask completes — the function
-      // itself decides whether to actually move anything based on whether
-      // the immediate-next subtask is already aligned (within 1 minute) or
-      // not. We don't gate here on (actualEnd - originalScheduledEnd) any
-      // more, because that misses the case where the previous task
-      // finished on time but there was originally a gap before the next
-      // subtask that should now be closed.
-      const result = await cascadeShiftLaterSubtasks({
+      const projectTaskId = existingSubTask.project_task_id;
+      const originalScheduledEndMs = originalScheduledEndDate.getTime();
+
+      void cascadeShiftLaterSubtasks({
         finishingSubTaskId: projectSubTaskId,
-        projectTaskId: existingSubTask.project_task_id,
-        originalScheduledEndMs: originalScheduledEndDate.getTime(),
+        projectTaskId,
+        originalScheduledEndMs,
         actualEndMs: referenceNow.getTime(),
         timestampIso,
-      });
-
-      if (result.error) {
-        // Status update already succeeded — don't roll it back. Surface a
-        // soft warning so the UI can show "marked done, but follow-up
-        // schedule shift didn't apply" instead of an outright failure
-        // that hides the fact that the subtask is already marked done.
-        cascadeWarning = result.error;
-      } else {
-        cascadeShiftedCount = result.shifted;
-        cascadeDeltaMs = result.deltaMs;
-      }
+      })
+        .then((result) => {
+          if (result.error) {
+            console.error(
+              "[updateSubTaskStatus] background cascade shift failed:",
+              result.error,
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          console.error(
+            "[updateSubTaskStatus] background cascade shift threw:",
+            err instanceof Error ? err.message : String(err),
+          );
+        });
     }
 
     let projectStatus: string | null = null;
@@ -389,45 +392,48 @@ export async function POST(request: Request) {
       const projectTask = projectTaskRows?.[0] ?? null;
 
       if (projectTask?.project_id) {
-        const { data: projectRows, error: projectLookupError } =
-          await supabaseAdmin
+        // Stage 2 — projects.status, all-project-tasks-for-this-project,
+        // and (anticipating need) all-subtasks need not be sequential.
+        // Fan them out together: the projects.status read tells us if
+        // we even need to check; the other two feed the
+        // hasRemainingOpenSubTask computation below.
+        const [projectResult, allProjectTaskRowsResult] = await Promise.all([
+          supabaseAdmin
             .from("projects")
             .select("status")
             .eq("project_id", projectTask.project_id)
-            .returns<ProjectRow[]>();
+            .returns<ProjectRow[]>(),
+          supabaseAdmin
+            .from("project_task")
+            .select("project_task_id, project_id")
+            .eq("project_id", projectTask.project_id)
+            .returns<ProjectTaskRow[]>(),
+        ]);
 
-        if (projectLookupError) {
+        if (projectResult.error) {
           return NextResponse.json(
             {
               error: "Failed to load project status.",
-              details: projectLookupError.message,
+              details: projectResult.error.message,
+            },
+            { status: 500 },
+          );
+        }
+        if (allProjectTaskRowsResult.error) {
+          return NextResponse.json(
+            {
+              error: "Failed to load project tasks.",
+              details: allProjectTaskRowsResult.error.message,
             },
             { status: 500 },
           );
         }
 
-        const currentProject = projectRows?.[0] ?? null;
+        const currentProject = projectResult.data?.[0] ?? null;
         projectStatus = normalizeStatus(currentProject?.status);
 
         if (canMoveProjectToReview(projectStatus)) {
-          const { data: allProjectTaskRows, error: allProjectTasksError } =
-            await supabaseAdmin
-              .from("project_task")
-              .select("project_task_id, project_id")
-              .eq("project_id", projectTask.project_id)
-              .returns<ProjectTaskRow[]>();
-
-          if (allProjectTasksError) {
-            return NextResponse.json(
-              {
-                error: "Failed to load project tasks.",
-                details: allProjectTasksError.message,
-              },
-              { status: 500 },
-            );
-          }
-
-          const projectTaskIds = (allProjectTaskRows ?? []).map(
+          const projectTaskIds = (allProjectTaskRowsResult.data ?? []).map(
             (row) => row.project_task_id,
           );
 
@@ -486,11 +492,11 @@ export async function POST(request: Request) {
       ok: true,
       projectStatus,
       movedToReviewPending,
-      cascade: {
-        shifted: cascadeShiftedCount,
-        deltaMs: cascadeDeltaMs,
-        warning: cascadeWarning,
-      },
+      // Cascade now runs in the background; its UPDATE events
+      // broadcast via realtime so dashboards patch the shifted
+      // subtask times automatically. We no longer carry a per-call
+      // shifted/delta/warning summary because awaiting that would
+      // re-introduce the slowness this change was made to remove.
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";

@@ -1,13 +1,25 @@
 "use client";
 
-import { useState } from "react";
-import { Edit3, Loader2, Network, Plus, Save, Trash2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Edit3, Loader2, Network, Plus, Ruler, Save, Trash2, X } from "lucide-react";
 
 import {
   type EstimationFormulaTemplate,
   type EstimationFormulaTemplatePayload,
   ESTIMATION_FORMULA_SCOPES,
 } from "@/lib/estimationSettings";
+import {
+  type AreaVariableDefinition,
+  getAreaVariableDefinition,
+} from "@/lib/planning/areaVariables";
+
+// Pull identifiers (variable names, function names) out of a formula
+// expression. expr-eval's tokens follow the standard \b[A-Za-z_][\w]*\b
+// shape, so a single regex is enough. We dedupe before returning.
+function extractIdentifiers(expression: string): string[] {
+  const matches = expression.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? [];
+  return Array.from(new Set(matches));
+}
 
 type EditFormulaModalProps = {
   open: boolean;
@@ -50,6 +62,32 @@ export default function EditFormulaModal({
   const [formState, setFormState] = useState<EstimationFormulaTemplatePayload>(
     buildPayload(formula),
   );
+
+  // Detect which built-in surface-measurement variables this formula
+  // actually references in its (live) expression. These come from
+  // AREA_VARIABLE_DEFINITIONS — names like `wall_area_m2`,
+  // `ceiling_area_m2`, `doors_count`. They aren't stored as
+  // formula_variables rows; the project-generation flow plugs in the
+  // measured values from projects.dimensions at evaluation time. Use
+  // a Set lookup against the formula's own variable_keys so we don't
+  // double-list a key that's been redefined as a custom variable.
+  const surfaceVariablesUsed = useMemo<AreaVariableDefinition[]>(() => {
+    const ownKeys = new Set(
+      formula?.variables.map((v) => v.variable_key) ?? [],
+    );
+    const ids = extractIdentifiers(formState.formulaExpression);
+    const seen = new Set<string>();
+    const out: AreaVariableDefinition[] = [];
+    for (const id of ids) {
+      if (ownKeys.has(id)) continue;
+      const def = getAreaVariableDefinition(id);
+      if (def && !seen.has(def.key)) {
+        seen.add(def.key);
+        out.push(def);
+      }
+    }
+    return out;
+  }, [formState.formulaExpression, formula?.variables]);
 
   if (!open || !formula) return null;
 
@@ -241,14 +279,64 @@ export default function EditFormulaModal({
               </div>
             </div>
 
+            {/* Surface Measurements Used — built-in area variables
+                referenced by the live formula expression. Auto-detected,
+                read-only: these are filled in at project-generation
+                time from the measurements admin entered in basic-details.
+                The author doesn't need to define them as formula
+                variables — they exist globally via AREA_VARIABLE_DEFINITIONS. */}
+            <div className="md:col-span-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                  Surface Measurements Used
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Built-in measurement variables this formula reads from the
+                  project's dimensions. Auto-detected from the expression.
+                </p>
+              </div>
+
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {surfaceVariablesUsed.length > 0 ? (
+                  surfaceVariablesUsed.map((def) => (
+                    <div
+                      key={def.key}
+                      className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/60 p-2"
+                    >
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-white text-blue-700">
+                        <Ruler className="h-3 w-3" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-gray-900">
+                          {def.label}
+                        </p>
+                        <p className="truncate text-[11px] text-gray-500">
+                          {def.key} • {def.unit}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-500 sm:col-span-2">
+                    This formula doesn't reference any surface measurements.
+                    Add an identifier like{" "}
+                    <code className="rounded bg-white px-1 py-0.5 text-[10px]">
+                      wall_area_m2
+                    </code>{" "}
+                    to the expression to pull a measured value at generation time.
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="md:col-span-2">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Variables
+                    Custom Variables
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">
-                    Add, edit, or remove variables used by this formula.
+                    Variables defined on this formula. Add, edit, or remove as needed.
                   </p>
                 </div>
 

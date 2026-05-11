@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, PencilLine } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  PencilLine,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import {
@@ -131,6 +137,12 @@ export default function OverviewPage() {
   }, [router]);
 
   const [loading, setLoading] = useState(true);
+  // Stepper for the "Generating quotation" overlay. The save-generated API
+  // call is the slowest part, so we segment the user-visible progress into
+  // three stages (save → render → finish) and update it as the handler
+  // advances. Helps the multi-second wait feel intentional instead of stuck.
+  type GenerationStep = "save" | "render" | "finish" | null;
+  const [generationStep, setGenerationStep] = useState<GenerationStep>(null);
   const [isNavigating, setIsNavigating] = useState<"back" | "quote" | null>(
     null,
   );
@@ -335,6 +347,7 @@ export default function OverviewPage() {
 
   async function handleGenerateQuotation() {
     setIsNavigating("quote");
+    setGenerationStep("save");
 
     // Batch-save all cached wizard data to the database. We deliberately
     // DO NOT advance the status here — if PDF generation fails below,
@@ -362,6 +375,7 @@ export default function OverviewPage() {
           const data = await response.json();
           toast.error(data?.error || "Failed to save project.");
           setIsNavigating(null);
+          setGenerationStep(null);
           return;
         }
 
@@ -369,6 +383,7 @@ export default function OverviewPage() {
       } catch (error: any) {
         toast.error(error?.message || "Failed to save project.");
         setIsNavigating(null);
+        setGenerationStep(null);
         return;
       }
     }
@@ -377,6 +392,7 @@ export default function OverviewPage() {
     // page can stream it straight from storage instead of regenerating the
     // HTML preview every time. We block navigation on this so the next page
     // opens with the file already in place.
+    setGenerationStep("render");
     try {
       const generateResponse = await fetch("/api/quotation/save-generated", {
         method: "POST",
@@ -394,16 +410,19 @@ export default function OverviewPage() {
           data?.details ? `${baseError} (${data.details})` : baseError,
         );
         setIsNavigating(null);
+        setGenerationStep(null);
         return;
       }
     } catch (error: any) {
       toast.error(error?.message || "Failed to generate quotation PDF.");
       setIsNavigating(null);
+      setGenerationStep(null);
       return;
     }
 
     // PDF is in the bucket — now (and only now) flip the status so a
     // refresh from anywhere routes the user to /quotation-generation.
+    setGenerationStep("finish");
     try {
       const statusResponse = await fetch("/api/planning/updateProjectStatus", {
         method: "POST",
@@ -417,11 +436,13 @@ export default function OverviewPage() {
         const data = await statusResponse.json().catch(() => null);
         toast.error(data?.error || "Failed to update project status.");
         setIsNavigating(null);
+        setGenerationStep(null);
         return;
       }
     } catch (error: any) {
       toast.error(error?.message || "Failed to update project status.");
       setIsNavigating(null);
+      setGenerationStep(null);
       return;
     }
 
@@ -926,10 +947,10 @@ export default function OverviewPage() {
         }
       `}</style>
 
-      {/* Generating-quotation overlay. Shown while handleGenerateQuotation
-          is in flight (state === "quote") so the user gets visible
-          feedback during the multi-second PDF render. backdrop-blur-sm
-          on a tinted layer dims the page underneath. */}
+      {/* Generating-quotation overlay. Three-step progress: save → render →
+          finish. Each step ticks to a check once handleGenerateQuotation
+          moves past it, so the user gets concrete feedback during the
+          multi-second PDF render instead of an opaque spinner. */}
       {isNavigating === "quote" ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="mx-4 w-full max-w-sm rounded-md border border-gray-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
@@ -941,12 +962,82 @@ export default function OverviewPage() {
                 />
               </div>
               <p className="text-base font-semibold text-gray-900 dark:text-slate-100">
-                Generating quotation...
+                Generating quotation
               </p>
-              <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
-                Please wait while we render the PDF and stash it in
-                storage. This usually takes a few seconds.
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">
+                This usually takes a few seconds.
               </p>
+
+              <ul className="mt-4 w-full space-y-2 text-left">
+                {(
+                  [
+                    { id: "save", label: "Saving project data" },
+                    { id: "render", label: "Rendering quotation PDF" },
+                    { id: "finish", label: "Finishing up" },
+                  ] as const
+                ).map((step) => {
+                  const order: GenerationStep[] = ["save", "render", "finish"];
+                  const currentIdx = generationStep
+                    ? order.indexOf(generationStep)
+                    : -1;
+                  const stepIdx = order.indexOf(step.id);
+                  const state =
+                    currentIdx === -1
+                      ? "pending"
+                      : stepIdx < currentIdx
+                        ? "done"
+                        : stepIdx === currentIdx
+                          ? "active"
+                          : "pending";
+                  return (
+                    <li
+                      key={step.id}
+                      className="flex items-center gap-2 rounded-md border border-gray-100 bg-gray-50/70 px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900/40">
+                      <span
+                        className={[
+                          "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
+                          state === "pending"
+                            ? "border-gray-200 bg-white text-gray-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500"
+                            : "",
+                        ].join(" ")}
+                        style={
+                          state === "done"
+                            ? {
+                                borderColor: ACCENT,
+                                backgroundColor: ACCENT,
+                                color: "#ffffff",
+                              }
+                            : state === "active"
+                              ? {
+                                  borderColor: ACCENT,
+                                  backgroundColor: "#ffffff",
+                                  color: ACCENT,
+                                }
+                              : undefined
+                        }>
+                        {state === "done" ? (
+                          <Check className="h-3 w-3" />
+                        ) : state === "active" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          stepIdx + 1
+                        )}
+                      </span>
+                      <span
+                        className={[
+                          "text-[12px] font-medium",
+                          state === "active"
+                            ? "text-gray-900 dark:text-slate-100"
+                            : state === "done"
+                              ? "text-gray-500 line-through dark:text-slate-500"
+                              : "text-gray-500 dark:text-slate-400",
+                        ].join(" ")}>
+                        {step.label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           </div>
         </div>

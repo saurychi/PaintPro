@@ -23,21 +23,53 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // ─── 1. Project metadata ──────────────────────────────────────────────────
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from("projects")
-      .select(
-        "project_id, project_code, title, site_address, description, client_id, status, markup_rate",
-      )
-      .eq("project_id", projectId)
-      .single();
+    // ─── 1. Project metadata + catalogs (in parallel) ────────────────────────
+    // staffUsers / equipmentCatalog / materialCatalog don't depend on the
+    // project chain at all, so kicking them off here lets them resolve
+    // while we walk through tasks → subtasks → staff. For a project with
+    // many subtasks this shaves ~500ms-1s off the round-trip.
+    const [
+      projectResult,
+      staffUsersResult,
+      equipmentCatalogResult,
+      materialCatalogResult,
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("projects")
+        .select(
+          "project_id, project_code, title, site_address, description, client_id, status, markup_rate",
+        )
+        .eq("project_id", projectId)
+        .single(),
+      supabaseAdmin
+        .from("users")
+        .select(
+          "id, username, email, role, hourly_wage, profile_image_url, specialty",
+        )
+        .eq("role", "staff")
+        .eq("status", "active")
+        .order("username", { ascending: true }),
+      supabaseAdmin
+        .from("equipment")
+        .select("equipment_id, name, status")
+        .order("name", { ascending: true }),
+      supabaseAdmin
+        .from("materials")
+        .select("material_id, name, unit, unit_cost, current_in_stock")
+        .order("name", { ascending: true }),
+    ]);
 
+    const { data: project, error: projectError } = projectResult;
     if (projectError || !project) {
       return NextResponse.json(
         { error: "Project not found.", details: projectError?.message },
         { status: 404 },
       );
     }
+
+    const staffUsers = staffUsersResult.data;
+    const equipmentCatalog = equipmentCatalogResult.data;
+    const materialCatalog = materialCatalogResult.data;
 
     // ─── 2. Main tasks (project_task + main_task join) ────────────────────────
     const { data: projectTasks, error: ptError } = await supabaseAdmin
@@ -108,40 +140,40 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // Resolve equipment names
+      // Resolve equipment names + staff assignments in parallel — both
+      // depend on the subtask rows but not on each other.
       const allEquipmentIds = collectEquipmentUsageIds(
         (subTaskRows ?? []).map((r: any) => r.equipments_used),
       );
-
-      let equipmentMap = new Map<string, string>();
-      if (allEquipmentIds.length > 0) {
-        const { data: eqRows } = await supabaseAdmin
-          .from("equipment")
-          .select("equipment_id, name")
-          .in("equipment_id", allEquipmentIds);
-
-        for (const row of eqRows ?? []) {
-          equipmentMap.set(row.equipment_id, row.name);
-        }
-      }
-
-      // Staff assignments for all subtasks
       const projectSubTaskIds = (subTaskRows ?? []).map(
         (r: any) => r.project_sub_task_id,
       );
 
-      let staffBySubTask = new Map<string, string[]>();
-      if (projectSubTaskIds.length > 0) {
-        const { data: staffRows } = await supabaseAdmin
-          .from("project_sub_task_staff")
-          .select("project_sub_task_id, user_id")
-          .in("project_sub_task_id", projectSubTaskIds);
+      const [eqResult, staffResult] = await Promise.all([
+        allEquipmentIds.length > 0
+          ? supabaseAdmin
+              .from("equipment")
+              .select("equipment_id, name")
+              .in("equipment_id", allEquipmentIds)
+          : Promise.resolve({ data: [] as Array<{ equipment_id: string; name: string }>, error: null }),
+        projectSubTaskIds.length > 0
+          ? supabaseAdmin
+              .from("project_sub_task_staff")
+              .select("project_sub_task_id, user_id")
+              .in("project_sub_task_id", projectSubTaskIds)
+          : Promise.resolve({ data: [] as Array<{ project_sub_task_id: string; user_id: string }>, error: null }),
+      ]);
 
-        for (const row of staffRows ?? []) {
-          const current = staffBySubTask.get(row.project_sub_task_id) ?? [];
-          current.push(row.user_id);
-          staffBySubTask.set(row.project_sub_task_id, current);
-        }
+      const equipmentMap = new Map<string, string>();
+      for (const row of eqResult.data ?? []) {
+        equipmentMap.set(row.equipment_id, row.name);
+      }
+
+      const staffBySubTask = new Map<string, string[]>();
+      for (const row of staffResult.data ?? []) {
+        const current = staffBySubTask.get(row.project_sub_task_id) ?? [];
+        current.push(row.user_id);
+        staffBySubTask.set(row.project_sub_task_id, current);
       }
 
       subTasks = (subTaskRows ?? []).map((row: any) => {
@@ -213,28 +245,7 @@ export async function GET(request: NextRequest) {
       }));
     }
 
-    // ─── 5. Reference data (catalogs) ─────────────────────────────────────────
-    // Staff users
-    const { data: staffUsers } = await supabaseAdmin
-      .from("users")
-      .select("id, username, email, role, hourly_wage, profile_image_url, specialty")
-      .eq("role", "staff")
-      .eq("status", "active")
-      .order("username", { ascending: true });
-
-    // Equipment catalog
-    const { data: equipmentCatalog } = await supabaseAdmin
-      .from("equipment")
-      .select("equipment_id, name, status")
-      .order("name", { ascending: true });
-
-    // Material catalog
-    const { data: materialCatalog } = await supabaseAdmin
-      .from("materials")
-      .select("material_id, name, unit, unit_cost, current_in_stock")
-      .order("name", { ascending: true });
-
-    // ─── 6. Build response ────────────────────────────────────────────────────
+    // ─── 5. Build response (catalogs were prefetched in tier 1) ──────────────
     return NextResponse.json({
       projectId: project.project_id,
       projectCode: project.project_code,

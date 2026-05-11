@@ -36,7 +36,16 @@ function formatSelectedDate(date: string) {
 }
 
 function toDateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
+  // Use LOCAL year/month/day instead of toISOString(). FullCalendar
+  // passes day cells as local-midnight Date objects, and the click
+  // handler's info.dateStr is also local — so toISOString() would
+  // pull today's cell into "yesterday" in any timezone east of UTC
+  // (e.g. UTC+8 in Manila), causing the cell to render with the
+  // past-day diagonal hatch even though the user can still pick it.
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export default function ScheduleCalendarModal({

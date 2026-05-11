@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
         project_task_id,
         sub_task_id,
         estimated_hours,
+        equipments_used,
         status,
         sort_order,
         notes,

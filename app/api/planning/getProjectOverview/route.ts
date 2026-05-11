@@ -19,6 +19,13 @@ type ProjectRow = {
   estimated_cost: number | null;
   estimated_profit: number | null;
   downpayment: number | null;
+  cancelled_at: string | null;
+  cancelled_from_status: string | null;
+  cancellation_phase: string | null;
+  cancellation_earned_cost: number | null;
+  cancellation_earned_revenue: number | null;
+  cancellation_balance: number | null;
+  cancellation_settled: number | null;
 };
 
 type ProjectTaskRow = {
@@ -147,21 +154,30 @@ function parseEquipment(
   equipmentById: Map<string, EquipmentRow>,
   equipmentByName: Map<string, EquipmentRow>,
 ): ParsedEquipment[] {
-  return parseEquipmentUsage(value)
-    .map((item) => {
-      const equipment =
-        equipmentById.get(item.equipmentId) ??
-        equipmentByName.get(item.legacyName);
-      const resolvedName = equipment?.name ?? item.legacyName;
+  return parseEquipmentUsage(value).map((item, index) => {
+    const equipment =
+      equipmentById.get(item.equipmentId) ??
+      equipmentByName.get(item.legacyName);
+    const resolvedName = equipment?.name ?? item.legacyName;
 
-      return {
-        equipment_id: equipment?.equipment_id ?? item.equipmentId ?? null,
-        name: resolvedName || "",
-        quantity: item.quantity,
-        notes: item.notes,
-      };
-    })
-    .filter((item) => item.name);
+    // Fall back to a stable placeholder when the catalog reference is
+    // broken (equipment row was deleted after assignment, the saved
+    // JSON only carries an id, etc.) instead of dropping the entry
+    // entirely. Materials use the same "Material" fallback — without
+    // this, equipment usage silently disappears from review/audit
+    // surfaces and the count card reads 0 even when the project has
+    // assigned equipment.
+    const fallbackName = item.equipmentId
+      ? `Equipment ${item.equipmentId.slice(0, 8)}`
+      : `Equipment ${index + 1}`;
+
+    return {
+      equipment_id: equipment?.equipment_id ?? item.equipmentId ?? null,
+      name: resolvedName || fallbackName,
+      quantity: item.quantity,
+      notes: item.notes,
+    };
+  });
 }
 
 function normalizeStatus(value: string | null | undefined) {
@@ -196,26 +212,46 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
     }
 
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from("projects")
-      .select(
-        `
-        project_id,
-        project_code,
-        title,
-        description,
-        site_address,
-        status,
-        scheduled_start_datetime,
-        scheduled_end_datetime,
-        estimated_budget,
-        estimated_cost,
-        estimated_profit,
-        downpayment
-        `,
-      )
-      .eq("project_id", projectId)
-      .maybeSingle<ProjectRow>();
+    // Stage 1 — both queries only need projectId, so fan them out in
+    // parallel. Was sequential before; saves ~one RTT on every project
+    // switch in the dashboard.
+    const [projectResult, projectTasksResult] = await Promise.all([
+      supabaseAdmin
+        .from("projects")
+        .select(
+          `
+          project_id,
+          project_code,
+          title,
+          description,
+          site_address,
+          status,
+          scheduled_start_datetime,
+          scheduled_end_datetime,
+          estimated_budget,
+          estimated_cost,
+          estimated_profit,
+          downpayment,
+          cancelled_at,
+          cancelled_from_status,
+          cancellation_phase,
+          cancellation_earned_cost,
+          cancellation_earned_revenue,
+          cancellation_balance,
+          cancellation_settled
+          `,
+        )
+        .eq("project_id", projectId)
+        .maybeSingle<ProjectRow>(),
+      supabaseAdmin
+        .from("project_task")
+        .select("project_task_id, project_id, main_task_id")
+        .eq("project_id", projectId)
+        .returns<ProjectTaskRow[]>(),
+    ]);
+
+    const { data: project, error: projectError } = projectResult;
+    const { data: projectTasks, error: projectTasksError } = projectTasksResult;
 
     if (projectError) {
       return NextResponse.json(
@@ -230,12 +266,6 @@ export async function GET(request: Request) {
     if (!project) {
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
-
-    const { data: projectTasks, error: projectTasksError } = await supabaseAdmin
-      .from("project_task")
-      .select("project_task_id, project_id, main_task_id")
-      .eq("project_id", projectId)
-      .returns<ProjectTaskRow[]>();
 
     if (projectTasksError) {
       return NextResponse.json(
@@ -255,11 +285,60 @@ export async function GET(request: Request) {
       (projectTasks ?? []).map((row) => row.main_task_id),
     );
 
-    const { data: mainTasks, error: mainTasksError } = await supabaseAdmin
-      .from("main_task")
-      .select("main_task_id, name, sort_order:default_sort_order")
-      .in("main_task_id", mainTaskIds)
-      .returns<MainTaskRow[]>();
+    // Stage 2 — main_task / project_sub_task / project_task_material all
+    // depend only on the IDs we just derived from project_task. Fan them
+    // out in parallel; previously this was three sequential round-trips.
+    const [mainTasksResult, projectSubTasksResult, projectTaskMaterialsResult] =
+      await Promise.all([
+        mainTaskIds.length > 0
+          ? supabaseAdmin
+              .from("main_task")
+              .select("main_task_id, name, sort_order:default_sort_order")
+              .in("main_task_id", mainTaskIds)
+              .returns<MainTaskRow[]>()
+          : Promise.resolve({ data: [] as MainTaskRow[], error: null }),
+        projectTaskIds.length > 0
+          ? supabaseAdmin
+              .from("project_sub_task")
+              .select(
+                `
+                project_sub_task_id,
+                project_task_id,
+                sub_task_id,
+                estimated_hours,
+                equipments_used,
+                status,
+                sort_order,
+                scheduled_start_datetime,
+                scheduled_end_datetime,
+                updated_at
+              `,
+              )
+              .in("project_task_id", projectTaskIds)
+              .returns<ProjectSubTaskRow[]>()
+          : Promise.resolve({ data: [] as ProjectSubTaskRow[], error: null }),
+        projectTaskIds.length > 0
+          ? supabaseAdmin
+              .from("project_task_material")
+              .select(
+                `
+                project_task_material_id,
+                project_task_id,
+                material_id,
+                estimated_quantity,
+                estimated_cost
+              `,
+              )
+              .in("project_task_id", projectTaskIds)
+              .returns<ProjectTaskMaterialRow[]>()
+          : Promise.resolve({ data: [] as ProjectTaskMaterialRow[], error: null }),
+      ]);
+
+    const { data: mainTasks, error: mainTasksError } = mainTasksResult;
+    const { data: projectSubTasks, error: projectSubTasksError } =
+      projectSubTasksResult;
+    const { data: projectTaskMaterials, error: projectTaskMaterialsError } =
+      projectTaskMaterialsResult;
 
     if (mainTasksError) {
       return NextResponse.json(
@@ -271,25 +350,6 @@ export async function GET(request: Request) {
       );
     }
 
-    const { data: projectSubTasks, error: projectSubTasksError } = await supabaseAdmin
-      .from("project_sub_task")
-      .select(
-        `
-        project_sub_task_id,
-        project_task_id,
-        sub_task_id,
-        estimated_hours,
-        equipments_used,
-        status,
-        sort_order,
-        scheduled_start_datetime,
-        scheduled_end_datetime,
-        updated_at
-      `,
-      )
-      .in("project_task_id", projectTaskIds)
-      .returns<ProjectSubTaskRow[]>();
-
     if (projectSubTasksError) {
       return NextResponse.json(
         {
@@ -299,69 +359,6 @@ export async function GET(request: Request) {
         { status: 500 },
       );
     }
-
-    let nextProjectStatus = project.status;
-
-    if (
-      canMoveProjectToReview(project.status) &&
-      (projectSubTasks ?? []).length > 0 &&
-      !(projectSubTasks ?? []).some((row) => !isFinishedSubTaskStatus(row.status))
-    ) {
-      nextProjectStatus = "review_pending";
-
-      const { error: reviewStatusError } = await supabaseAdmin
-        .from("projects")
-        .update({
-          status: nextProjectStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("project_id", project.project_id);
-
-      if (reviewStatusError) {
-        return NextResponse.json(
-          {
-            error: "Failed to move project to review.",
-            details: reviewStatusError.message,
-          },
-          { status: 500 },
-        );
-      }
-    }
-
-    const subTaskIds = uniqueStrings(
-      (projectSubTasks ?? []).map((row) => row.sub_task_id),
-    );
-
-    const { data: subTasks, error: subTasksError } = await supabaseAdmin
-      .from("sub_task")
-      .select("sub_task_id, description")
-      .in("sub_task_id", subTaskIds)
-      .returns<SubTaskRow[]>();
-
-    if (subTasksError) {
-      return NextResponse.json(
-        {
-          error: "Failed to load sub tasks.",
-          details: subTasksError.message,
-        },
-        { status: 500 },
-      );
-    }
-
-    const { data: projectTaskMaterials, error: projectTaskMaterialsError } =
-      await supabaseAdmin
-        .from("project_task_material")
-        .select(
-          `
-          project_task_material_id,
-          project_task_id,
-          material_id,
-          estimated_quantity,
-          estimated_cost
-        `,
-        )
-        .in("project_task_id", projectTaskIds)
-        .returns<ProjectTaskMaterialRow[]>();
 
     if (projectTaskMaterialsError) {
       return NextResponse.json(
@@ -373,31 +370,42 @@ export async function GET(request: Request) {
       );
     }
 
+    // The "all subtasks finished -> bump project to review" transition
+    // used to block this response. Fire it without await — the client
+    // gets the in-memory updated status in the response, and the DB
+    // write reaches Supabase asynchronously. Errors land in the server
+    // log but don't fail the read.
+    let nextProjectStatus = project.status;
+    if (
+      canMoveProjectToReview(project.status) &&
+      (projectSubTasks ?? []).length > 0 &&
+      !(projectSubTasks ?? []).some((row) => !isFinishedSubTaskStatus(row.status))
+    ) {
+      nextProjectStatus = "review_pending";
+      void supabaseAdmin
+        .from("projects")
+        .update({
+          status: nextProjectStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("project_id", project.project_id)
+        .then(({ error }) => {
+          if (error) {
+            console.error(
+              "[getProjectOverview] background review-status bump failed:",
+              error.message,
+            );
+          }
+        });
+    }
+
+    const subTaskIds = uniqueStrings(
+      (projectSubTasks ?? []).map((row) => row.sub_task_id),
+    );
+
     const materialIds = uniqueStrings(
       (projectTaskMaterials ?? []).map((row) => row.material_id),
     );
-
-    let materials: MaterialRow[] = [];
-
-    if (materialIds.length > 0) {
-      const { data: materialsData, error: materialsError } = await supabaseAdmin
-        .from("materials")
-        .select("material_id, name, unit, unit_cost")
-        .in("material_id", materialIds)
-        .returns<MaterialRow[]>();
-
-      if (materialsError) {
-        return NextResponse.json(
-          {
-            error: "Failed to load material catalog.",
-            details: materialsError.message,
-          },
-          { status: 500 },
-        );
-      }
-
-      materials = materialsData ?? [];
-    }
 
     const equipmentIds = collectEquipmentUsageIds(
       (projectSubTasks ?? []).map((row) => row.equipments_used),
@@ -407,92 +415,134 @@ export async function GET(request: Request) {
       (projectSubTasks ?? []).map((row) => row.equipments_used),
     );
 
-    let equipmentById = new Map<string, EquipmentRow>();
-    let equipmentByName = new Map<string, EquipmentRow>();
-
-    if (equipmentIds.length > 0) {
-      const { data: equipmentRowsById, error: equipmentByIdError } =
-        await supabaseAdmin
-          .from("equipment")
-          .select("equipment_id, name")
-          .in("equipment_id", equipmentIds)
-          .returns<EquipmentRow[]>();
-
-      if (equipmentByIdError) {
-        return NextResponse.json(
-          {
-            error: "Failed to load equipment catalog.",
-            details: equipmentByIdError.message,
-          },
-          { status: 500 },
-        );
-      }
-
-      equipmentById = new Map(
-        (equipmentRowsById ?? []).map((row) => [row.equipment_id, row]),
-      );
-    }
-
-    if (equipmentNames.length > 0) {
-      const { data: equipmentRowsByName, error: equipmentByNameError } =
-        await supabaseAdmin
-          .from("equipment")
-          .select("equipment_id, name")
-          .in("name", equipmentNames)
-          .returns<EquipmentRow[]>();
-
-      if (equipmentByNameError) {
-        return NextResponse.json(
-          {
-            error: "Failed to load equipment catalog.",
-            details: equipmentByNameError.message,
-          },
-          { status: 500 },
-        );
-      }
-
-      equipmentByName = new Map(
-        (equipmentRowsByName ?? [])
-          .filter((row) => Boolean(row.name))
-          .map((row) => [String(row.name), row]),
-      );
-    }
-
     const projectSubTaskIds = uniqueStrings(
       (projectSubTasks ?? []).map((row) => row.project_sub_task_id),
     );
 
-    const { data: projectSubTaskStaff, error: projectSubTaskStaffError } =
-      await supabaseAdmin
-        .from("project_sub_task_staff")
-        .select(
-          `
-          project_sub_task_staff_id,
-          project_sub_task_id,
-          user_id,
-          role,
-          assignment_status
-        `,
-        )
-        .in("project_sub_task_id", projectSubTaskIds)
-        .returns<ProjectSubTaskStaffRow[]>();
+    // Stage 3 — sub_task / materials / equipment-by-id / equipment-by-name
+    // / project_sub_task_staff are all independent of each other; only
+    // the project_sub_task_staff -> users hop has to wait. Fire them
+    // in parallel so we cover all five round-trips in one wall-clock
+    // window instead of five.
+    const [
+      subTasksResult,
+      materialsResult,
+      equipmentByIdResult,
+      equipmentByNameResult,
+      projectSubTaskStaffResult,
+    ] = await Promise.all([
+      subTaskIds.length > 0
+        ? supabaseAdmin
+            .from("sub_task")
+            .select("sub_task_id, description")
+            .in("sub_task_id", subTaskIds)
+            .returns<SubTaskRow[]>()
+        : Promise.resolve({ data: [] as SubTaskRow[], error: null }),
+      materialIds.length > 0
+        ? supabaseAdmin
+            .from("materials")
+            .select("material_id, name, unit, unit_cost")
+            .in("material_id", materialIds)
+            .returns<MaterialRow[]>()
+        : Promise.resolve({ data: [] as MaterialRow[], error: null }),
+      equipmentIds.length > 0
+        ? supabaseAdmin
+            .from("equipment")
+            .select("equipment_id, name")
+            .in("equipment_id", equipmentIds)
+            .returns<EquipmentRow[]>()
+        : Promise.resolve({ data: [] as EquipmentRow[], error: null }),
+      equipmentNames.length > 0
+        ? supabaseAdmin
+            .from("equipment")
+            .select("equipment_id, name")
+            .in("name", equipmentNames)
+            .returns<EquipmentRow[]>()
+        : Promise.resolve({ data: [] as EquipmentRow[], error: null }),
+      projectSubTaskIds.length > 0
+        ? supabaseAdmin
+            .from("project_sub_task_staff")
+            .select(
+              `
+              project_sub_task_staff_id,
+              project_sub_task_id,
+              user_id,
+              role,
+              assignment_status
+            `,
+            )
+            .in("project_sub_task_id", projectSubTaskIds)
+            .returns<ProjectSubTaskStaffRow[]>()
+        : Promise.resolve({
+            data: [] as ProjectSubTaskStaffRow[],
+            error: null,
+          }),
+    ]);
 
-    if (projectSubTaskStaffError) {
+    if (subTasksResult.error) {
+      return NextResponse.json(
+        {
+          error: "Failed to load sub tasks.",
+          details: subTasksResult.error.message,
+        },
+        { status: 500 },
+      );
+    }
+    if (materialsResult.error) {
+      return NextResponse.json(
+        {
+          error: "Failed to load material catalog.",
+          details: materialsResult.error.message,
+        },
+        { status: 500 },
+      );
+    }
+    if (equipmentByIdResult.error) {
+      return NextResponse.json(
+        {
+          error: "Failed to load equipment catalog.",
+          details: equipmentByIdResult.error.message,
+        },
+        { status: 500 },
+      );
+    }
+    if (equipmentByNameResult.error) {
+      return NextResponse.json(
+        {
+          error: "Failed to load equipment catalog.",
+          details: equipmentByNameResult.error.message,
+        },
+        { status: 500 },
+      );
+    }
+    if (projectSubTaskStaffResult.error) {
       return NextResponse.json(
         {
           error: "Failed to load project sub task staff.",
-          details: projectSubTaskStaffError.message,
+          details: projectSubTaskStaffResult.error.message,
         },
         { status: 500 },
       );
     }
 
+    const subTasks = subTasksResult.data ?? [];
+    const materials = materialsResult.data ?? [];
+    const equipmentById = new Map<string, EquipmentRow>(
+      (equipmentByIdResult.data ?? []).map((row) => [row.equipment_id, row]),
+    );
+    const equipmentByName = new Map<string, EquipmentRow>(
+      (equipmentByNameResult.data ?? [])
+        .filter((row) => Boolean(row.name))
+        .map((row) => [String(row.name), row]),
+    );
+    const projectSubTaskStaff = projectSubTaskStaffResult.data ?? [];
+
     const userIds = uniqueStrings(
-      (projectSubTaskStaff ?? []).map((row) => row.user_id),
+      projectSubTaskStaff.map((row) => row.user_id),
     );
 
+    // Stage 4 — users is the only query that has to wait for staff.
     let users: UserRow[] = [];
-
     if (userIds.length > 0) {
       const { data: usersData, error: usersError } = await supabaseAdmin
         .from("users")

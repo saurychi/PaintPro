@@ -117,11 +117,16 @@ export async function POST(req: Request) {
         const { data: scheduledRows, error: scheduledRowsError } = await supabaseAdmin
           .from("project_sub_task")
           .select(
-            "project_sub_task_id, scheduled_start_datetime, scheduled_end_datetime"
+            "project_sub_task_id, project_task_id, status, scheduled_start_datetime, scheduled_end_datetime"
           )
           .in("project_sub_task_id", projectSubTaskIds)
           .not("scheduled_start_datetime", "is", null)
           .not("scheduled_end_datetime", "is", null)
+          // Cancelled subtasks shouldn't block the new schedule even if
+          // their datetime columns are still set (defensive — the cancel
+          // route also nulls these out, but old data may not have been
+          // migrated).
+          .neq("status", "cancelled")
           .returns<ExistingScheduledRow[]>()
 
         if (scheduledRowsError) {
@@ -134,8 +139,93 @@ export async function POST(req: Request) {
           )
         }
 
+        // Resolve each subtask to its parent project so we can drop blocks
+        // belonging to cancelled or completed projects. Without this filter
+        // a cancelled project's stale schedule rows phantom-block staff.
+        const projectTaskIds = [
+          ...new Set(
+            (scheduledRows ?? [])
+              .map((row) => (row as { project_task_id?: string }).project_task_id)
+              .filter((id): id is string => Boolean(id))
+          ),
+        ]
+
+        const inactiveSubTaskIds = new Set<string>()
+
+        if (projectTaskIds.length > 0) {
+          const { data: projectTaskRows, error: projectTaskError } =
+            await supabaseAdmin
+              .from("project_task")
+              .select("project_task_id, project_id")
+              .in("project_task_id", projectTaskIds)
+
+          if (projectTaskError) {
+            return NextResponse.json(
+              {
+                error: "Failed to resolve subtask projects.",
+                details: projectTaskError.message,
+              },
+              { status: 500 }
+            )
+          }
+
+          const projectIdsForBlocks = [
+            ...new Set(
+              (projectTaskRows ?? [])
+                .map((row) => row.project_id as string)
+                .filter(Boolean)
+            ),
+          ]
+
+          if (projectIdsForBlocks.length > 0) {
+            const { data: projectRows, error: projectStatusError } =
+              await supabaseAdmin
+                .from("projects")
+                .select("project_id, status")
+                .in("project_id", projectIdsForBlocks)
+
+            if (projectStatusError) {
+              return NextResponse.json(
+                {
+                  error: "Failed to resolve project statuses.",
+                  details: projectStatusError.message,
+                },
+                { status: 500 }
+              )
+            }
+
+            const inactiveProjectIds = new Set(
+              (projectRows ?? [])
+                .filter(
+                  (row) =>
+                    String(row.status ?? "").toLowerCase() === "cancelled" ||
+                    String(row.status ?? "").toLowerCase() === "completed"
+                )
+                .map((row) => row.project_id as string)
+            )
+
+            const taskToProject = new Map(
+              (projectTaskRows ?? []).map((row) => [
+                row.project_task_id as string,
+                row.project_id as string,
+              ])
+            )
+
+            for (const row of scheduledRows ?? []) {
+              const projectIdForRow = taskToProject.get(
+                (row as { project_task_id?: string }).project_task_id ?? ""
+              )
+              if (projectIdForRow && inactiveProjectIds.has(projectIdForRow)) {
+                inactiveSubTaskIds.add(row.project_sub_task_id)
+              }
+            }
+          }
+        }
+
         const scheduledRowMap = new Map(
-          (scheduledRows ?? []).map((row) => [row.project_sub_task_id, row])
+          (scheduledRows ?? [])
+            .filter((row) => !inactiveSubTaskIds.has(row.project_sub_task_id))
+            .map((row) => [row.project_sub_task_id, row])
         )
 
         existingBlocks = (assignments ?? [])
