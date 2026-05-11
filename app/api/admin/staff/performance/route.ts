@@ -31,21 +31,48 @@ const METRIC_KEYS = [
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const userId = searchParams.get("userId")?.trim()
+  // Optional date-range filter applied to employee_performance rows
+  // via reviewed_at. When start/end are omitted, the endpoint
+  // returns aggregated results across all reviews (lifetime view).
+  const startParam = searchParams.get("start")?.trim() || null
+  const endParam = searchParams.get("end")?.trim() || null
 
   if (!userId) return NextResponse.json({ error: "Missing userId." }, { status: 400 })
 
   try {
-    const { data, error } = await supabaseAdmin
+    // Pull review rows and the user's current hourly wage in parallel.
+    // hourly_wage feeds the Payroll panel even when no reviews exist,
+    // so it's fetched regardless of the performance result.
+    let perfQuery = supabaseAdmin
       .from("employee_performance")
-      .select("work_quality, time_efficiency, teamwork, work_ethic, total_estimated_hours")
+      .select(
+        "work_quality, time_efficiency, teamwork, work_ethic, total_estimated_hours, salary_amount, hourly_wage, reviewed_at",
+      )
       .eq("user_id", userId)
 
-    if (error || !data || data.length === 0) {
+    if (startParam) perfQuery = perfQuery.gte("reviewed_at", startParam)
+    if (endParam) perfQuery = perfQuery.lte("reviewed_at", endParam)
+
+    const [perfRes, userRes] = await Promise.all([
+      perfQuery,
+      supabaseAdmin
+        .from("users")
+        .select("hourly_wage")
+        .eq("id", userId)
+        .maybeSingle(),
+    ])
+
+    const hourlyWage = Number(userRes.data?.hourly_wage ?? 0)
+
+    const data = perfRes.data
+    if (perfRes.error || !data || data.length === 0) {
       return NextResponse.json({
         hasData: false,
         cards: METRIC_KEYS.map(({ key, metric }) => ({ key, metric, rating: null, score: 0 })),
         projectCount: 0,
         totalHours: 0,
+        totalSalary: 0,
+        hourlyWage,
       })
     }
 
@@ -56,13 +83,16 @@ export async function GET(req: Request) {
       return { key, metric, rating, score }
     })
 
-    const totalHours = data.reduce((sum, r) => sum + (r.total_estimated_hours ?? 0), 0)
+    const totalHours = data.reduce((sum, r) => sum + (Number(r.total_estimated_hours) || 0), 0)
+    const totalSalary = data.reduce((sum, r) => sum + (Number(r.salary_amount) || 0), 0)
 
     return NextResponse.json({
       hasData: true,
       cards,
       projectCount: data.length,
       totalHours: Math.round(totalHours * 10) / 10,
+      totalSalary: Math.round(totalSalary * 100) / 100,
+      hourlyWage,
     })
   } catch {
     return NextResponse.json({
@@ -70,6 +100,8 @@ export async function GET(req: Request) {
       cards: METRIC_KEYS.map(({ key, metric }) => ({ key, metric, rating: null, score: 0 })),
       projectCount: 0,
       totalHours: 0,
+      totalSalary: 0,
+      hourlyWage: 0,
     })
   }
 }
