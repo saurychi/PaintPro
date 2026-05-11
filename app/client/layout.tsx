@@ -22,6 +22,7 @@ type ProjectAccessRow = {
   project_code: string | null
   client_id: string | null
   status: string | null
+  cancellation_phase: string | null
 }
 
 type ClientProfileRow = {
@@ -49,17 +50,27 @@ async function getProjectAccessSidebarUser(
 ): Promise<SidebarUser | null> {
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
-    .select("project_id, project_code, client_id, status")
+    .select(
+      "project_id, project_code, client_id, status, cancellation_phase",
+    )
     .eq("project_id", projectId)
     .maybeSingle<ProjectAccessRow>()
 
   if (projectError) throw projectError
   if (!project) return null
 
-  // Completed projects revoke code-based client access — same gate as
-  // /api/auth/client-access. The caller redirects to /auth/signin when
-  // this returns null.
-  if (String(project.status ?? "").trim().toLowerCase() === "completed") {
+  // Terminal projects revoke code-based client access — same gate as
+  // /api/auth/client-access. "Terminal" = the work is fully closed out:
+  // either status flipped to "completed" or it was cancelled and the
+  // post-cancel wrap-up reached cancellation_phase "done". Either way
+  // there's no further client-facing action left, so we bounce them
+  // back to sign-in.
+  const status = String(project.status ?? "").trim().toLowerCase()
+  const phase = String(project.cancellation_phase ?? "").trim().toLowerCase()
+  if (
+    status === "completed" ||
+    (status === "cancelled" && phase === "done")
+  ) {
     return null
   }
 
@@ -121,10 +132,12 @@ export default async function ClientLayout({ children }: { children: ReactNode }
     if (!clientProjectId) redirect("/auth/signin")
     const guestSidebarUser = await getProjectAccessSidebarUser(clientProjectId)
     if (!guestSidebarUser) {
-      // Project is missing or completed — drop the cookie so the
-      // client lands cleanly on the sign-in page instead of bouncing
-      // back through here on the next request.
-      cookieStore.delete(CLIENT_COOKIE)
+      // Project is missing or terminal — bounce the client to sign-in.
+      // We can't drop the cookie from here (Next 16 only allows cookie
+      // mutation in Server Actions or Route Handlers), but that's
+      // fine: the gate above re-runs on every /client/* request, and
+      // the client-side terminal-status watcher already DELETEs the
+      // cookie via /api/auth/client-access when it fires live.
       redirect("/auth/signin")
     }
     return (
