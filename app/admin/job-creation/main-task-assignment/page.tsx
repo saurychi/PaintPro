@@ -328,6 +328,8 @@ export default function MainTaskAssignment() {
   async function handleCreateTask(payload: {
     name: string;
     sortOrder: string;
+    surfaceKey: string;
+    formulaTemplateId: string;
     subTasks: {
       description: string;
       sortOrder: string;
@@ -356,13 +358,55 @@ export default function MainTaskAssignment() {
       name: data.mainTask.name,
     };
 
+    // Link the chosen formula via material_estimation_rules. Mirrors
+    // the settings-page Add Main Task flow: main task is created
+    // first, formula is linked after. If linking fails we keep the
+    // main task and surface a warning so the admin can re-link from
+    // Edit Estimations rather than losing the whole creation.
+    let linkSummary = `Surface: ${payload.surfaceKey}`;
+    try {
+      const ruleResponse = await fetch(
+        "/api/planning/material-estimation-rule",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mainTaskId: newTask.id,
+            formulaTemplateId: payload.formulaTemplateId,
+            materialName: payload.name,
+            minimumQuantity: 0,
+            isActive: true,
+          }),
+        },
+      );
+      const ruleBody = await ruleResponse.json().catch(() => null);
+      if (!ruleResponse.ok) {
+        throw new Error(
+          [ruleBody?.error, ruleBody?.details]
+            .filter(Boolean)
+            .join(" - ") || "Failed to link formula.",
+        );
+      }
+      linkSummary = `Linked to formula. Surface: ${payload.surfaceKey}.`;
+    } catch (linkError) {
+      const message =
+        linkError instanceof Error
+          ? linkError.message
+          : "Could not attach the selected formula.";
+      toast.error("Formula link failed.", {
+        description: `${message} The main task was still created. Wire the formula manually from Edit Estimations.`,
+      });
+    }
+
     pushSelectedHistory();
     setSelected((prev) => {
       if (prev.some((item) => item.id === newTask.id)) return prev;
       return [...prev, newTask];
     });
     setIsDirty(true); markWizardDirty(projectId);
-    toast.success(`Task "${newTask.name}" created.`);
+    toast.success(`Task "${newTask.name}" created.`, {
+      description: linkSummary,
+    });
     loadAllMainTasks({ silent: true });
   }
 
