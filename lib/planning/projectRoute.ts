@@ -15,7 +15,9 @@
 //     (dashboard auto-opens FinalPaymentModal — admin's next action is
 //     receiving payment, not editing the invoice)
 //   • completed → /admin/report/report-list/<id> (per-project report)
-//   • cancelled → /admin/projects (the list view)
+//   • cancelled → /admin/report/report-list/<id> (per-project report —
+//     cancelled projects are archive-state too, so the report view is
+//     the right landing instead of bouncing back to the list)
 
 export type ProjectStatusKey =
   | "main_task_pending"
@@ -125,8 +127,8 @@ export function getProjectRoute(
       // their JobProgressCard pre-selected so the admin can advance them.
       return `/admin?projectId=${projectId}`;
     case "completed":
-      return `/admin/report/report-list/${projectId}`;
     case "cancelled":
+      return `/admin/report/report-list/${projectId}`;
     case "unknown":
     default:
       return `/admin/projects`;
