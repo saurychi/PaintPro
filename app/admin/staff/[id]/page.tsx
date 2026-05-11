@@ -148,23 +148,43 @@ function formatPHP(amount: number): string {
   }).format(Number.isFinite(amount) ? amount : 0)
 }
 
-type StaffViewRange = "daily" | "weekly" | "yearly"
+type StaffViewRange = "daily" | "weekly" | "monthly" | "yearly"
 
 const STAFF_VIEW_LABEL: Record<StaffViewRange, string> = {
   daily: "Daily",
   weekly: "Weekly",
+  monthly: "Monthly",
   yearly: "Yearly",
+}
+
+const MONTH_LABELS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const
+
+// Year picker starts at 2025 (project go-live) and grows with the
+// calendar so older years stay selectable as time passes.
+const YEAR_PICKER_START = 2025
+
+function getYearOptions(today = new Date()): number[] {
+  const end = Math.max(today.getFullYear(), YEAR_PICKER_START)
+  const years: number[] = []
+  for (let y = end; y >= YEAR_PICKER_START; y--) years.push(y)
+  return years
 }
 
 // Calendar-period boundaries for the date filter. Daily is the
 // current calendar day, weekly is Monday through Sunday of the
-// current week, yearly is January 1 through December 31 of the
-// current year. All returned as ISO strings so we can pass them
-// straight into the API query params.
-function getStaffViewRange(view: StaffViewRange, today = new Date()): {
-  start: string
-  end: string
-} {
+// current week, monthly is the 1st through the last day of the
+// selected month/year, and yearly is January 1 through December 31
+// of the selected year. All returned as ISO strings so we can pass
+// them straight into the API query params.
+function getStaffViewRange(
+  view: StaffViewRange,
+  month: number,
+  year: number,
+  today = new Date(),
+): { start: string; end: string } {
   const startOfToday = new Date(today)
   startOfToday.setHours(0, 0, 0, 0)
   const endOfToday = new Date(today)
@@ -185,9 +205,16 @@ function getStaffViewRange(view: StaffViewRange, today = new Date()): {
     return { start: monday.toISOString(), end: sunday.toISOString() }
   }
 
+  if (view === "monthly") {
+    const monthStart = new Date(year, month, 1, 0, 0, 0, 0)
+    // Day 0 of the next month = last day of this month.
+    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999)
+    return { start: monthStart.toISOString(), end: monthEnd.toISOString() }
+  }
+
   // yearly
-  const jan1 = new Date(today.getFullYear(), 0, 1, 0, 0, 0, 0)
-  const dec31 = new Date(today.getFullYear(), 11, 31, 23, 59, 59, 999)
+  const jan1 = new Date(year, 0, 1, 0, 0, 0, 0)
+  const dec31 = new Date(year, 11, 31, 23, 59, 59, 999)
   return { start: jan1.toISOString(), end: dec31.toISOString() }
 }
 
@@ -233,13 +260,23 @@ export default function StaffDetailPage() {
   }, [staffId])
 
   const [staff, setStaff] = useState<Staff | null>(cachedStaff)
+  // Performance, Hours, and Payroll all read the same /performance
+  // payload but each filters by its own date range, so they're held
+  // in separate state slots and fetched independently.
   const [performance, setPerformance] = useState<PerformanceData | null>(null)
+  const [hours, setHours] = useState<PerformanceData | null>(null)
+  const [payroll, setPayroll] = useState<PerformanceData | null>(null)
   const [timeline, setTimeline] = useState<ProjectTimelineEntry[] | null>(null)
   // Only show the full-page spinner when we have no cached data and
   // are waiting on the first network response. If we already have
   // cached data we render immediately and refresh silently.
   const [loadingStaff, setLoadingStaff] = useState(!cachedStaff)
-  const [loadingWork, setLoadingWork] = useState(true)
+  // Independent loading flags so changing one section's range doesn't
+  // flash a spinner in the other section.
+  const [loadingPerformance, setLoadingPerformance] = useState(true)
+  const [loadingHours, setLoadingHours] = useState(true)
+  const [loadingPayroll, setLoadingPayroll] = useState(true)
+  const [loadingTimeline, setLoadingTimeline] = useState(true)
   const [staffError, setStaffError] = useState<string | null>(null)
 
   const [reportProject, setReportProject] = useState<ProjectTimelineEntry | null>(null)
@@ -251,11 +288,47 @@ export default function StaffDetailPage() {
   // automatically when this page unmounts on navigation.
   const [navigatingBack, setNavigatingBack] = useState(false)
 
-  // Date-range filter applied to performance and timeline. Defaults
-  // to weekly so the page lands with a useful slice instead of all
-  // of an employee's history at once.
-  const [view, setView] = useState<StaffViewRange>("weekly")
-  const viewRange = useMemo(() => getStaffViewRange(view), [view])
+  // Date-range filters scoped per section so the admin can compare
+  // (eg weekly performance vs yearly payroll). Each card filters
+  // independently. The month/year picks only matter when view is
+  // "monthly" or "yearly" respectively, but we keep them in state
+  // regardless so the secondary dropdown remembers the user's last
+  // selection between view switches.
+  const now = useMemo(() => new Date(), [])
+  const yearOptions = useMemo(() => getYearOptions(now), [now])
+
+  const [performanceView, setPerformanceView] = useState<StaffViewRange>("weekly")
+  const [performanceMonth, setPerformanceMonth] = useState(() => now.getMonth())
+  const [performanceYear, setPerformanceYear] = useState(() => now.getFullYear())
+
+  const [hoursView, setHoursView] = useState<StaffViewRange>("weekly")
+  const [hoursMonth, setHoursMonth] = useState(() => now.getMonth())
+  const [hoursYear, setHoursYear] = useState(() => now.getFullYear())
+
+  const [payrollView, setPayrollView] = useState<StaffViewRange>("weekly")
+  const [payrollMonth, setPayrollMonth] = useState(() => now.getMonth())
+  const [payrollYear, setPayrollYear] = useState(() => now.getFullYear())
+
+  const [timelineView, setTimelineView] = useState<StaffViewRange>("weekly")
+  const [timelineMonth, setTimelineMonth] = useState(() => now.getMonth())
+  const [timelineYear, setTimelineYear] = useState(() => now.getFullYear())
+
+  const performanceRange = useMemo(
+    () => getStaffViewRange(performanceView, performanceMonth, performanceYear),
+    [performanceView, performanceMonth, performanceYear],
+  )
+  const hoursRange = useMemo(
+    () => getStaffViewRange(hoursView, hoursMonth, hoursYear),
+    [hoursView, hoursMonth, hoursYear],
+  )
+  const payrollRange = useMemo(
+    () => getStaffViewRange(payrollView, payrollMonth, payrollYear),
+    [payrollView, payrollMonth, payrollYear],
+  )
+  const timelineRange = useMemo(
+    () => getStaffViewRange(timelineView, timelineMonth, timelineYear),
+    [timelineView, timelineMonth, timelineYear],
+  )
 
   function handleBack() {
     if (navigatingBack) return
@@ -305,32 +378,113 @@ export default function StaffDetailPage() {
     }
   }, [staffId, cachedStaff])
 
-  const fetchWork = useCallback(async () => {
+  // Performance, Hours, and Payroll each call /performance with
+  // their own range. The endpoint is cheap (one filtered query +
+  // a single user row), so issuing three parallel calls is fine
+  // and lets each card filter independently.
+  const fetchPerformance = useCallback(async () => {
     if (!staffId) return
-    setLoadingWork(true)
+    setLoadingPerformance(true)
     try {
       const params = new URLSearchParams({
         userId: staffId,
-        start: viewRange.start,
-        end: viewRange.end,
+        start: performanceRange.start,
+        end: performanceRange.end,
       })
-      const [perfJson, timelineJson] = await Promise.all([
-        fetch(`/api/admin/staff/performance?${params.toString()}`, { cache: "no-store" }).then((r) => r.json()),
-        fetch(`/api/staff/timeline?${params.toString()}`, { cache: "no-store" }).then((r) => r.json()),
-      ])
-      setPerformance(perfJson ?? { hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 })
-      setTimeline(timelineJson?.projects ?? [])
+      const res = await fetch(
+        `/api/admin/staff/performance?${params.toString()}`,
+        { cache: "no-store" },
+      )
+      const json = await res.json()
+      setPerformance(
+        json ?? { hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 },
+      )
     } catch (e) {
-      console.error("Failed to fetch work data:", e)
+      console.error("Failed to fetch performance:", e)
       setPerformance({ hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 })
+    } finally {
+      setLoadingPerformance(false)
+    }
+  }, [staffId, performanceRange.start, performanceRange.end])
+
+  const fetchHours = useCallback(async () => {
+    if (!staffId) return
+    setLoadingHours(true)
+    try {
+      const params = new URLSearchParams({
+        userId: staffId,
+        start: hoursRange.start,
+        end: hoursRange.end,
+      })
+      const res = await fetch(
+        `/api/admin/staff/performance?${params.toString()}`,
+        { cache: "no-store" },
+      )
+      const json = await res.json()
+      setHours(
+        json ?? { hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 },
+      )
+    } catch (e) {
+      console.error("Failed to fetch hours:", e)
+      setHours({ hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 })
+    } finally {
+      setLoadingHours(false)
+    }
+  }, [staffId, hoursRange.start, hoursRange.end])
+
+  const fetchPayroll = useCallback(async () => {
+    if (!staffId) return
+    setLoadingPayroll(true)
+    try {
+      const params = new URLSearchParams({
+        userId: staffId,
+        start: payrollRange.start,
+        end: payrollRange.end,
+      })
+      const res = await fetch(
+        `/api/admin/staff/performance?${params.toString()}`,
+        { cache: "no-store" },
+      )
+      const json = await res.json()
+      setPayroll(
+        json ?? { hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 },
+      )
+    } catch (e) {
+      console.error("Failed to fetch payroll:", e)
+      setPayroll({ hasData: false, cards: [], projectCount: 0, totalHours: 0, totalSalary: 0, hourlyWage: 0 })
+    } finally {
+      setLoadingPayroll(false)
+    }
+  }, [staffId, payrollRange.start, payrollRange.end])
+
+  const fetchTimeline = useCallback(async () => {
+    if (!staffId) return
+    setLoadingTimeline(true)
+    try {
+      const params = new URLSearchParams({
+        userId: staffId,
+        start: timelineRange.start,
+        end: timelineRange.end,
+      })
+      const res = await fetch(
+        `/api/staff/timeline?${params.toString()}`,
+        { cache: "no-store" },
+      )
+      const json = await res.json()
+      setTimeline(json?.projects ?? [])
+    } catch (e) {
+      console.error("Failed to fetch timeline:", e)
       setTimeline([])
     } finally {
-      setLoadingWork(false)
+      setLoadingTimeline(false)
     }
-  }, [staffId, viewRange.start, viewRange.end])
+  }, [staffId, timelineRange.start, timelineRange.end])
 
   useEffect(() => { fetchStaff() }, [fetchStaff])
-  useEffect(() => { fetchWork() }, [fetchWork])
+  useEffect(() => { fetchPerformance() }, [fetchPerformance])
+  useEffect(() => { fetchHours() }, [fetchHours])
+  useEffect(() => { fetchPayroll() }, [fetchPayroll])
+  useEffect(() => { fetchTimeline() }, [fetchTimeline])
 
   const specialties = useMemo(
     () =>
@@ -417,37 +571,18 @@ export default function StaffDetailPage() {
 
       <div className="mt-3 shrink-0 flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-900">{staff.name}</h1>
-        <div className="flex items-center gap-2">
-          {/* Date range filter for Performance, Hours, Payroll, and
-              Timeline. Re-fetches both /performance and /timeline
-              when changed. Defaults to weekly. */}
-          <div className="relative">
-            <select
-              value={view}
-              onChange={(e) => setView(e.target.value as StaffViewRange)}
-              className="h-9 appearance-none rounded-md border border-gray-200 bg-white pl-3 pr-8 text-sm font-semibold text-gray-700 shadow-sm outline-none transition-colors hover:border-[#00c065]/40 focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
-            >
-              {(Object.keys(STAFF_VIEW_LABEL) as StaffViewRange[]).map((option) => (
-                <option key={option} value={option}>
-                  {STAFF_VIEW_LABEL[option]}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-          </div>
-          <button
-            onClick={handleMessage}
-            disabled={!currentUserId || messaging || isArchived}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {messaging ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <MessageSquare className="h-4 w-4" />
-            )}
-            Message
-          </button>
-        </div>
+        <button
+          onClick={handleMessage}
+          disabled={!currentUserId || messaging || isArchived}
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {messaging ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MessageSquare className="h-4 w-4" />
+          )}
+          Message
+        </button>
       </div>
 
       {/* Profile card. Shrinks to its content height; not part of the
@@ -521,12 +656,23 @@ export default function StaffDetailPage() {
             Hours and Payroll are compact KPI cards. */}
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col rounded-md border border-gray-200 bg-white shadow-sm">
-            <div className="shrink-0 border-b border-gray-100 px-4 py-2.5">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Performance</div>
-              <p className="mt-0.5 text-xs text-gray-400">Average rating per metric.</p>
+            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2.5">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Performance</div>
+                <p className="mt-0.5 text-xs text-gray-400">Average rating per metric.</p>
+              </div>
+              <RangeSelect
+                view={performanceView}
+                onViewChange={setPerformanceView}
+                month={performanceMonth}
+                onMonthChange={setPerformanceMonth}
+                year={performanceYear}
+                onYearChange={setPerformanceYear}
+                yearOptions={yearOptions}
+              />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {loadingWork ? (
+              {loadingPerformance ? (
                 <div className="flex h-full items-center justify-center text-gray-400">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   <span className="text-xs">Loading performance...</span>
@@ -539,8 +685,19 @@ export default function StaffDetailPage() {
 
           <div className="grid shrink-0 grid-cols-2 gap-3">
             <div className="flex flex-col rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Hours</div>
-              {loadingWork ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Hours</div>
+                <RangeSelect
+                  view={hoursView}
+                  onViewChange={setHoursView}
+                  month={hoursMonth}
+                  onMonthChange={setHoursMonth}
+                  year={hoursYear}
+                  onYearChange={setHoursYear}
+                  yearOptions={yearOptions}
+                />
+              </div>
+              {loadingHours ? (
                 <div className="mt-2 flex items-center text-gray-400">
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   <span className="text-xs">Loading...</span>
@@ -548,20 +705,31 @@ export default function StaffDetailPage() {
               ) : (
                 <>
                   <p className="mt-1 text-2xl font-bold text-gray-900">
-                    {performance?.totalHours ?? 0}
+                    {hours?.totalHours ?? 0}
                     <span className="ml-1 text-sm font-semibold text-gray-500">h</span>
                   </p>
                   <p className="mt-1 text-[11px] text-gray-500">
-                    Across {performance?.projectCount ?? 0} reviewed{" "}
-                    {(performance?.projectCount ?? 0) === 1 ? "project" : "projects"}
+                    Across {hours?.projectCount ?? 0} reviewed{" "}
+                    {(hours?.projectCount ?? 0) === 1 ? "project" : "projects"}
                   </p>
                 </>
               )}
             </div>
 
             <div className="flex flex-col rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Payroll</div>
-              {loadingWork ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Payroll</div>
+                <RangeSelect
+                  view={payrollView}
+                  onViewChange={setPayrollView}
+                  month={payrollMonth}
+                  onMonthChange={setPayrollMonth}
+                  year={payrollYear}
+                  onYearChange={setPayrollYear}
+                  yearOptions={yearOptions}
+                />
+              </div>
+              {loadingPayroll ? (
                 <div className="mt-2 flex items-center text-gray-400">
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   <span className="text-xs">Loading...</span>
@@ -569,11 +737,11 @@ export default function StaffDetailPage() {
               ) : (
                 <>
                   <p className="mt-1 text-2xl font-bold text-gray-900">
-                    {formatPHP(performance?.totalSalary ?? 0)}
+                    {formatPHP(payroll?.totalSalary ?? 0)}
                   </p>
                   <p className="mt-1 text-[11px] text-gray-500">
-                    {(performance?.hourlyWage ?? 0) > 0
-                      ? `${formatPHP(performance?.hourlyWage ?? 0)} / hour`
+                    {(payroll?.hourlyWage ?? 0) > 0
+                      ? `${formatPHP(payroll?.hourlyWage ?? 0)} / hour`
                       : "No hourly rate set"}
                   </p>
                 </>
@@ -584,12 +752,23 @@ export default function StaffDetailPage() {
 
         {/* Right column: Work Timeline with internal scroll. */}
         <div className="flex min-h-0 flex-col rounded-md border border-gray-200 bg-white shadow-sm">
-          <div className="shrink-0 border-b border-gray-100 px-4 py-2.5">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Work Timeline</div>
-            <p className="mt-0.5 text-xs text-gray-400">Projects assigned to this employee.</p>
+          <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2.5">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Work Timeline</div>
+              <p className="mt-0.5 text-xs text-gray-400">Projects assigned to this employee.</p>
+            </div>
+            <RangeSelect
+              view={timelineView}
+              onViewChange={setTimelineView}
+              month={timelineMonth}
+              onMonthChange={setTimelineMonth}
+              year={timelineYear}
+              onYearChange={setTimelineYear}
+              yearOptions={yearOptions}
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {loadingWork ? (
+            {loadingTimeline ? (
               <div className="flex h-full items-center justify-center text-gray-400">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 <span className="text-xs">Loading timeline...</span>
@@ -710,6 +889,84 @@ export default function StaffDetailPage() {
   )
 }
 
+// Compact range filter rendered inside a section header (Performance,
+// Work Timeline). Smaller than the page-level select so it sits
+// comfortably next to a small section title. Picking Monthly reveals
+// a month dropdown, picking Yearly reveals a year dropdown.
+function RangeSelect({
+  view,
+  onViewChange,
+  month,
+  onMonthChange,
+  year,
+  onYearChange,
+  yearOptions,
+}: {
+  view: StaffViewRange
+  onViewChange: (v: StaffViewRange) => void
+  month: number
+  onMonthChange: (m: number) => void
+  year: number
+  onYearChange: (y: number) => void
+  yearOptions: number[]
+}) {
+  const selectClass =
+    "h-7 appearance-none rounded-md border border-gray-200 bg-white pl-2.5 pr-7 text-xs font-semibold text-gray-700 outline-none transition-colors hover:border-[#00c065]/40 focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <div className="relative">
+        <select
+          value={view}
+          onChange={(e) => onViewChange(e.target.value as StaffViewRange)}
+          className={selectClass}
+        >
+          {(Object.keys(STAFF_VIEW_LABEL) as StaffViewRange[]).map((option) => (
+            <option key={option} value={option}>
+              {STAFF_VIEW_LABEL[option]}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
+      </div>
+
+      {view === "monthly" && (
+        <div className="relative">
+          <select
+            value={month}
+            onChange={(e) => onMonthChange(Number(e.target.value))}
+            className={selectClass}
+          >
+            {MONTH_LABELS.map((label, i) => (
+              <option key={label} value={i}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
+        </div>
+      )}
+
+      {view === "yearly" && (
+        <div className="relative">
+          <select
+            value={year}
+            onChange={(e) => onYearChange(Number(e.target.value))}
+            className={selectClass}
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Vertical bar chart for performance metrics. Each metric is a
 // fixed-width column whose bar height is the score (0 to 100). Bar
 // color follows the rating tint so a glance tells you which metrics
@@ -732,21 +989,32 @@ function PerformanceBarChart({ data }: { data: PerformanceData | null }) {
     )
   }
 
-  const gridLines = [25, 50, 75, 100]
+  // Y-axis tiers mirror the score values returned by /performance
+  // (awful=20, bad=40, good=70, great=90) so a "Good" bar lands
+  // exactly on the "Good" gridline.
+  const ratingTiers = [
+    { label: "Awful", position: 20, text: "text-red-400" },
+    { label: "Bad",   position: 40, text: "text-amber-400" },
+    { label: "Good",  position: 70, text: "text-blue-400" },
+    { label: "Great", position: 90, text: "text-emerald-400" },
+  ]
 
   return (
     <div className="flex h-full min-h-[180px] flex-col">
       {/* Chart body. Bars sit inside a relative container so the
-          horizontal gridlines can absolutely-position behind them. */}
-      <div className="relative flex flex-1 items-end gap-3 border-b border-gray-200 pb-1 pl-7">
-        {/* Gridlines + axis labels */}
-        {gridLines.map((line) => (
+          horizontal gridlines can absolutely-position behind them.
+          Columns use items-stretch (the flex default) so each one
+          spans the full chart height; otherwise the percentage-
+          based bar height collapses to zero. */}
+      <div className="relative flex flex-1 gap-3 border-b border-gray-200 pb-1 pl-12">
+        {/* Gridlines + rating-tier labels */}
+        {ratingTiers.map((tier) => (
           <div
-            key={line}
-            className="pointer-events-none absolute inset-x-0 flex items-center text-[9px] text-gray-300"
-            style={{ bottom: `${line}%` }}
+            key={tier.label}
+            className={["pointer-events-none absolute inset-x-0 flex items-center text-[9px] font-semibold", tier.text].join(" ")}
+            style={{ bottom: `${tier.position}%` }}
           >
-            <span className="w-6 pr-1 text-right">{line}</span>
+            <span className="w-10 pr-1 text-right">{tier.label}</span>
             <div className="h-px flex-1 bg-gray-100" />
           </div>
         ))}
@@ -774,7 +1042,7 @@ function PerformanceBarChart({ data }: { data: PerformanceData | null }) {
 
       {/* Metric labels under each bar. Mirrors the bar layout above
           so labels and bars line up. */}
-      <div className="flex gap-3 pl-7 pt-1.5">
+      <div className="flex gap-3 pl-12 pt-1.5">
         {data.cards.map((card) => (
           <div
             key={card.key}
