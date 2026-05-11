@@ -286,6 +286,13 @@ export default function ProjectReviewModal({
                 <SectionCard
                   title="Tasks"
                   description="Completed work, timing status, equipment, and assigned staff.">
+                  {mainTasks.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-6 text-center text-[11px] text-gray-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                      No work was completed before this project was
+                      cancelled. There are no tasks, materials, or
+                      employees to review.
+                    </div>
+                  ) : (
                   <div className="space-y-2">
                     {mainTasks.map((mainTask) => {
                       const isOpen = openMainTaskIds.includes(mainTask.id);
@@ -439,6 +446,7 @@ export default function ProjectReviewModal({
                       );
                     })}
                   </div>
+                  )}
                 </SectionCard>
 
                 <div className="flex min-h-0 flex-col overflow-hidden">

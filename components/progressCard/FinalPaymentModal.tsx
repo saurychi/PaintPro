@@ -7,6 +7,31 @@ const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
 const BORDER = "border border-gray-200";
 
+// Parse a comma-formatted currency string ("1,500,000.50") into a
+// plain number. Empty / invalid → 0.
+function parseCurrencyInput(value: string): number {
+  if (!value) return 0;
+  const cleaned = value.replace(/,/g, "");
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Format whatever the user typed into a thousand-separated string —
+// commas every three digits on the integer half; preserves a single
+// decimal. Same helper as DownpaymentModal so all the payment inputs
+// behave identically.
+function formatCurrencyInput(raw: string): string {
+  if (!raw) return "";
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+  const firstDot = cleaned.indexOf(".");
+  const intPart = firstDot === -1 ? cleaned : cleaned.slice(0, firstDot);
+  const decPartRaw =
+    firstDot === -1 ? "" : cleaned.slice(firstDot + 1).replace(/\./g, "");
+  const intWithCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return firstDot === -1 ? intWithCommas : `${intWithCommas}.${decPartRaw}`;
+}
+
 type Props = {
   open: boolean;
   projectId: string | null | undefined;
@@ -75,7 +100,7 @@ export default function FinalPaymentModal({
   const totalInvoice = Math.max(0, estimatedBudget);
   const paidDownpayment = Math.max(0, downpayment);
   const remainingBalance = Math.max(0, totalInvoice - paidDownpayment);
-  const paid = parseFloat(paidAmount) || 0;
+  const paid = parseCurrencyInput(paidAmount);
   const neededPayment = Math.max(0, remainingBalance - paid);
 
   const canConfirm = remainingBalance <= 0 || paid >= remainingBalance;
@@ -230,7 +255,35 @@ export default function FinalPaymentModal({
                 </div>
               </div>
 
-              {/* Paid Final Payment */}
+              {/* Needed Payment — shown before the editable input so
+                  the admin always sees what's still owed (computed
+                  from remaining balance minus whatever they're
+                  currently typing) right above the input field. */}
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
+                  Needed Payment
+                </label>
+
+                <div
+                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
+                >
+                  <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
+                    $AUD
+                  </span>
+
+                  <span className="flex-1 px-3 text-sm text-gray-700">
+                    {neededPayment.toLocaleString("en-AU", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Paid Final Payment — the editable input the admin
+                  enters the actual amount into. Sits at the bottom
+                  so the running breakdown above (remaining → needed)
+                  always reads top-to-bottom into the action field. */}
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
                   Paid Final Payment
@@ -245,10 +298,12 @@ export default function FinalPaymentModal({
                   </span>
 
                   <input
-                    type="number"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
+                    onChange={(e) =>
+                      setPaidAmount(formatCurrencyInput(e.target.value))
+                    }
                     placeholder="Enter Payment"
                     className="flex-1 bg-transparent px-3 text-sm text-gray-900 outline-none placeholder:text-gray-400"
                   />
@@ -269,28 +324,6 @@ export default function FinalPaymentModal({
                     Final payment is enough to settle the remaining balance.
                   </p>
                 ) : null}
-              </div>
-
-              {/* Needed Payment */}
-              <div>
-                <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
-                  Needed Payment
-                </label>
-
-                <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
-                >
-                  <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
-                    $AUD
-                  </span>
-
-                  <span className="flex-1 px-3 text-sm text-gray-700">
-                    {neededPayment.toLocaleString("en-AU", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </div>
               </div>
             </>
           )}
