@@ -3,10 +3,11 @@
 import React, { useState, useEffect } from "react"
 import { supabase } from '@/lib/supabaseClient'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, Plus, Filter } from "lucide-react"
+import { Search, Plus, Filter, MapPin, Tag as TagIcon, Truck } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import InventoryTable from '@/components/inventorytable'
 import InventoryModal from '@/components/inventory-modal'
+import InventoryReferenceModal from '@/components/inventory-reference-modal'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 
@@ -35,6 +36,11 @@ export default function AdminInventory() {
 
   // Quick Add Deficit State
   const [quickAddModal, setQuickAddModal] = useState<{isOpen: boolean, item: any, amount: number}>({isOpen: false, item: null, amount: 0})
+
+  // Which reference-data manager modal is open (suppliers / tags / locations).
+  // `null` means none. The same modal component handles all three by reading
+  // the type prop, so the page only needs to track the current selection.
+  const [referenceModal, setReferenceModal] = useState<"supplier" | "tag" | "location" | null>(null)
 
   const fetchInventory = async () => {
     setIsLoading(true)
@@ -82,6 +88,46 @@ export default function AdminInventory() {
   }
 
   useEffect(() => { fetchInventory() }, [])
+
+  // Realtime: listen for changes on the materials, equipment, and
+  // reference-data tables (tag/supplier/location) and refetch so the
+  // table and dropdowns reflect updates from other tabs/users without
+  // a manual reload. Requires the relevant tables to be in the
+  // supabase_realtime publication — see sql/enable_realtime_inventory.sql.
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-inventory-watcher")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "materials" },
+        () => fetchInventory(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "equipment" },
+        () => fetchInventory(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tag" },
+        () => fetchInventory(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "supplier" },
+        () => fetchInventory(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "location" },
+        () => fetchInventory(),
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSaveItem = async (data: any, mode: 'add' | 'edit', type: 'materials' | 'equipment') => {
     const table = type === 'materials' ? 'materials' : 'equipment'
@@ -192,60 +238,91 @@ export default function AdminInventory() {
   const hasActiveFilters = locationFilter !== "All" || tagFilter !== "All" || supplierFilter !== "All" || statusFilter !== "All" || alertFilter !== "All";
 
   return (
-    <div className="p-6 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden flex flex-col">
+    <div className="p-4 h-[calc(100vh-var(--admin-header-offset,0px))] overflow-hidden flex flex-col">
       <div className="flex items-center justify-between shrink-0">
-        <h1 className="text-2xl font-semibold text-gray-900">Inventory Management</h1>
-        <div className="flex gap-4 items-center">
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+        <h1 className="text-xl font-semibold text-gray-900">Inventory Management</h1>
+        <div className="flex gap-3 items-center">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-700 cursor-pointer">
             <input
               type="checkbox"
               checked={showArchived}
               onChange={(e) => setShowArchived(e.target.checked)}
-              className="rounded border-gray-300 text-[#00c065] focus:ring-[#00c065] w-4 h-4"
+              className="rounded border-gray-300 text-[#00c065] focus:ring-[#00c065] w-3.5 h-3.5"
             />
             Show Archived
           </label>
           <button
             onClick={() => setModalConfig({ isOpen: true, mode: 'add', item: null })}
-            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90"
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-md active:translate-y-0 active:scale-[0.97]"
             style={{ backgroundColor: ACCENT }}
           >
-            <Plus className="h-4 w-4" /> Add Item
+            <Plus className="h-3.5 w-3.5" /> Add Item
           </button>
         </div>
       </div>
 
-      <div className="mt-6 flex-1 flex flex-col min-h-0 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+      <div className="mt-4 flex-1 flex flex-col min-h-0 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
         <Tabs defaultValue="materials" onValueChange={(val) => {
           setActiveTab(val as 'materials' | 'equipment')
           setSearchQuery("")
           setStatusFilter("All")
           setAlertFilter("All")
         }} className="flex-1 flex flex-col h-full">
-          <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0">
-            <TabsList className="bg-gray-100">
-              <TabsTrigger value="materials" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Materials</TabsTrigger>
-              <TabsTrigger value="equipment" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Equipment</TabsTrigger>
+          <div className="flex items-center justify-between gap-3 p-3 border-b border-gray-200 shrink-0">
+            <TabsList className="bg-gray-100 h-8">
+              <TabsTrigger value="materials" className="text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Materials</TabsTrigger>
+              <TabsTrigger value="equipment" className="text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Equipment</TabsTrigger>
             </TabsList>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                 <input
                   type="text"
                   placeholder={`Search ${activeTab}...`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-64 rounded-lg border border-gray-200 pl-9 pr-4 py-2 text-sm outline-none focus:border-[#00c065] focus:ring-1 focus:ring-[#00c065] transition-all"
+                  className="h-8 w-56 rounded-md border border-gray-200 pl-8 pr-3 text-xs outline-none focus:border-[#00c065] focus:ring-1 focus:ring-[#00c065] transition-all"
                 />
               </div>
 
+              {/* Reference data managers — open a modal listing all
+                  suppliers / tags / locations with add/edit/delete. The
+                  modal is wider than tall (landscape grid). */}
+              <button
+                type="button"
+                onClick={() => setReferenceModal("supplier")}
+                title="Manage suppliers"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#00a054] hover:shadow-md active:translate-y-0 active:scale-[0.97]"
+              >
+                <Truck className="h-3.5 w-3.5" />
+                Suppliers
+              </button>
+              <button
+                type="button"
+                onClick={() => setReferenceModal("tag")}
+                title="Manage tags"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#00a054] hover:shadow-md active:translate-y-0 active:scale-[0.97]"
+              >
+                <TagIcon className="h-3.5 w-3.5" />
+                Tags
+              </button>
+              <button
+                type="button"
+                onClick={() => setReferenceModal("location")}
+                title="Manage locations"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#00a054] hover:shadow-md active:translate-y-0 active:scale-[0.97]"
+              >
+                <MapPin className="h-3.5 w-3.5" />
+                Locations
+              </button>
+
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors outline-none focus:outline-none focus:ring-0">
-                    <Filter className="h-4 w-4" /> Filters
+                  <button className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md active:translate-y-0 active:scale-[0.97] outline-none focus:outline-none focus:ring-0">
+                    <Filter className="h-3.5 w-3.5" /> Filters
                     {hasActiveFilters && (
-                      <span className="flex h-2 w-2 rounded-full bg-[#00c065]"></span>
+                      <span className="flex h-1.5 w-1.5 rounded-full bg-[#00c065]"></span>
                     )}
                   </button>
                 </DropdownMenuTrigger>
@@ -312,7 +389,7 @@ export default function AdminInventory() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-hidden p-4 bg-gray-50/50">
+          <div className="flex-1 overflow-hidden p-3 bg-gray-50/50">
             <TabsContent value="materials" className="h-full m-0 data-[state=active]:flex flex-col">
               <InventoryTable
                 data={applyFilters(materials, "materials")}
@@ -349,6 +426,17 @@ export default function AdminInventory() {
           refreshData={fetchInventory}
         />
       )}
+
+      {/* Reference-data manager (suppliers / tags / locations). Single
+          modal that takes a `type` prop and re-fetches its own list. After
+          a save/delete, also refresh the inventory page so dropdowns and
+          table joins pick up the change. */}
+      <InventoryReferenceModal
+        open={referenceModal !== null}
+        type={referenceModal ?? "supplier"}
+        onClose={() => setReferenceModal(null)}
+        onChanged={fetchInventory}
+      />
 
       {/* Quick Add Shortcut Modal */}
       <Dialog open={quickAddModal.isOpen} onOpenChange={() => setQuickAddModal({ isOpen: false, item: null, amount: 0 })}>
