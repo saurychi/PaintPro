@@ -1891,7 +1891,7 @@ function JobProgressCard({
             {!selectedProject ? (
               <NoProjectEmptyState
                 mode={emptyProjectState}
-                onGoToReports={() => router.push("/admin/report")}
+                onGoToReports={() => router.push("/admin/report/report-list")}
               />
             ) : loadingDetails ? (
               <ProgressSkeleton />
@@ -1941,7 +1941,7 @@ function JobProgressCard({
                   </p>
                   <button
                     type="button"
-                    onClick={() => router.push("/admin/report")}
+                    onClick={() => router.push("/admin/report/report-list")}
                     className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-[#00c065] px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
                     Go to reports
                   </button>
