@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import type { BrowserContext } from "playwright-core";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureBucket } from "@/lib/supabase/ensureBucket";
-import { getPdfBrowser } from "@/lib/server/pdfBrowser";
-
-// Dynamic import below — same reason as the cancellation-agreement
-// signature endpoint: Turbopack's static graph doesn't like a route.ts
-// statically importing from another route.ts.
+import {
+  renderUnsignedInvoicePdf,
+  stampClientSignatureOnInvoice,
+} from "@/lib/server/invoicePdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,6 +31,20 @@ function sanitizeFileName(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+// Download a buffer from Supabase Storage. Returns null when the
+// object doesn't exist so the caller can fall back to live render.
+async function downloadStoredPdf(
+  bucket: string,
+  path: string,
+): Promise<Buffer | null> {
+  const { data, error } = await supabaseAdmin.storage
+    .from(bucket)
+    .download(path);
+  if (error || !data) return null;
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
@@ -41,10 +53,8 @@ export async function POST(request: Request) {
 
     const projectId =
       typeof body?.projectId === "string" ? body.projectId.trim() : "";
-
     const projectCode =
       typeof body?.projectCode === "string" ? body.projectCode.trim() : "";
-
     const signatureDataUrl =
       typeof body?.signatureDataUrl === "string"
         ? body.signatureDataUrl.trim()
@@ -53,14 +63,12 @@ export async function POST(request: Request) {
     if (!projectId) {
       return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
     }
-
     if (!projectCode) {
       return NextResponse.json(
         { error: "Missing project code." },
         { status: 400 },
       );
     }
-
     if (!signatureDataUrl) {
       return NextResponse.json(
         { error: "Missing client signature." },
@@ -68,22 +76,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from("projects")
-      .select("project_id, project_code, client_id, status")
-      .eq("project_id", projectId)
-      .eq("project_code", projectCode)
-      .maybeSingle();
+    // Pull project + client + (optional) existing pending document
+    // in parallel so we don't pay sequential round-trips.
+    const [projectResult, pendingDocResult] = await Promise.all([
+      supabaseAdmin
+        .from("projects")
+        .select("project_id, project_code, client_id, status")
+        .eq("project_id", projectId)
+        .eq("project_code", projectCode)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("project_documents")
+        .select(
+          "document_id, storage_bucket, storage_path, file_name, file_mime_type",
+        )
+        .eq("project_id", projectId)
+        .eq("document_type", "invoice")
+        .neq("document_status", "void")
+        .maybeSingle(),
+    ]);
 
-    if (projectError) throw projectError;
-
+    if (projectResult.error) throw projectResult.error;
+    const project = projectResult.data;
     if (!project) {
       return NextResponse.json(
         { error: "Project was not found." },
         { status: 404 },
       );
     }
-
     if (project.status !== "invoice_agreement_pending") {
       return NextResponse.json(
         { error: "This invoice is not pending client agreement." },
@@ -107,7 +127,9 @@ export async function POST(request: Request) {
     const { buffer: signatureBuffer, mimeType } =
       dataUrlToBuffer(signatureDataUrl);
 
-    if (!["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(mimeType)) {
+    if (
+      !["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(mimeType)
+    ) {
       return NextResponse.json(
         { error: "Signature must be a PNG, JPEG, or WEBP image." },
         { status: 400 },
@@ -116,55 +138,94 @@ export async function POST(request: Request) {
 
     const now = new Date().toISOString();
     const safeProjectCode = sanitizeFileName(project.project_code || projectId);
-
     const invoicePdfPath = `invoices/${projectId}/invoice-${safeProjectCode}.pdf`;
     const invoiceFileName = `invoice-${safeProjectCode}.pdf`;
 
     await ensureBucket("documents");
 
-    // Render the signed invoice HTML *in memory* — client signature
-    // rides along as an inline data URL so the raw PNG never reaches
-    // the signatures bucket.
-    const clientSignatureDataUrl = `data:${mimeType};base64,${signatureBuffer.toString("base64")}`;
+    // Try the fast path: stamp the signature onto the pre-rendered
+    // unsigned PDF with pdf-lib. Fall back to a full Chromium render
+    // when either (a) the unsigned PDF isn't in storage yet, or (b)
+    // the signature image is a format pdf-lib can't embed (eg WebP).
+    const pendingDoc = pendingDocResult.data;
+    const storedBucket = pendingDoc?.storage_bucket ?? "documents";
+    const storedPath = pendingDoc?.storage_path ?? invoicePdfPath;
 
-    const { renderInvoiceHtml } = await import(
-      "../../../invoice/html/route"
-    );
-    const html = await renderInvoiceHtml({
-      projectId,
-      origin,
-      clientSignatureDataUrl,
-      clientSignedName: signedName,
-    });
+    let signedPdfBuffer: Buffer | null = null;
 
-    let context: BrowserContext | null = null;
-    let pdfBuffer: Buffer;
-    try {
-      const browser = await getPdfBrowser();
-      context = await browser.newContext();
-      const page = await context.newPage();
-      await page.setContent(html, { waitUntil: "networkidle" });
-      await page.emulateMedia({ media: "screen" });
-      const pdfBytes = await page.pdf({
-        format: "A4",
-        printBackground: true,
-        margin: {
-          top: "12mm",
-          right: "12mm",
-          bottom: "12mm",
-          left: "12mm",
-        },
+    const canStamp =
+      mimeType === "image/png" ||
+      mimeType === "image/jpeg" ||
+      mimeType === "image/jpg";
+
+    if (canStamp) {
+      const unsigned = await downloadStoredPdf(storedBucket, storedPath);
+      if (unsigned) {
+        try {
+          const stamped = await stampClientSignatureOnInvoice(unsigned, {
+            signatureBuffer,
+            signatureMimeType: mimeType,
+            signedName,
+          });
+          signedPdfBuffer = stamped.buffer;
+        } catch (stampError) {
+          // pdf-lib couldn't stamp (corrupt PDF, etc). Drop through
+          // to the Chromium fallback so the user still gets a
+          // signed invoice — we don't want to block signing on a
+          // library-level issue.
+          console.error(
+            "[invoice-signature] pdf-lib stamping failed, falling back to Chromium:",
+            stampError instanceof Error ? stampError.message : stampError,
+          );
+        }
+      }
+    }
+
+    // Slow fallback: render the whole invoice via Chromium with the
+    // client signature inlined. Only runs when the fast path can't.
+    // Same render pipeline as before this refactor, just gated.
+    if (!signedPdfBuffer) {
+      const { renderInvoiceHtml } = await import(
+        "../../../invoice/html/route"
+      );
+      const clientSignatureDataUrl = `data:${mimeType};base64,${signatureBuffer.toString("base64")}`;
+      const html = await renderInvoiceHtml({
+        projectId,
+        origin,
+        clientSignatureDataUrl,
+        clientSignedName: signedName,
       });
-      pdfBuffer = Buffer.from(pdfBytes);
-    } finally {
-      if (context) {
+
+      const { getPdfBrowser } = await import("@/lib/server/pdfBrowser");
+      const browser = await getPdfBrowser();
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        await page.setContent(html, { waitUntil: "networkidle" });
+        await page.emulateMedia({ media: "screen" });
+        const pdfBytes = await page.pdf({
+          format: "A4",
+          printBackground: true,
+          margin: {
+            top: "12mm",
+            right: "12mm",
+            bottom: "12mm",
+            left: "12mm",
+          },
+        });
+        signedPdfBuffer = Buffer.from(pdfBytes);
+      } finally {
         await context.close().catch(() => {});
       }
     }
 
+    // Upload the signed PDF, then run the two DB writes in parallel.
+    // Upload has to land before the status flips so a quick refresh
+    // by the client sees the new file; the document row update and
+    // the project status update don't depend on each other.
     const { error: uploadPdfError } = await supabaseAdmin.storage
       .from("documents")
-      .upload(invoicePdfPath, pdfBuffer, {
+      .upload(invoicePdfPath, signedPdfBuffer, {
         contentType: "application/pdf",
         upsert: true,
       });
@@ -175,40 +236,25 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: existingDocument, error: existingError } = await supabaseAdmin
-      .from("project_documents")
-      .select("document_id")
-      .eq("project_id", projectId)
-      .eq("document_type", "invoice")
-      .neq("document_status", "void")
-      .maybeSingle();
-
-    if (existingError) throw existingError;
-
-    let documentId: string | null = existingDocument?.document_id ?? null;
-
-    if (documentId) {
-      const { error: updateDocumentError } = await supabaseAdmin
-        .from("project_documents")
-        .update({
-          document_status: "signed",
-          storage_bucket: "documents",
-          storage_path: invoicePdfPath,
-          file_name: invoiceFileName,
-          file_mime_type: "application/pdf",
-          file_size_bytes: pdfBuffer.byteLength,
-          signed_at: now,
-          signed_name: signedName,
-          // Never set — raw client signature is not persisted anywhere.
-          client_signature_path: null,
-          updated_at: now,
-        })
-        .eq("document_id", documentId);
-
-      if (updateDocumentError) throw updateDocumentError;
-    } else {
-      const { data: insertedDocument, error: insertDocumentError } =
-        await supabaseAdmin
+    const documentUpsert = pendingDoc?.document_id
+      ? supabaseAdmin
+          .from("project_documents")
+          .update({
+            document_status: "signed",
+            storage_bucket: "documents",
+            storage_path: invoicePdfPath,
+            file_name: invoiceFileName,
+            file_mime_type: "application/pdf",
+            file_size_bytes: signedPdfBuffer.byteLength,
+            signed_at: now,
+            signed_name: signedName,
+            client_signature_path: null,
+            updated_at: now,
+          })
+          .eq("document_id", pendingDoc.document_id)
+          .select("document_id")
+          .single()
+      : supabaseAdmin
           .from("project_documents")
           .insert({
             project_id: projectId,
@@ -219,7 +265,7 @@ export async function POST(request: Request) {
             storage_path: invoicePdfPath,
             file_name: invoiceFileName,
             file_mime_type: "application/pdf",
-            file_size_bytes: pdfBuffer.byteLength,
+            file_size_bytes: signedPdfBuffer.byteLength,
             signed_at: now,
             signed_name: signedName,
             client_signature_path: null,
@@ -229,29 +275,26 @@ export async function POST(request: Request) {
           .select("document_id")
           .single();
 
-      if (insertDocumentError) throw insertDocumentError;
-
-      documentId = insertedDocument.document_id;
-    }
-
-    // Client just signed the invoice but the admin still needs to
-    // confirm "Proceed to Payment" before money is owed — park the
-    // project at invoice_signed in between. The admin invoice page
-    // shows a button on this status that flips to payment_pending.
-    const { error: statusError } = await supabaseAdmin
+    const statusUpdate = supabaseAdmin
       .from("projects")
       .update({
         status: "invoice_signed",
-        updated_at: new Date().toISOString(),
+        updated_at: now,
       })
       .eq("project_id", projectId);
 
-    if (statusError) throw statusError;
+    const [docResult, statusResult] = await Promise.all([
+      documentUpsert,
+      statusUpdate,
+    ]);
+
+    if (docResult.error) throw docResult.error;
+    if (statusResult.error) throw statusResult.error;
 
     return NextResponse.json({
       message: "Invoice signed and saved.",
       nextStatus: "invoice_signed",
-      documentId,
+      documentId: docResult.data?.document_id ?? null,
       signedName,
       signedAt: now,
       invoicePdfPath,

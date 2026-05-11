@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  CostEstimationLoadError,
+  loadProjectCostEstimation,
+} from "@/lib/planning/loadProjectCostEstimation";
 
 export const runtime = "nodejs";
 
@@ -274,21 +278,25 @@ export async function renderInvoiceHtml(args: {
     throw new Error("Missing projectId.");
   }
 
-  const estimationResponse = await fetch(
-    `${origin}/api/planning/getProjectCostEstimation?projectId=${encodeURIComponent(
+  // Direct call into the loader to avoid a self-HTTP fetch back to
+  // /api/planning/getProjectCostEstimation. Same code path the GET
+  // endpoint runs, just without the network round-trip and JSON
+  // ser/des overhead.
+  let data: CostEstimationResponse;
+  try {
+    data = (await loadProjectCostEstimation(
       projectId,
-    )}&markupRate=${encodeURIComponent(markupRate)}`,
-    { cache: "no-store" },
-  );
-
-  const data = (await estimationResponse.json()) as CostEstimationResponse;
-
-  if (!estimationResponse.ok) {
-    throw new Error(
-      [data?.error || "Failed to load invoice data.", data?.details]
-        .filter(Boolean)
-        .join(": "),
-    );
+      markupRate,
+    )) as CostEstimationResponse;
+  } catch (loaderError) {
+    if (loaderError instanceof CostEstimationLoadError) {
+      throw new Error(
+        [loaderError.message, loaderError.details]
+          .filter(Boolean)
+          .join(": "),
+      );
+    }
+    throw loaderError;
   }
 
   const project = data.project;
@@ -472,6 +480,11 @@ export async function renderInvoiceHtml(args: {
               display: grid;
               grid-template-columns: 1fr 1fr;
               gap: 28px;
+              /* Reserve the signature block on its own page so the
+                 client-signature stamp (lib/server/invoicePdf.ts)
+                 always lands at predictable PDF coordinates. */
+              break-before: page;
+              page-break-before: always;
             }
             .sig-box {
               min-height: 86px;
