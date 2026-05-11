@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Loader2, RefreshCw, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  getProjectRoute as resolveProjectRoute,
+  normalizeProjectStatus,
+  type ProjectStatusKey,
+} from "@/lib/planning/projectRoute";
 // --- SIMULATED TIME (testing only) ---------------------------------------
 // The `useProjectNow` hook returns the simulated reference time when one is
 // configured, otherwise the real `new Date()`. To remove the simulation
@@ -30,30 +35,7 @@ type ProjectsResponse = {
   error?: string;
 };
 
-type StatusKey =
-  | "main_task_pending"
-  | "sub_task_pending"
-  | "materials_pending"
-  | "equipment_pending"
-  | "schedule_pending"
-  | "employee_assignment_pending"
-  | "cost_estimation_pending"
-  | "overview_pending"
-  | "quotation_pending"
-  | "grant_access_quotation"
-  | "client_quotation_done"
-  | "downpayment_pending"
-  | "ready_to_start"
-  | "in_progress"
-  | "review_pending"
-  | "invoice_pending"
-  | "invoice_agreement_pending"
-  | "invoice_signed"
-  | "payment_pending"
-  | "employee_management_pending"
-  | "conclude_job_pending"
-  | "completed"
-  | "cancelled";
+type StatusKey = ProjectStatusKey;
 
 const PROJECT_CREATION_STATUSES: StatusKey[] = [
   "main_task_pending",
@@ -237,74 +219,8 @@ const STATUS_META: Record<StatusKey, StatusMeta> = {
   },
 };
 
-function normalizeStatus(value: string | null | undefined): StatusKey | "unknown" {
-  const normalized = String(value || "").trim().toLowerCase();
-  if ((STATUS_ORDER as readonly string[]).includes(normalized)) {
-    return normalized as StatusKey;
-  }
-  return "unknown";
-}
-
-function getProjectRoute(projectId: string, status: StatusKey | "unknown"): string {
-  switch (status) {
-    case "main_task_pending":
-      return `/admin/job-creation/main-task-assignment?projectId=${projectId}`;
-    case "sub_task_pending":
-      return `/admin/job-creation/sub-task-assignment?projectId=${projectId}`;
-    case "materials_pending":
-      return `/admin/job-creation/materials-assignment?projectId=${projectId}`;
-    case "equipment_pending":
-      return `/admin/job-creation/equipment-assignment?projectId=${projectId}`;
-    case "schedule_pending":
-      return `/admin/job-creation/project-schedule?projectId=${projectId}`;
-    case "employee_assignment_pending":
-      return `/admin/job-creation/employee-assignment?projectId=${projectId}`;
-    case "cost_estimation_pending":
-      return `/admin/job-creation/cost-estimation?projectId=${projectId}`;
-    case "overview_pending":
-      return `/admin/job-creation/overview?projectId=${projectId}`;
-    case "quotation_pending":
-    case "grant_access_quotation":
-      return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
-    case "client_quotation_done":
-      // The client has signed; the admin still needs to review and ack on the
-      // quotation page before advancing to downpayment.
-      return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
-    case "downpayment_pending":
-      // Land on the admin dashboard with a query flag the JobProgressCard
-      // listens for, which opens the Downpayment modal automatically.
-      return `/admin?openDownpayment=${projectId}`;
-    case "ready_to_start":
-      // Same pattern: dashboard + a flag that pops the kickoff modal so
-      // the manager can confirm-start from one click.
-      return `/admin?openKickoff=${projectId}`;
-    case "in_progress":
-      // Live projects belong on the dashboard — that's where the
-      // JobProgressCard tracks subtask completion in real time. The
-      // ?projectId param tells admin/page.tsx to pre-select this row
-      // on load instead of falling through to whatever the auto-pick
-      // would have chosen.
-      return `/admin?projectId=${projectId}`;
-    case "invoice_pending":
-    case "invoice_agreement_pending":
-    case "invoice_signed":
-    case "payment_pending":
-      // Anything invoice-related (preparing → sent → signed → payment
-      // pending) lands on the invoice-generation page. From there the
-      // admin can preview/download the PDF, send it to the client, or
-      // hit "Go to Payment" which redirects to the dashboard with the
-      // FinalPaymentModal pre-opened.
-      return `/admin/projects/invoice-generation?projectId=${projectId}`;
-    case "review_pending":
-    case "employee_management_pending":
-    case "conclude_job_pending":
-    case "completed":
-    case "cancelled":
-    case "unknown":
-    default:
-      return `/admin/projects/${projectId}`;
-  }
-}
+const normalizeStatus = normalizeProjectStatus;
+const getProjectRoute = resolveProjectRoute;
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -615,16 +531,20 @@ export default function AdminProjectsPage() {
                                 </div>
                               </div>
 
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  router.push(getProjectRoute(project.id, status))
-                                }
-                                className="shrink-0 inline-flex items-center justify-center rounded-lg px-4 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
-                                style={{ backgroundColor: ACCENT }}
-                              >
-                                Open
-                              </button>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    router.push(
+                                      getProjectRoute(project.id, status),
+                                    )
+                                  }
+                                  className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                                  style={{ backgroundColor: ACCENT }}
+                                >
+                                  Open
+                                </button>
+                              </div>
                             </li>
                           );
                         })}
