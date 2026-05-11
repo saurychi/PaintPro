@@ -114,6 +114,10 @@ export default function ClientPendingDocumentsPage() {
   // Tracks whether the bucket PDF has finished loading inside the iframe so
   // we can keep a spinner over it until the document is actually visible.
   const [previewLoaded, setPreviewLoaded] = useState(false);
+  // Bumped on every refresh so the iframe key changes and the viewer
+  // remounts, picking up the latest bucket PDF (e.g. the just-signed
+  // version) even when projectStatus hasn't advanced.
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
 
   const [signatureErr, setSignatureErr] = useState<string | null>(null);
 
@@ -275,6 +279,10 @@ export default function ClientPendingDocumentsPage() {
 
   async function handleRefresh() {
     if (refreshing || loading) return;
+    // Force the PDF viewer to remount so the bucket's latest version
+    // (e.g. the freshly client-signed PDF) is fetched again.
+    setPreviewLoaded(false);
+    setPreviewRefreshKey((k) => k + 1);
     await loadProject("refresh");
     // Same broadcast the dashboard's refresh button uses, so the sidebar
     // "pending-documents" badge re-checks in lock-step instead of waiting
@@ -613,6 +621,11 @@ export default function ClientPendingDocumentsPage() {
       );
       setJustSignedCancellationAgreement(true);
       cancellationSignatureRef.current.clear();
+      // Force the iframe to remount so it pulls the freshly-uploaded
+      // signed PDF from the bucket instead of showing the cached
+      // unsigned copy.
+      setPreviewLoaded(false);
+      setPreviewRefreshKey((k) => k + 1);
 
       toast.success("Cancellation agreement signed.", {
         description:
@@ -640,7 +653,7 @@ export default function ClientPendingDocumentsPage() {
       setDownloading(true);
 
       const response = await fetch(
-        `/api/cancellation-agreement/pdf?projectId=${encodeURIComponent(
+        `/api/cancellation-agreement/from-bucket?projectId=${encodeURIComponent(
           projectId,
         )}&download=1`,
       );
@@ -742,8 +755,16 @@ export default function ClientPendingDocumentsPage() {
     project &&
     (isPendingCancellationAgreement || isCancellationAgreementSigned)
   ) {
+    // Stream the saved PDF from storage instead of re-rendering from
+    // HTML every load. The /pdf route reads project_documents but the
+    // raw client signature is intentionally never persisted there, so
+    // it always produced an unsigned-looking preview even after the
+    // client signed. The signature endpoint uploads the baked-in
+    // signed PDF to the same bucket path on every sign, so
+    // /from-bucket reflects the latest signed (or unsigned, pre-sign)
+    // copy faithfully.
     const previewUrl = projectId
-      ? `/api/cancellation-agreement/pdf?projectId=${encodeURIComponent(
+      ? `/api/cancellation-agreement/from-bucket?projectId=${encodeURIComponent(
           projectId,
         )}#navpanes=0&zoom=95`
       : "";
@@ -831,7 +852,7 @@ export default function ClientPendingDocumentsPage() {
                 <div className="relative flex-1 overflow-hidden p-3 lg:min-h-[420px]">
                   {previewUrl ? (
                     <iframe
-                      key={previewUrl}
+                      key={`${previewUrl}-${previewRefreshKey}`}
                       src={previewUrl}
                       title="Cancellation Agreement Preview"
                       onLoad={() => setPreviewLoaded(true)}
@@ -1182,7 +1203,7 @@ export default function ClientPendingDocumentsPage() {
                       </div>
                     ) : null}
                     <iframe
-                      key={`${documentType}-${projectStatus}-${projectId}`}
+                      key={`${documentType}-${projectStatus}-${projectId}-${previewRefreshKey}`}
                       src={previewSrc}
                       title={`${documentLabel} Preview`}
                       onLoad={() => setPreviewLoaded(true)}
