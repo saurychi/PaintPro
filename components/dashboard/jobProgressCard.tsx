@@ -1473,6 +1473,34 @@ function JobProgressCard({
       setProjectStatusOverride(nextStatus);
       onRefresh?.();
 
+      // Conclude-job flow: tear down the project's conversation
+      // threads so they stop cluttering everyone's message lists
+      // once the project is closed. Done after the status update
+      // so the project is already marked completed if this fails.
+      if (nextStatus === "completed") {
+        try {
+          const cleanupResponse = await fetch(
+            "/api/planning/deleteProjectConversations",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectId: effectiveProjectId }),
+            },
+          );
+          if (!cleanupResponse.ok) {
+            const cleanupBody = await cleanupResponse
+              .json()
+              .catch(() => null);
+            console.error(
+              "deleteProjectConversations failed:",
+              cleanupBody?.error ?? cleanupResponse.statusText,
+            );
+          }
+        } catch (cleanupError) {
+          console.error("deleteProjectConversations error:", cleanupError);
+        }
+      }
+
       toast.success(successTitle, {
         description: successDescription,
       });
@@ -3846,6 +3874,42 @@ function JobProgressCard({
                       "conclude",
                     );
                     if (ok) {
+                      // Cancellation wrap-up done. Tear down the
+                      // project's conversation threads same as the
+                      // normal completed flow so the client and
+                      // recipient don't keep seeing a stale
+                      // thread for a closed project.
+                      if (effectiveProjectId) {
+                        try {
+                          const cleanupResponse = await fetch(
+                            "/api/planning/deleteProjectConversations",
+                            {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                projectId: effectiveProjectId,
+                              }),
+                            },
+                          );
+                          if (!cleanupResponse.ok) {
+                            const cleanupBody = await cleanupResponse
+                              .json()
+                              .catch(() => null);
+                            console.error(
+                              "deleteProjectConversations failed:",
+                              cleanupBody?.error ??
+                                cleanupResponse.statusText,
+                            );
+                          }
+                        } catch (cleanupError) {
+                          console.error(
+                            "deleteProjectConversations error:",
+                            cleanupError,
+                          );
+                        }
+                      }
                       setCancellationConcludeConfirmOpen(false);
                       toast.success("Project closed out", {
                         description: "The cancellation wrap-up is complete.",
