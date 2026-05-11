@@ -131,6 +131,30 @@ export default function AddMainTaskModal({
     setSurfaces(rows);
   }, []);
 
+  // When the surface changes, try to auto-select a formula that
+  // references that surface_key in its expression. The match runs
+  // against identifiers in formula_expression (same regex used by
+  // the EditFormulaModal's surface-detection block). If multiple
+  // formulas match, picks the first by alphabetical name order.
+  // Leaves the current formula choice alone when nothing matches so
+  // the admin can pick manually.
+  useEffect(() => {
+    if (!selectedSurfaceKey) return;
+    const matchPattern = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+    const match = formulas
+      .filter((formula) => formula.is_active)
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .find((formula) => {
+        const identifiers = formula.formula_expression.match(matchPattern);
+        if (!identifiers) return false;
+        return identifiers.includes(selectedSurfaceKey);
+      });
+    if (match) {
+      setSelectedFormulaId(match.formula_template_id);
+    }
+  }, [selectedSurfaceKey, formulas]);
+
   // Load formulas + surfaces every time the modal opens. Fresh data
   // each session so newly-created records from elsewhere (eg the
   // edit-estimations page in another tab) show up.
@@ -161,6 +185,16 @@ export default function AddMainTaskModal({
         (formula) => formula.formula_template_id === selectedFormulaId,
       ) ?? null,
     [formulas, selectedFormulaId],
+  );
+
+  // Surface record for the currently-selected key. Used to seed
+  // sub-modals so a newly-created formula/variable carries the
+  // surface's identifier and unit out of the gate.
+  const selectedSurface = useMemo(
+    () =>
+      surfaces.find((surface) => surface.surface_key === selectedSurfaceKey) ??
+      null,
+    [surfaces, selectedSurfaceKey],
   );
 
   const formulaOptions = useMemo(
@@ -571,6 +605,28 @@ export default function AddMainTaskModal({
         subTasks={subTasks}
         onClose={() => setAddFormulaOpen(false)}
         onSubmit={(payload) => void handleCreateFormula(payload)}
+        // Seed the expression with the selected surface_key so the
+        // new formula is wired to it from the start, and queue a
+        // matching variable so the formula's expression resolves
+        // when the project-generation flow plugs in the measured
+        // value. Empty when no surface is selected (the modal then
+        // behaves the same as it does outside this context).
+        initialFormulaExpression={selectedSurface?.surface_key ?? ""}
+        initialVariables={
+          selectedSurface
+            ? [
+                {
+                  variableKey: selectedSurface.surface_key,
+                  label: selectedSurface.label,
+                  description: `Auto-attached to surface ${selectedSurface.label}.`,
+                  dataType: "number",
+                  defaultValue: "0",
+                  unit: selectedSurface.unit,
+                  isRequired: true,
+                },
+              ]
+            : []
+        }
       />
 
       <AddVariableModal
@@ -582,6 +638,12 @@ export default function AddMainTaskModal({
         saving={savingVariable}
         onClose={() => setAddVariableOpen(false)}
         onSubmit={(payload) => void handleCreateVariable(payload)}
+        // Pre-fill with the selected surface's identifiers so the
+        // variable lands with the right key for the formula's
+        // expression to pick up. Admin can override before saving.
+        defaultVariableKey={selectedSurface?.surface_key ?? ""}
+        defaultLabel={selectedSurface?.label ?? ""}
+        defaultUnit={selectedSurface?.unit ?? ""}
       />
     </>
   );
