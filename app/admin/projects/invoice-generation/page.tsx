@@ -93,6 +93,11 @@ export default function JobInvoice() {
   const [savedPdfAvailable, setSavedPdfAvailable] = useState<boolean | null>(
     null,
   );
+  // Bumped on refresh to bust the iframe / PDF viewer cache so a
+  // newly-signed invoice replaces the stale unsigned (or previously
+  // signed) view. The URL is otherwise identical so the browser
+  // would happily serve the old response.
+  const [previewVersion, setPreviewVersion] = useState(0);
 
   async function handleCopyProjectCode() {
     const code = project?.project_code;
@@ -136,10 +141,29 @@ export default function JobInvoice() {
     }
   }
 
+  // Probes /api/invoice/from-bucket to decide whether the iframe
+  // should stream the saved PDF (post-sign) or fall back to a live
+  // HTML render (pre-sign). Returns the resolved availability so the
+  // refresh handler can wait on it before bumping the cache-buster.
+  const probeSavedPdf = useCallback(async (): Promise<boolean> => {
+    if (!projectId) return false;
+    try {
+      const res = await fetch(
+        `/api/invoice/from-bucket?projectId=${encodeURIComponent(projectId)}`,
+        { method: "HEAD", cache: "no-store" },
+      );
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, [projectId]);
+
   // Loader is hoisted out of the effect so the in-card refresh button
   // can re-fetch on demand without re-triggering the full-page
   // skeleton. Pass mode="refresh" to reload silently (only the
-  // refresh button's spinner).
+  // refresh button's spinner). Refresh also re-probes the bucket and
+  // bumps `previewVersion` so the iframe / PDF viewer drops its
+  // cached copy and pulls the freshly-signed invoice.
   const loadProject = useCallback(
     async (mode: "initial" | "refresh" = "initial") => {
       if (!projectId) {
@@ -151,19 +175,24 @@ export default function JobInvoice() {
         if (mode === "refresh") setRefreshing(true);
         else setLoading(true);
 
-        const response = await fetch(
-          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
-            projectId,
-          )}`,
-          { cache: "no-store" },
-        );
+        const [overviewResponse, pdfAvailable] = await Promise.all([
+          fetch(
+            `/api/planning/getProjectOverview?projectId=${encodeURIComponent(
+              projectId,
+            )}`,
+            { cache: "no-store" },
+          ),
+          mode === "refresh" ? probeSavedPdf() : Promise.resolve<
+            boolean | null
+          >(null),
+        ]);
 
-        const data = (await response.json()) as ProjectOverviewResponse & {
+        const data = (await overviewResponse.json()) as ProjectOverviewResponse & {
           error?: string;
           details?: string;
         };
 
-        if (!response.ok) {
+        if (!overviewResponse.ok) {
           throw new Error(
             [data?.error, data?.details].filter(Boolean).join(": ") ||
               "Failed to load invoice project data.",
@@ -173,6 +202,14 @@ export default function JobInvoice() {
         setProject(data.project);
 
         setStatus(deriveInvoiceStatus(data.project?.status));
+
+        if (mode === "refresh") {
+          // Apply the freshly-probed availability and bump the
+          // version so the iframe url changes even when the path
+          // stays the same.
+          setSavedPdfAvailable(Boolean(pdfAvailable));
+          setPreviewVersion((v) => v + 1);
+        }
       } catch (error) {
         console.error(error);
         toast.error("Failed to load invoice project data.");
@@ -181,7 +218,7 @@ export default function JobInvoice() {
         setRefreshing(false);
       }
     },
-    [projectId],
+    [projectId, probeSavedPdf],
   );
 
   useEffect(() => {
@@ -302,26 +339,22 @@ export default function JobInvoice() {
     let cancelled = false;
     setSavedPdfAvailable(null);
     (async () => {
-      try {
-        const res = await fetch(
-          `/api/invoice/from-bucket?projectId=${encodeURIComponent(projectId)}`,
-          { method: "HEAD", cache: "no-store" },
-        );
-        if (!cancelled) setSavedPdfAvailable(res.ok);
-      } catch {
-        if (!cancelled) setSavedPdfAvailable(false);
-      }
+      const ok = await probeSavedPdf();
+      if (!cancelled) setSavedPdfAvailable(ok);
     })();
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, probeSavedPdf]);
 
+  // Cache-buster query param. Stays on the URL even before the first
+  // refresh so the iframe key path is stable, and `previewVersion`
+  // changing forces a fresh fetch from the PDF viewer / browser.
   const previewSrc = projectId
     ? savedPdfAvailable
-      ? `/api/invoice/from-bucket?projectId=${encodeURIComponent(projectId)}#navpanes=0&zoom=95&toolbar=1`
+      ? `/api/invoice/from-bucket?projectId=${encodeURIComponent(projectId)}&v=${previewVersion}#navpanes=0&zoom=95&toolbar=1`
       : savedPdfAvailable === false
-        ? `/api/invoice/html?projectId=${encodeURIComponent(projectId)}`
+        ? `/api/invoice/html?projectId=${encodeURIComponent(projectId)}&v=${previewVersion}`
         : ""
     : "";
 
@@ -344,16 +377,32 @@ export default function JobInvoice() {
             <span>Invoice</span>
           </div>
 
-          <span
-            className="inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold"
-            style={{
-              backgroundColor: statusStyles.bg,
-              borderColor: statusStyles.border,
-              color: statusStyles.text,
-            }}
-            aria-label="Invoice status">
-            {status}
-          </span>
+          {/* Status badge. Stays in a neutral "Loading..." state while
+              the project overview fetch is in flight so the user
+              never sees a flash of "Not yet Issued" on an already-
+              issued invoice. */}
+          {loading ? (
+            <span
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              aria-label="Invoice status loading"
+              aria-busy="true"
+            >
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading...
+            </span>
+          ) : (
+            <span
+              className="inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold"
+              style={{
+                backgroundColor: statusStyles.bg,
+                borderColor: statusStyles.border,
+                color: statusStyles.text,
+              }}
+              aria-label="Invoice status"
+            >
+              {status}
+            </span>
+          )}
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
