@@ -122,7 +122,7 @@ async function cascadeShiftLaterSubtasks(args: {
   const { data: subTaskRows, error: subTaskError } = await supabaseAdmin
     .from("project_sub_task")
     .select(
-      "project_sub_task_id, project_task_id, status, scheduled_start_datetime, scheduled_end_datetime",
+      "project_sub_task_id, project_task_id, status, scheduled_start_datetime, scheduled_end_datetime, estimated_hours",
     )
     .in("project_task_id", projectTaskIds)
     .returns<ProjectSubTaskRow[]>();
@@ -206,8 +206,20 @@ async function cascadeShiftLaterSubtasks(args: {
           originalStart && originalEnd
             ? originalEnd.getTime() - originalStart.getTime()
             : 0;
+        // Prefer the persisted work-hours estimate over the clock span:
+        // a span that crosses lunch or an overnight gap measures more
+        // wall-clock hours than the actual work, and feeding the wider
+        // number into placeWorkSpan would silently extend the end into
+        // the next day on every cascade. estimated_hours is the value
+        // the scheduler originally fed in, so the re-placement stays
+        // idempotent across repeated finishes.
+        const estimatedWorkHours = Number(row.estimated_hours);
         const durationHours =
-          originalDurationMs > 0 ? originalDurationMs / (60 * 60 * 1000) : 0;
+          Number.isFinite(estimatedWorkHours) && estimatedWorkHours > 0
+            ? estimatedWorkHours
+            : originalDurationMs > 0
+              ? originalDurationMs / (60 * 60 * 1000)
+              : 0;
 
         // Snap past unavailable days using the shared helper. If naive
         // start lands on (or its [start, end] span crosses) a blocked day,
