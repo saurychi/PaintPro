@@ -18,7 +18,7 @@ import {
   Info,
   Loader2,
   MapPin,
-  PhilippinePeso,
+  DollarSign,
   RefreshCw,
   TrendingUp,
   Users,
@@ -119,9 +119,9 @@ function formatRangeLabel(start: Date, end: Date) {
 }
 
 function currency(n: number) {
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 0,
   }).format(n)
 }
@@ -900,7 +900,7 @@ export default function AdminReportPage() {
                 hint="Total estimated budget"
                 loading={loading}
                 icon={
-                  <PhilippinePeso className="h-4 w-4 text-gray-600 dark:text-slate-300" />
+                  <DollarSign className="h-4 w-4 text-gray-600 dark:text-slate-300" />
                 }
               />
               <KpiCard

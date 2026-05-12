@@ -20,17 +20,21 @@ function escapeHtml(value: unknown) {
     .replaceAll("'", "&#39;");
 }
 
+// Generated documents render amounts in AUD to match the rest of
+// the app. Locale is en-AU so the currency symbol/formatting follows
+// Australian conventions on both the in-browser preview and the
+// generated PDF.
 function formatCurrency(value: number | null | undefined) {
   const safe = Number(value ?? 0);
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safe);
 }
 
 function todayString() {
-  return new Date().toLocaleDateString("en-PH", {
+  return new Date().toLocaleDateString("en-AU", {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -41,7 +45,7 @@ function formatDateOnly(value: string | null | undefined) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-PH", {
+  return d.toLocaleDateString("en-AU", {
     month: "long",
     day: "numeric",
     year: "numeric",

@@ -50,10 +50,10 @@ const HARD_DELETE_STATUSES = new Set([
   "quotation_pending",
 ]);
 
-function pesos(value: number): string {
-  return new Intl.NumberFormat("en-PH", {
+function aud(value: number): string {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(value);
 }
@@ -269,7 +269,7 @@ export default function CancelProjectModal({
                           {preview.completedSubtaskCount === 1 ? "" : "s"})
                         </span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100">
-                          {pesos(preview.earnedRevenue)}
+                          {aud(preview.earnedRevenue)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
@@ -277,7 +277,7 @@ export default function CancelProjectModal({
                           Downpayment collected
                         </span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100">
-                          {pesos(preview.downpayment)}
+                          {aud(preview.downpayment)}
                         </span>
                       </div>
                       <div className="mt-1 flex items-center justify-between gap-2 border-t border-slate-200 pt-1 dark:border-slate-700">
@@ -297,7 +297,7 @@ export default function CancelProjectModal({
                                 ? "text-rose-700 dark:text-rose-300"
                                 : "text-slate-900 dark:text-slate-100",
                           ].join(" ")}>
-                          {pesos(Math.abs(preview.balance))}
+                          {aud(Math.abs(preview.balance))}
                         </span>
                       </div>
                     </div>

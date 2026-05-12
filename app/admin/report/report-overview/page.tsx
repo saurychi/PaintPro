@@ -27,7 +27,7 @@ import {
   ChevronDown,
   Download,
   Loader2,
-  PhilippinePeso,
+  DollarSign,
   RefreshCw,
   TrendingDown,
   TrendingUp,
@@ -254,17 +254,17 @@ function formatDate(value: string | null | undefined) {
 }
 
 function formatCurrencyPHP(n: number) {
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 0,
   }).format(n);
 }
 
 function formatCompactCurrency(n: number) {
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(n);
@@ -957,7 +957,7 @@ export default function ReportOverviewPage() {
           value={formatCurrencyPHP(reportData.summary.totalRevenue)}
           note="Combined estimated budget"
           loading={loading}
-          icon={<PhilippinePeso className="h-4 w-4" />}
+          icon={<DollarSign className="h-4 w-4" />}
         />
 
         <KpiCard

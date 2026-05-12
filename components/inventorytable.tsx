@@ -166,7 +166,11 @@ export default function InventoryTable({ data, type, isLoading, onRowClick, onQu
 
                 {type === "materials" && (
                   <td className="px-3 py-2 text-right text-xs font-semibold text-gray-900">
-                    PHP {(item.unit_cost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {new Intl.NumberFormat("en-AU", {
+                      style: "currency",
+                      currency: "AUD",
+                      minimumFractionDigits: 2,
+                    }).format(Number(item.unit_cost ?? 0))}
                   </td>
                 )}
               </tr>
