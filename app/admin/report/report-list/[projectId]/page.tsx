@@ -97,6 +97,8 @@ type OverviewSubTask = {
   estimated_hours: number | null
   scheduled_start_datetime: string | null
   scheduled_end_datetime: string | null
+  actual_start_datetime: string | null
+  actual_end_datetime: string | null
   status: string | null
   sort_order: number | null
   equipments_used: OverviewEquipment[]
@@ -129,9 +131,9 @@ const sectionHeader =
   "border-b border-gray-100 px-4 py-3 dark:border-slate-700/70"
 
 function currency(value: number) {
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 0,
   }).format(value)
 }
@@ -232,6 +234,59 @@ function specialtyList(value: unknown): string[] {
 
 function staffDisplayName(staff: OverviewStaff) {
   return staff.user?.username || staff.user?.email || "Assigned staff"
+}
+
+type ScheduleVarianceVariant = "early" | "late" | "ontime"
+
+type ScheduleVariance = {
+  variant: ScheduleVarianceVariant
+  label: string
+}
+
+// Diff the subtask's actual finish against its scheduled finish. Within
+// an hour either way reads as "On time" since the live timer rarely
+// lines up with the planned ISO down to the minute. Returns null when
+// either timestamp is missing, so callers can skip the badge entirely
+// for unfinished or schedule-less subtasks.
+function getScheduleVariance(
+  actualEnd: string | null | undefined,
+  scheduledEnd: string | null | undefined,
+): ScheduleVariance | null {
+  if (!actualEnd || !scheduledEnd) return null
+
+  const actualMs = new Date(actualEnd).getTime()
+  const scheduledMs = new Date(scheduledEnd).getTime()
+  if (!Number.isFinite(actualMs) || !Number.isFinite(scheduledMs)) return null
+
+  const diffMs = actualMs - scheduledMs
+  const ONE_HOUR = 60 * 60 * 1000
+  if (Math.abs(diffMs) <= ONE_HOUR) {
+    return { variant: "ontime", label: "On time" }
+  }
+
+  const abs = Math.abs(diffMs)
+  const days = Math.floor(abs / (24 * ONE_HOUR))
+  const hours = Math.floor((abs % (24 * ONE_HOUR)) / ONE_HOUR)
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days}d`)
+  if (hours > 0) parts.push(`${hours}h`)
+  if (parts.length === 0) parts.push("<1h")
+
+  const prefix = diffMs > 0 ? "Late" : "Early"
+  return {
+    variant: diffMs > 0 ? "late" : "early",
+    label: `${prefix} by ${parts.join(" ")}`,
+  }
+}
+
+function scheduleVarianceBadgeClass(variant: ScheduleVarianceVariant) {
+  if (variant === "late") {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-300"
+  }
+  if (variant === "early") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-500/15 dark:text-emerald-300"
+  }
+  return "border-gray-200 bg-gray-50 text-gray-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
 }
 
 function MetaRow({
@@ -668,6 +723,10 @@ export default function ProjectReportDetailPage() {
                                       const isSubOpen = expandedSubtasks.has(
                                         subtask.project_sub_task_id,
                                       )
+                                      const variance = getScheduleVariance(
+                                        subtask.actual_end_datetime,
+                                        subtask.scheduled_end_datetime,
+                                      )
                                       return (
                                         <div
                                           key={subtask.project_sub_task_id}
@@ -700,6 +759,16 @@ export default function ProjectReportDetailPage() {
                                                 <span>
                                                   {statusLabel(subtask.status)}
                                                 </span>
+                                                {variance ? (
+                                                  <>
+                                                    <span>•</span>
+                                                    <span
+                                                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${scheduleVarianceBadgeClass(variance.variant)}`}
+                                                    >
+                                                      {variance.label}
+                                                    </span>
+                                                  </>
+                                                ) : null}
                                               </div>
                                             </div>
                                             <div className="flex shrink-0 items-start gap-2">

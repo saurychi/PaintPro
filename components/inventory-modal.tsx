@@ -175,6 +175,19 @@ export default function InventoryModal({
   const isArchived = formData.status === "Archived"
   const displayStatus =
     type === "materials" ? formData.status ?? "Active" : formData.status ?? "Available"
+  // Block "Archive" on a material that still has stock on hand. Same
+  // gate the /api/inventory/archive endpoint enforces — surfacing it
+  // here means the user sees the reason on hover instead of clicking
+  // and getting bounced with a toast.
+  const materialStockOnHand = Number(formData.current_in_stock ?? 0)
+  const blockArchiveForStock =
+    type === "materials" &&
+    !isArchived &&
+    Number.isFinite(materialStockOnHand) &&
+    materialStockOnHand > 0
+  const archiveButtonTitle = blockArchiveForStock
+    ? "Bring stock to 0 before archiving this material."
+    : undefined
   const titleText =
     mode === "add"
       ? `Add New ${type === "materials" ? "Material" : "Equipment"}`
@@ -233,7 +246,9 @@ export default function InventoryModal({
                       !isArchived,
                     )
                   }
-                  className={isArchived ? btnRestore : btnDanger}
+                  disabled={blockArchiveForStock}
+                  title={archiveButtonTitle}
+                  className={`${isArchived ? btnRestore : btnDanger} disabled:cursor-not-allowed disabled:opacity-60`}
                 >
                   {isArchived ? <RefreshCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
                   {isArchived ? "Restore" : "Archive"}

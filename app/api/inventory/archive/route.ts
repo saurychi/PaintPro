@@ -71,6 +71,40 @@ export async function POST(request: NextRequest) {
     const restoreStatus = type === "materials" ? "Active" : "Available";
     const newStatus = isArchiving ? "Archived" : restoreStatus;
 
+    // Block archiving a material that still has stock on hand. The
+    // status flag is what hides a material from quote / project flows,
+    // so archiving a row with remaining stock would orphan that
+    // inventory. Equipment is unit-tracked, not stock-tracked, so the
+    // same gate doesn't apply.
+    if (isArchiving && type === "materials") {
+      const { data: stockRow, error: stockError } = await supabaseAdmin
+        .from("materials")
+        .select("current_in_stock")
+        .eq("material_id", id)
+        .maybeSingle();
+
+      if (stockError) {
+        return NextResponse.json(
+          {
+            error: "Failed to check material stock.",
+            details: stockError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      const stock = Number(stockRow?.current_in_stock ?? 0);
+      if (Number.isFinite(stock) && stock > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Cannot archive a material with stock on hand. Bring current_in_stock to 0 first.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const { error } = await supabaseAdmin
       .from(table)
       .update({ status: newStatus, updated_at: new Date().toISOString() })
