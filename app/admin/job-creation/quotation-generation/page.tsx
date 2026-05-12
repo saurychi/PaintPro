@@ -18,7 +18,6 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import { ensureWizardCacheHydrated, setCachedStep } from "@/lib/wizardCache";
-import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
 import { toast } from "sonner";
 import CancelProjectModal from "@/components/project-cancellation/CancelProjectModal";
 
@@ -83,12 +82,6 @@ export default function JobQuotation() {
   const [generatingQuotation, setGeneratingQuotation] = useState(false);
   const [grantingAccess, setGrantingAccess] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
-  // Hook into the simulated project clock so "Proceed to Downpayment"
-  // can also fast-forward the dashboard's workday to the moment this
-  // project is scheduled to start — that way the JobProgressCard lands
-  // on the right project and the downpayment modal opens against a
-  // realistic clock instead of whatever the previous reference was.
-  const { saveReferenceIso } = useProjectTimeReference();
   // Cache-busting token appended to the iframe src to force a reload after
   // (re)generation without dropping focus / scroll.
   const [previewVersion, setPreviewVersion] = useState(0);
@@ -331,16 +324,13 @@ export default function JobQuotation() {
     setStartingProgress(true);
     setOptimisticProjectStatus(projectId, "downpayment_pending");
 
-    // Fast-forward the simulated workday clock to whenever this project
-    // is scheduled to start. The dashboard reads the cookie via
-    // useProjectTimeReference, so by the time the redirect lands the
-    // JobProgressCard is already viewing "today = the project's start
-    // day" — handy when multiple projects share a calendar day, since
-    // we also pass projectId so the auto-select picks this one.
-    if (project?.scheduled_start_datetime) {
-      saveReferenceIso(project.scheduled_start_datetime);
-    }
-
+    // The simulated workday clock is intentionally NOT touched here.
+    // It is owned by the Settings panel; "Proceed to Downpayment" used
+    // to silently overwrite the cookie so the dashboard auto-landed on
+    // this project's scheduled date, but that hid a global side effect
+    // behind a per-project action. The dashboard's auto-select still
+    // picks the right project via the projectId URL param.
+    //
     // Dashboard params do three jobs:
     //  • projectId  → JobProgressCard pre-selects this project even
     //    when there are other projects on the same workday.
