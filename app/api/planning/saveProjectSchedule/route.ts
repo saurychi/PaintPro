@@ -6,6 +6,14 @@ import {
   buildUnavailableDateSet,
   snapStartPastUnavailableSpan,
 } from "@/lib/schedule/snapPastUnavailable";
+// snapStartPastUnavailableSpan only handles non-working DAYS (Sundays +
+// the blocked list). We also need to clamp out-of-hours starts
+// (e.g. 17:00, lunch, before 09:00) so a buggy client payload can't
+// persist a subtask whose start sits outside the work calendar.
+import {
+  placeWorkSpan,
+  snapToNextWorkingMoment,
+} from "@/lib/schedule/workHours";
 
 type ScheduleItem = {
   projectSubTaskId?: string;
@@ -73,16 +81,58 @@ export async function POST(request: Request) {
       .map((item) => {
         const estimatedHours =
           typeof item.estimatedHours === "number" ? item.estimatedHours : null;
+
+        // Stage 1: snap past blocked DAYS (Sundays + holiday/manual list).
+        // Pure day-level math, preserves time-of-day.
         const snapped = snapStartPastUnavailableSpan(
           item.scheduledStartDatetime ?? null,
           estimatedHours,
           unavailableSet,
         );
-        const scheduledStart = snapped.iso;
-        const scheduledEnd =
+
+        // Stage 2: snap the time-of-day into the working window. The
+        // client (e.g. the schedule wizard's drag-and-drop) could send
+        // a moment at 17:00, mid-lunch, or before 09:00; without this
+        // step we'd persist it verbatim and the dashboard would
+        // happily render a task that starts after the workday is over.
+        // snapToNextWorkingMoment is idempotent on values that are
+        // already valid, so well-behaved payloads are untouched.
+        let scheduledStart: string | null = snapped.iso;
+        let scheduledEnd: string | null =
           snapped.skippedDays > 0 || !item.scheduledEndDatetime
             ? addHoursToIso(scheduledStart, estimatedHours)
-            : item.scheduledEndDatetime;
+            : item.scheduledEndDatetime ?? null;
+
+        if (scheduledStart) {
+          const beforeSnap = new Date(scheduledStart);
+          if (!Number.isNaN(beforeSnap.getTime())) {
+            const afterSnap = snapToNextWorkingMoment(
+              beforeSnap,
+              unavailableSet,
+            );
+            if (afterSnap.getTime() !== beforeSnap.getTime()) {
+              // Start moved into a new working block, so the end has to
+              // be recomputed against the placed span — letting
+              // placeWorkSpan carve out lunch / overnight / unavailable
+              // days inside the new envelope.
+              if (
+                typeof estimatedHours === "number" &&
+                estimatedHours > 0
+              ) {
+                const placed = placeWorkSpan(
+                  afterSnap,
+                  estimatedHours,
+                  unavailableSet,
+                );
+                scheduledStart = placed.start.toISOString();
+                scheduledEnd = placed.end.toISOString();
+              } else {
+                scheduledStart = afterSnap.toISOString();
+                scheduledEnd = afterSnap.toISOString();
+              }
+            }
+          }
+        }
 
         return {
           project_sub_task_id: item.projectSubTaskId as string,

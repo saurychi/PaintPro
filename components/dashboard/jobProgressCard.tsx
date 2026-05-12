@@ -967,6 +967,26 @@ function JobProgressCard({
   const effectiveProjectStatus = projectStatusOverride || selectedProjectStatus;
   const effectiveCurrentUserId = currentUserId || resolvedCurrentUserId;
 
+  // Effective top-level status per group, in display order. Drives the
+  // cross-group ordering check on Finish buttons: the first child of a
+  // group can only finish once every preceding group is done.
+  const groupEffectiveStatuses = useMemo<StepVisualStatus[]>(
+    () =>
+      processItems.map((g) => {
+        if (isStartOfWorkGroup(g) && startOfWorkDone) return "done";
+        if (isManageEndOfWorkGroup(g))
+          return getEndOfWorkGroupVisualStatus(effectiveProjectStatus);
+        if (isCancellationGroup(g))
+          return getCancellationGroupVisualStatus(effectiveCancellationPhase);
+        return g.status;
+      }),
+    [
+      processItems,
+      startOfWorkDone,
+      effectiveProjectStatus,
+      effectiveCancellationPhase,
+    ],
+  );
 
   useEffect(() => {
     setProjectStatusOverride(null);
@@ -2000,6 +2020,16 @@ function JobProgressCard({
                     (status) => status === "done",
                   ).length;
 
+                  // Only the IMMEDIATE next pending child shows its
+                  // scheduled start. Every later pending row hides it so
+                  // the eye stays on the work that's actually about to
+                  // happen instead of a long ladder of future starts.
+                  // Done rows continue to render start + end so the
+                  // completion history is legible.
+                  const firstPendingIndex = siblingStatuses.findIndex(
+                    (status) => status === "pending",
+                  );
+
                   return (
                     <div
                       key={group.id}
@@ -2173,10 +2203,15 @@ function JobProgressCard({
                                   previousSibling?.detail
                                     ?.scheduledEndDatetime,
                               );
+                              const allPreviousGroupsDone =
+                                groupEffectiveStatuses
+                                  .slice(0, groupIndex)
+                                  .every((s) => s === "done");
                               const isPreviousTaskDone =
-                                childIndex === 0 ||
-                                (siblingStatuses[childIndex - 1] === "done" &&
-                                  previousHasEndDatetime);
+                                childIndex === 0
+                                  ? allPreviousGroupsDone
+                                  : siblingStatuses[childIndex - 1] === "done" &&
+                                    previousHasEndDatetime;
                               const childOpen = openSubtaskIds.has(child.id);
                               const hasDetail = Boolean(child.detail);
                               const childRoute = isJobCreationGroup
@@ -2750,64 +2785,82 @@ function JobProgressCard({
                                           </div>
 
                                           {/* Mobile-only date subtext.
-                                              Pre-completion the only useful
-                                              number is the scheduled start
-                                              (when it WILL run / IS running);
-                                              the "Finished" line only shows
-                                              once the subtask is actually
-                                              done, so the placeholder dashes
-                                              on active / pending rows
-                                              disappear. */}
-                                          <div
-                                            className={[
-                                              "mt-1.5 space-y-0.5 text-[11px] md:hidden",
-                                              dim
-                                                ? "text-gray-300"
-                                                : "text-gray-500 dark:text-slate-400",
-                                            ].join(" ")}>
-                                            <div>
-                                              {effectiveChildStatus === "done"
-                                                ? "Started: "
-                                                : "Scheduled: "}
-                                              <span
-                                                className={
+                                              Visibility rules:
+                                              - done   → show Started + Finished
+                                              - active → show Scheduled (start only)
+                                              - first pending after active → show Scheduled
+                                              - any later pending → hide entirely
+                                              so the eye stays on the work
+                                              the crew is actually about to do. */}
+                                          {(() => {
+                                            // Three render shapes:
+                                            // - done    → Started + Finished rows
+                                            // - active or first-pending → Scheduled row
+                                            // - later pending → render nothing
+                                            const showStart =
+                                              effectiveChildStatus !== "pending" ||
+                                              childIndex === firstPendingIndex;
+                                            if (!showStart) return null;
+                                            return (
+                                              <div
+                                                className={[
+                                                  "mt-1.5 space-y-0.5 text-[11px] md:hidden",
                                                   dim
                                                     ? "text-gray-300"
-                                                    : "text-gray-700 dark:text-slate-300"
-                                                }>
-                                                {child.startLabel || "-"}
-                                              </span>
-                                            </div>
-                                            {effectiveChildStatus === "done" ? (
-                                              <div>
-                                                Finished:{" "}
-                                                <span
-                                                  className={
-                                                    dim
-                                                      ? "text-gray-300"
-                                                      : "text-gray-700 dark:text-slate-300"
-                                                  }>
-                                                  {child.endLabel || "-"}
-                                                </span>
+                                                    : "text-gray-500 dark:text-slate-400",
+                                                ].join(" ")}>
+                                                {showStart ? (
+                                                  <div>
+                                                    {effectiveChildStatus === "done"
+                                                      ? "Started: "
+                                                      : "Scheduled: "}
+                                                    <span
+                                                      className={
+                                                        dim
+                                                          ? "text-gray-300"
+                                                          : "text-gray-700 dark:text-slate-300"
+                                                      }>
+                                                      {child.startLabel || "-"}
+                                                    </span>
+                                                  </div>
+                                                ) : null}
+                                                {effectiveChildStatus === "done" ? (
+                                                  <div>
+                                                    Finished:{" "}
+                                                    <span
+                                                      className={
+                                                        dim
+                                                          ? "text-gray-300"
+                                                          : "text-gray-700 dark:text-slate-300"
+                                                      }>
+                                                      {child.endLabel || "-"}
+                                                    </span>
+                                                  </div>
+                                                ) : null}
                                               </div>
-                                            ) : null}
-                                          </div>
+                                            );
+                                          })()}
                                         </div>
 
-                                        {/* Start date (desktop only). Always
-                                            visible: the ongoing subtask and
-                                            every pending subtask after it
-                                            care about when they begin. */}
+                                        {/* Start date (desktop only). Done +
+                                            active rows always show it. Pending
+                                            rows show it ONLY for the first
+                                            pending in the group — every later
+                                            pending hides it to declutter the
+                                            "future work" tail. */}
                                         <div className="hidden md:col-span-3 md:block">
-                                          <div
-                                            className={[
-                                              "text-xs",
-                                              dim
-                                                ? "text-gray-200"
-                                                : "text-gray-700 dark:text-slate-300",
-                                            ].join(" ")}>
-                                            {child.startLabel || "-"}
-                                          </div>
+                                          {effectiveChildStatus !== "pending" ||
+                                          childIndex === firstPendingIndex ? (
+                                            <div
+                                              className={[
+                                                "text-xs",
+                                                dim
+                                                  ? "text-gray-200"
+                                                  : "text-gray-700 dark:text-slate-300",
+                                              ].join(" ")}>
+                                              {child.startLabel || "-"}
+                                            </div>
+                                          ) : null}
                                         </div>
 
                                         {/* End date + detail chevron
@@ -2971,7 +3024,9 @@ function JobProgressCard({
                                                 disabled={!isPreviousTaskDone}
                                                 title={
                                                   !isPreviousTaskDone
-                                                    ? "The previous subtask must be finished (have an end datetime) first"
+                                                    ? childIndex === 0
+                                                      ? "Finish the tasks above this one first."
+                                                      : "The previous subtask must be finished (have an end datetime) first."
                                                     : undefined
                                                 }
                                                 onClick={() => {

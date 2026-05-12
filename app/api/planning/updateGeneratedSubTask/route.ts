@@ -8,6 +8,10 @@ import {
   snapStartPastUnavailableSpan,
 } from "@/lib/schedule/snapPastUnavailable";
 import { cascadeShiftLaterSubtasks } from "@/lib/schedule/cascadeShift";
+import {
+  placeWorkSpan,
+  snapToNextWorkingMoment,
+} from "@/lib/schedule/workHours";
 
 type MaterialInput = {
   materialId?: string;
@@ -71,11 +75,45 @@ export async function POST(request: Request) {
       estimatedHours,
       unavailableSet,
     );
-    const scheduledStartDatetime = snapped.iso;
-    const scheduledEndDatetime =
+    let scheduledStartDatetime: string | null = snapped.iso;
+    let scheduledEndDatetime: string | null =
       snapped.skippedDays > 0 || !body.scheduledEndDatetime
         ? addHoursToIso(scheduledStartDatetime, estimatedHours)
-        : body.scheduledEndDatetime;
+        : body.scheduledEndDatetime ?? null;
+
+    // Server-side defense: even if the modal's client-side validation
+    // is bypassed (curl, stale tab, etc.), make sure the persisted
+    // start lands inside the work calendar. snapToNextWorkingMoment
+    // pushes 17:00 → next-day 09:00, lunch → 13:00, pre-09:00 → 09:00,
+    // and rolls over Sundays / blocked days. placeWorkSpan then
+    // re-derives the end so the saved row matches what the dashboard
+    // would render via the same helpers.
+    if (scheduledStartDatetime) {
+      const beforeSnap = new Date(scheduledStartDatetime);
+      if (!Number.isNaN(beforeSnap.getTime())) {
+        const afterSnap = snapToNextWorkingMoment(
+          beforeSnap,
+          unavailableSet,
+        );
+        if (afterSnap.getTime() !== beforeSnap.getTime()) {
+          if (
+            typeof estimatedHours === "number" &&
+            estimatedHours > 0
+          ) {
+            const placed = placeWorkSpan(
+              afterSnap,
+              estimatedHours,
+              unavailableSet,
+            );
+            scheduledStartDatetime = placed.start.toISOString();
+            scheduledEndDatetime = placed.end.toISOString();
+          } else {
+            scheduledStartDatetime = afterSnap.toISOString();
+            scheduledEndDatetime = afterSnap.toISOString();
+          }
+        }
+      }
+    }
 
     // Snapshot the OLD scheduled bounds before the update so the
     // cascade can anchor on where this subtask used to sit and shift
