@@ -134,14 +134,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Cascade runs in the background. Each subtask it shifts emits a
-    // project_sub_task UPDATE that the dashboard's realtime
-    // subscription patches in place — so the user sees the new times
-    // land within ~1s of the response, instead of waiting for the
-    // entire cascade to finish before getting "Done". For a project
-    // with many remaining subtasks the cascade can take 1-3s to
-    // chunk through; making it block the response was the main
-    // source of the perceived "Finishing..." lag.
+    // Cascade is now awaited rather than fire-and-forget: the chain
+    // underneath the finishing subtask MUST be coherent by the time we
+    // tell the dashboard "done". Background-firing it lost shifts on
+    // Vercel function teardowns and made it impossible to surface
+    // cascade failures to the admin (they'd just see a "Done" toast
+    // and stale times). The cascade is ~1-2s for typical projects;
+    // worth the trade for the consistency.
     //
     // The gate accepts either bound: a subtask whose scheduled_end was
     // never populated (manual data tweaks, partially-migrated rows)
@@ -155,6 +154,9 @@ export async function POST(request: Request) {
       originalScheduledEndDate?.getTime() ?? null;
     const finishingAnchorMs =
       finishingAnchorStartMs ?? finishingAnchorEndMs;
+
+    let cascadeShifted = 0;
+    let cascadeWarning: string | null = null;
 
     if (
       isCompleting &&
@@ -170,28 +172,34 @@ export async function POST(request: Request) {
       const originalScheduledEndMs =
         finishingAnchorEndMs ?? finishingAnchorStartMs ?? finishingAnchorMs;
 
-      void cascadeShiftLaterSubtasks({
-        anchorSubTaskId: projectSubTaskId,
-        projectTaskId,
-        originalScheduledStartMs,
-        originalScheduledEndMs,
-        referenceEndMs: referenceNow.getTime(),
-        timestampIso,
-      })
-        .then((result) => {
-          if (result.error) {
-            console.error(
-              "[updateSubTaskStatus] background cascade shift failed:",
-              result.error,
-            );
-          }
-        })
-        .catch((err: unknown) => {
-          console.error(
-            "[updateSubTaskStatus] background cascade shift threw:",
-            err instanceof Error ? err.message : String(err),
-          );
+      try {
+        const cascadeResult = await cascadeShiftLaterSubtasks({
+          anchorSubTaskId: projectSubTaskId,
+          projectTaskId,
+          originalScheduledStartMs,
+          originalScheduledEndMs,
+          referenceEndMs: referenceNow.getTime(),
+          timestampIso,
         });
+
+        if (cascadeResult.error) {
+          console.error(
+            "[updateSubTaskStatus] cascade shift failed:",
+            cascadeResult.error,
+          );
+          cascadeWarning = cascadeResult.error;
+        } else {
+          cascadeShifted = cascadeResult.shifted;
+        }
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : String(err ?? "Unknown error");
+        console.error(
+          "[updateSubTaskStatus] cascade shift threw:",
+          message,
+        );
+        cascadeWarning = message;
+      }
     }
 
     let projectStatus: string | null = null;
@@ -318,11 +326,13 @@ export async function POST(request: Request) {
       ok: true,
       projectStatus,
       movedToReviewPending,
-      // Cascade now runs in the background; its UPDATE events
-      // broadcast via realtime so dashboards patch the shifted
-      // subtask times automatically. We no longer carry a per-call
-      // shifted/delta/warning summary because awaiting that would
-      // re-introduce the slowness this change was made to remove.
+      // Surface the cascade result so the dashboard can render a
+      // toast describing the shift (or warn if it failed mid-flight).
+      // The realtime subscription also patches subtask rows live, but
+      // shipping the count here gives a deterministic confirmation in
+      // the same response.
+      cascadeShifted,
+      cascadeWarning,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";

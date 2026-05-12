@@ -126,41 +126,64 @@ export async function POST(request: Request) {
     }
 
     // Cascade-shift every later subtask so the chain stays consistent
-    // with the edited end. Fired as a background task: each shift
-    // emits a realtime UPDATE the dashboard patches in place, so the
-    // response can return as soon as the primary write lands.
-    if (previousStartMs !== null && previousEndMs !== null) {
-      const newEndDate = scheduledEndDatetime
-        ? new Date(scheduledEndDatetime)
-        : null;
-      const newEndMs =
-        newEndDate && !Number.isNaN(newEndDate.getTime())
-          ? newEndDate.getTime()
+    // with the edited end. Awaited so the response only returns after
+    // the chain is coherent — every datetime change must propagate
+    // through to later subtasks before the dashboard hears about it,
+    // otherwise the admin sees the edited row in its new slot while
+    // siblings sit at stale times for several seconds.
+    let cascadeShifted = 0;
+    let cascadeWarning: string | null = null;
+
+    // Accept either bound as the anchor when only one is known —
+    // mirrors the relaxed gate in updateSubTaskStatus so a row with a
+    // missing scheduled_end still triggers a cascade.
+    const anchorPreviousStartMs = previousStartMs ?? previousEndMs;
+    const anchorPreviousEndMs = previousEndMs ?? previousStartMs;
+    const newEndDate = scheduledEndDatetime
+      ? new Date(scheduledEndDatetime)
+      : null;
+    const newStartDate = scheduledStartDatetime
+      ? new Date(scheduledStartDatetime)
+      : null;
+    const newEndMs =
+      newEndDate && !Number.isNaN(newEndDate.getTime())
+        ? newEndDate.getTime()
+        : newStartDate && !Number.isNaN(newStartDate.getTime())
+          ? newStartDate.getTime()
           : null;
 
-      if (newEndMs !== null) {
-        void cascadeShiftLaterSubtasks({
+    if (
+      anchorPreviousStartMs !== null &&
+      anchorPreviousEndMs !== null &&
+      newEndMs !== null
+    ) {
+      try {
+        const cascadeResult = await cascadeShiftLaterSubtasks({
           anchorSubTaskId: projectSubTaskId,
           projectTaskId,
-          originalScheduledStartMs: previousStartMs,
-          originalScheduledEndMs: previousEndMs,
+          originalScheduledStartMs: anchorPreviousStartMs,
+          originalScheduledEndMs: anchorPreviousEndMs,
           referenceEndMs: newEndMs,
           timestampIso: timestamp,
-        })
-          .then((result) => {
-            if (result.error) {
-              console.error(
-                "[updateGeneratedSubTask] background cascade shift failed:",
-                result.error,
-              );
-            }
-          })
-          .catch((err: unknown) => {
-            console.error(
-              "[updateGeneratedSubTask] background cascade shift threw:",
-              err instanceof Error ? err.message : String(err),
-            );
-          });
+        });
+
+        if (cascadeResult.error) {
+          console.error(
+            "[updateGeneratedSubTask] cascade shift failed:",
+            cascadeResult.error,
+          );
+          cascadeWarning = cascadeResult.error;
+        } else {
+          cascadeShifted = cascadeResult.shifted;
+        }
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : String(err ?? "Unknown error");
+        console.error(
+          "[updateGeneratedSubTask] cascade shift threw:",
+          message,
+        );
+        cascadeWarning = message;
       }
     }
 
@@ -246,7 +269,11 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      cascadeShifted,
+      cascadeWarning,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
 
