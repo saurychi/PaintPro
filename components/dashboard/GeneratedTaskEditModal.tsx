@@ -163,8 +163,8 @@ function snapToNextWorkingMoment(
 
 type StartIssue =
   | { kind: "ok" }
-  | { kind: "sunday" }
-  | { kind: "blocked"; date: string }
+  | { kind: "sunday"; suggested: Date }
+  | { kind: "blocked"; date: string; suggested: Date }
   | { kind: "before-work"; suggested: Date }
   | { kind: "lunch"; suggested: Date }
   | { kind: "after-work"; suggested: Date };
@@ -175,13 +175,19 @@ function describeStartIssue(
 ): StartIssue {
   if (Number.isNaN(start.getTime())) return { kind: "ok" };
 
-  if (start.getDay() === 0) return { kind: "sunday" };
+  if (start.getDay() === 0) {
+    const suggested = snapToNextWorkingMoment(start, unavailableSet);
+    return { kind: "sunday", suggested };
+  }
 
   const dateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(
     2,
     "0",
   )}-${String(start.getDate()).padStart(2, "0")}`;
-  if (unavailableSet.has(dateKey)) return { kind: "blocked", date: dateKey };
+  if (unavailableSet.has(dateKey)) {
+    const suggested = snapToNextWorkingMoment(start, unavailableSet);
+    return { kind: "blocked", date: dateKey, suggested };
+  }
 
   const minutes = start.getHours() * 60 + start.getMinutes();
   if (minutes < WORK_START_HOUR * 60) {
@@ -1046,33 +1052,31 @@ function ScheduleIssue({
     }
   })();
 
-  const suggestion =
-    issue.kind === "before-work" ||
-    issue.kind === "lunch" ||
-    issue.kind === "after-work"
-      ? issue.suggested
-      : null;
+  // Every issue kind now carries a suggestion (sunday + blocked both
+  // snap forward to the next working moment via snapToNextWorkingMoment),
+  // so the warning always shows a one-click recovery button.
+  const suggestion = issue.suggested;
+
+  const suggestionLabel = suggestion.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
   return (
-    <div className="mt-3 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <p>{message}</p>
-        {suggestion ? (
-          <button
-            type="button"
-            onClick={() => onSnap(suggestion)}
-            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold underline-offset-2 hover:underline">
-            Snap to{" "}
-            {suggestion.toLocaleString(undefined, {
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </button>
-        ) : null}
+    <div className="mt-3 flex flex-wrap items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+      <div className="flex min-w-0 flex-1 items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <p className="min-w-0 flex-1 leading-5">{message}</p>
       </div>
+      <button
+        type="button"
+        onClick={() => onSnap(suggestion)}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 hover:text-rose-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200 dark:hover:bg-rose-500/25">
+        Snap to {suggestionLabel}
+      </button>
     </div>
   );
 }
