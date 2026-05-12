@@ -109,7 +109,11 @@ export async function POST(req: Request) {
     if (!neededStockAvailable) break;
 
     const existingNeed = existingById.get(materialId) ?? 0;
-    const next = Math.max(existingNeed, requested);
+    // Round up so a partial-unit deficit (e.g. planned 105 minus 2.5 in
+    // stock = 102.5) still buys enough stock to cover the project. Also
+    // keeps the value compatible with integer-typed needed_stock columns
+    // in production — Postgres rejects "102.5" for an int column.
+    const next = Math.ceil(Math.max(existingNeed, requested));
 
     const update: Record<string, unknown> = {
       needed_stock: next,
