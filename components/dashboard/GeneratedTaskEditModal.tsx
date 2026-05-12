@@ -18,8 +18,8 @@ import {
   LUNCH_START_HOUR,
   WORK_END_HOUR,
   WORK_START_HOUR,
-  isNonWorkingDay,
   placeWorkSpan,
+  snapToNextWorkingMoment,
 } from "@/lib/schedule/workHours";
 
 export type GeneratedTaskMaterial = {
@@ -121,44 +121,6 @@ function dateToLocalInputValue(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
     date.getDate(),
   )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-// Snap an arbitrary moment forward to the next valid working second:
-// past lunch, past 17:00 to next day, past Sunday / blocked day, etc.
-// Mirrors the cursor-normalization loop inside computeWorkSegments so the
-// modal lands on the same start placeWorkSpan would have picked anyway.
-function snapToNextWorkingMoment(
-  start: Date,
-  unavailableSet: Set<string>,
-): Date {
-  const cursor = new Date(start);
-  for (let guard = 0; guard < 365 * 2; guard++) {
-    if (isNonWorkingDay(cursor, unavailableSet)) {
-      cursor.setDate(cursor.getDate() + 1);
-      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
-      continue;
-    }
-
-    const minutes = cursor.getHours() * 60 + cursor.getMinutes();
-    if (minutes < WORK_START_HOUR * 60) {
-      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
-      continue;
-    }
-    if (minutes >= WORK_END_HOUR * 60) {
-      cursor.setDate(cursor.getDate() + 1);
-      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
-      continue;
-    }
-    if (
-      minutes >= LUNCH_START_HOUR * 60 &&
-      minutes < LUNCH_END_HOUR * 60
-    ) {
-      cursor.setHours(LUNCH_END_HOUR, 0, 0, 0);
-      continue;
-    }
-    return cursor;
-  }
-  return cursor;
 }
 
 type StartIssue =

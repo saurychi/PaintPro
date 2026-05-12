@@ -178,6 +178,54 @@ export function workHoursBetween(
   return totalMs / 3_600_000;
 }
 
+// Snap an arbitrary moment forward to the next valid working second:
+// past lunch, past 17:00 to next day, past Sunday, past every entry in
+// the unavailable set. Used by callers that need to normalize a single
+// timestamp without computing a span — e.g. the cascade applied to a
+// subtask that has no estimated_hours value, where placeWorkSpan would
+// otherwise be skipped and leave a 17:00 start untouched.
+//
+// Mirrors the cursor-normalization loop inside computeWorkSegments so
+// the result is the same start placeWorkSpan would have picked anyway.
+export function snapToNextWorkingMoment(
+  start: Date,
+  unavailableDateSet?: Set<string> | null,
+): Date {
+  const cursor = new Date(start);
+  const set = unavailableDateSet ?? new Set<string>();
+
+  for (let guard = 0; guard < 365 * 2; guard++) {
+    if (isNonWorkingDay(cursor, set)) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+
+    const minutes = cursor.getHours() * 60 + cursor.getMinutes();
+
+    if (minutes < WORK_START_HOUR * 60) {
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (minutes >= WORK_END_HOUR * 60) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (
+      minutes >= LUNCH_START_HOUR * 60 &&
+      minutes < LUNCH_END_HOUR * 60
+    ) {
+      cursor.setHours(LUNCH_END_HOUR, 0, 0, 0);
+      continue;
+    }
+
+    return cursor;
+  }
+
+  return cursor;
+}
+
 // Convenience wrapper for callers that only need the overall envelope
 // (first segment's start, last segment's end). Returns the start
 // untouched on a zero-hour input so DB rows stay stable.

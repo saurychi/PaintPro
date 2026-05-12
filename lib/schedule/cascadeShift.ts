@@ -3,7 +3,7 @@ import {
   buildUnavailableDateSet,
   snapStartPastUnavailableSpan,
 } from "@/lib/schedule/snapPastUnavailable";
-import { placeWorkSpan } from "@/lib/schedule/workHours";
+import { placeWorkSpan, snapToNextWorkingMoment } from "@/lib/schedule/workHours";
 
 // Shared "shift every later subtask by the delta between the anchor task's
 // old position and a new reference time" helper. Two callers:
@@ -213,7 +213,23 @@ export async function cascadeShiftLaterSubtasks(args: {
               ? new Date(naiveEndIso)
               : null;
 
+        // ALWAYS normalize the start to a valid working moment. The
+        // earlier code only ran this step when durationHours > 0
+        // (because it piggy-backed on placeWorkSpan to do the snap),
+        // which meant a candidate without an estimated_hours value
+        // could land its start at 17:00 / Sunday / inside lunch / on
+        // a blocked day. snapToNextWorkingMoment pushes any moment
+        // forward to the next valid working second so the same rules
+        // hold for every subtask, with or without a duration.
+        if (finalStart) {
+          finalStart = snapToNextWorkingMoment(finalStart, unavailableSet);
+        }
+
         if (finalStart && durationHours > 0) {
+          // placeWorkSpan handles the multi-block layout (carve out
+          // lunch / overnight / blocked days inside the span) so the
+          // saved [start, end] envelope is the same the scheduler
+          // would have picked from scratch.
           const placed = placeWorkSpan(
             finalStart,
             durationHours,
@@ -221,6 +237,10 @@ export async function cascadeShiftLaterSubtasks(args: {
           );
           finalStart = placed.start;
           finalEnd = placed.end;
+        } else if (finalStart) {
+          // Zero-duration row: end follows start so the row stays
+          // consistent without inflating its clock span.
+          finalEnd = new Date(finalStart);
         }
 
         const payload: Record<string, unknown> = {
