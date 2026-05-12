@@ -56,6 +56,20 @@ function rangesOverlap(
   return aS < bE && aE > bS;
 }
 
+// When the user leaves End blank, default to 17:00 on the start's local
+// day so the block lines up with the 9-5 work window. If start is at or
+// after 17:00, fall back to start + 1 hour so end > start always holds
+// (the DB enforces this via staff_unavailability_valid_range).
+function defaultEndForStart(startLocal: string): string {
+  const start = new Date(startLocal);
+  const end = new Date(startLocal);
+  end.setHours(17, 0, 0, 0);
+  if (end.getTime() <= start.getTime()) {
+    end.setTime(start.getTime() + 60 * 60 * 1000);
+  }
+  return end.toISOString();
+}
+
 const STATUS_STYLES: Record<string, string> = {
   pending: "border-amber-200 bg-amber-50 text-amber-700",
   approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -229,7 +243,7 @@ export default function StaffLeaveRequestsPage() {
     const requestStartIso = new Date(form.startDatetime).toISOString();
     const requestEndIso = form.endDatetime
       ? new Date(form.endDatetime).toISOString()
-      : requestStartIso;
+      : defaultEndForStart(form.startDatetime);
     const conflict = assignments.find((a) =>
       rangesOverlap(
         a.startDatetime,
@@ -259,10 +273,8 @@ export default function StaffLeaveRequestsPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          startDatetime: new Date(form.startDatetime).toISOString(),
-          endDatetime: form.endDatetime
-            ? new Date(form.endDatetime).toISOString()
-            : null,
+          startDatetime: requestStartIso,
+          endDatetime: requestEndIso,
           reason: form.reason.trim(),
         }),
       });
@@ -437,7 +449,7 @@ export default function StaffLeaveRequestsPage() {
                 <label className="text-xs font-medium text-gray-700">
                   End{" "}
                   <span className="text-[11px] font-normal text-gray-400">
-                    (optional, for a multi-hour or multi-day block)
+                    (optional, defaults to 5pm same day)
                   </span>
                 </label>
                 <input

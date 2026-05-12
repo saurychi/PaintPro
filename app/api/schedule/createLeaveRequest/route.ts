@@ -45,11 +45,24 @@ export async function POST(request: NextRequest) {
   if (!startDatetime) {
     return NextResponse.json({ error: "Start date is required." }, { status: 400 })
   }
+  if (!endDatetime) {
+    return NextResponse.json({ error: "End date is required." }, { status: 400 })
+  }
   if (!reason) {
     return NextResponse.json({ error: "Reason is required." }, { status: 400 })
   }
 
-  const effectiveEnd = endDatetime || startDatetime
+  const startMs = new Date(startDatetime).getTime()
+  const endMs = new Date(endDatetime).getTime()
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    return NextResponse.json({ error: "Invalid date format." }, { status: 400 })
+  }
+  if (endMs <= startMs) {
+    return NextResponse.json(
+      { error: "End must be after start." },
+      { status: 400 },
+    )
+  }
 
   let conflicts: Awaited<ReturnType<typeof getStaffActiveAssignments>> = []
   try {
@@ -57,7 +70,7 @@ export async function POST(request: NextRequest) {
     conflicts = findOverlappingAssignments(
       assignments,
       startDatetime,
-      effectiveEnd,
+      endDatetime,
     )
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error"
@@ -92,7 +105,7 @@ export async function POST(request: NextRequest) {
     .insert({
       user_id: user.id,
       start_datetime: startDatetime,
-      end_datetime: effectiveEnd,
+      end_datetime: endDatetime,
       reason,
       status: "pending",
       created_at: new Date().toISOString(),
