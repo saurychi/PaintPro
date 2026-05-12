@@ -204,8 +204,11 @@ export default function ClientPendingDocumentsPage() {
     // the admin clicked Generate Quotation on overview). The URL fragment
     // collapses the PDF viewer's sidebar (`navpanes=0`) and opens at 95%
     // zoom — same defaults the admin's quotation-generation page uses.
-    return `/api/quotation/from-bucket?projectId=${encodeURIComponent(projectId)}#navpanes=0&zoom=95`;
-  }, [projectId, documentType]);
+    // `v=${previewRefreshKey}` busts the PDF viewer's disk cache when we
+    // bump the refresh counter (e.g. right after the client signs and the
+    // bucket file is replaced at the same path).
+    return `/api/quotation/from-bucket?projectId=${encodeURIComponent(projectId)}&v=${previewRefreshKey}#navpanes=0&zoom=95`;
+  }, [projectId, documentType, previewRefreshKey]);
 
   // Reset the iframe-loaded gate whenever the source changes, so the spinner
   // shows again while the next document is fetched.
@@ -441,6 +444,11 @@ export default function ClientPendingDocumentsPage() {
       setJustSignedQuotation(true);
       setPmNotified(false);
       signatureRef.current.clear();
+      // Force the iframe to remount AND bust the PDF viewer's URL cache so
+      // it pulls the freshly-uploaded signed PDF from the bucket instead
+      // of holding onto the unsigned copy at the same storage path.
+      setPreviewLoaded(false);
+      setPreviewRefreshKey((k) => k + 1);
 
       toast.success("Quotation signed.", {
         description:
