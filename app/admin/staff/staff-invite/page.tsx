@@ -10,12 +10,14 @@ import {
   Check,
   Trash2,
   X,
-  ChevronDown,
-  ChevronUp,
   ChevronRight,
 } from "lucide-react"
 
-type InviteRole = "staff" | "manager" | "client"
+// Invite creation is staff/manager only — clients are added via the
+// project flow, not by inviting them here. The list view below still
+// reads any historical client invites in the DB, but the create form
+// no longer offers it as a target role.
+type InviteRole = "staff" | "manager"
 
 type InviteRow = {
   id: string
@@ -58,8 +60,6 @@ function statusPill(status: InviteRow["status"]) {
 
 export default function StaffInvitePage() {
   const [tab, setTab] = useState<InviteRole>("staff")
-
-  const [createOpen, setCreateOpen] = useState(false)
 
   const [email, setEmail] = useState("")
   const [busy, setBusy] = useState(false)
@@ -135,16 +135,14 @@ export default function StaffInvitePage() {
     try {
       setBusy(true)
 
-      const needsPassword = tab === "staff" || tab === "manager"
-
-      const payload = needsPassword
-        ? { role: tab, email: e, password: generatedPassword }
-        : { role: "client", email: e }
-
       const res = await fetch("/api/invites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          role: tab,
+          email: e,
+          password: generatedPassword,
+        }),
       })
 
       const json = await res.json().catch(() => ({}))
@@ -154,18 +152,13 @@ export default function StaffInvitePage() {
         return
       }
 
-      if (tab === "staff") {
-        setSuccess("Staff invite created. Copy the password and send it to the staff member.")
-        setEmail("")
-        setGeneratedPassword(generatePassword())
-      } else if (tab === "manager") {
-        setSuccess("Manager invite created. Copy the password and send it to the manager.")
-        setEmail("")
-        setGeneratedPassword(generatePassword())
-      } else {
-        setSuccess("Client invite created.")
-        setEmail("")
-      }
+      setSuccess(
+        tab === "staff"
+          ? "Staff invite created. Copy the password and send it to the staff member."
+          : "Manager invite created. Copy the password and send it to the manager.",
+      )
+      setEmail("")
+      setGeneratedPassword(generatePassword())
 
       await loadInvites()
     } catch (e) {
@@ -211,12 +204,12 @@ export default function StaffInvitePage() {
   }
 
   const createBtnLabel =
-    tab === "staff" ? "Create staff invite" : tab === "manager" ? "Create manager invite" : "Create client invite"
+    tab === "staff" ? "Create staff invite" : "Create manager invite"
 
   return (
-    <div className="p-6">
+    <div className="flex h-[calc(100vh-var(--admin-header-offset,0px))] min-h-0 flex-col p-4">
       {/* Breadcrumbs */}
-      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+      <div className="flex shrink-0 items-center gap-2 text-sm font-semibold text-gray-900">
         <Link
           href="/admin/staff"
           className="rounded-md px-1.5 py-1 text-[#00c065] hover:bg-gray-50 hover:text-[#00a054]"
@@ -224,259 +217,212 @@ export default function StaffInvitePage() {
           Staff
         </Link>
 
-        <ChevronRight className="h-4 w-4 text-gray-400" />
+        <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
 
         <span className="text-gray-900">Invites</span>
       </div>
 
-      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Invites</h1>
+      <h1 className="mt-1 shrink-0 text-2xl font-semibold text-gray-900">Invites</h1>
 
-      <div className="mt-6 space-y-6">
-        {/* Create */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900">Create an invite</div>
-              <div className="mt-1 text-sm text-gray-600">
-                Make sure to save the password as it will only appear one time
-              </div>
+      <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
+        {/* Create — minimal pane: header, role toggle, then a single row
+            with password, email, and the submit button right-aligned. */}
+        <div className="flex shrink-0 flex-col gap-4 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="text-sm font-semibold text-gray-900">
+              Create an invite
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCreateOpen((v) => !v)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
-                aria-label={createOpen ? "Collapse create invite" : "Expand create invite"}
-                title={createOpen ? "Collapse" : "Expand"}
-              >
-                {createOpen ? (
-                  <ChevronUp className="h-4 w-4 text-gray-500" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-gray-500" />
-                )}
-              </button>
+            {/* Role toggle — compact segmented control. */}
+            <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
+              {(["staff", "manager"] as const).map((role) => {
+                const isActive = tab === role
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    onClick={() => {
+                      resetAlerts()
+                      setTab(role)
+                    }}
+                    className={[
+                      "rounded-sm px-2.5 py-0.5 text-xs font-semibold transition-colors",
+                      isActive
+                        ? "bg-[#00c065] text-white shadow-sm"
+                        : "text-gray-600 hover:text-gray-900",
+                    ].join(" ")}
+                  >
+                    {role === "staff" ? "Staff" : "Manager"}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          {createOpen && (
-            <div className="mt-4 grid grid-cols-1 gap-4">
-              {/* Tabs only visible when expanded */}
-              <div className="flex flex-wrap items-center gap-2">
+          {/* Single-row form: password block, email field, submit button.
+              All bottom-aligned so the labels sit at the top and the
+              inputs / button share a baseline. Stacks on narrow screens. */}
+          <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end lg:gap-5">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Password
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  value={generatedPassword}
+                  readOnly
+                  className="h-9 w-[180px] rounded-md border border-gray-200 bg-white px-3 font-mono text-sm font-semibold text-gray-900 shadow-sm outline-none"
+                />
                 <button
                   type="button"
-                  onClick={() => {
-                    resetAlerts()
-                    setTab("staff")
-                  }}
-                  className={[
-                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition-all duration-200 active:scale-[0.98]",
-                    tab === "staff"
-                      ? "border-[#00c065] bg-[#00c065]/10 text-gray-900"
-                      : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
-                  ].join(" ")}
+                  onClick={() => setGeneratedPassword(generatePassword())}
+                  aria-label="Regenerate password"
+                  title="Regenerate password"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                 >
-                  Staff
+                  <RefreshCw className="h-3.5 w-3.5" />
                 </button>
-
                 <button
                   type="button"
-                  onClick={() => {
-                    resetAlerts()
-                    setTab("manager")
-                  }}
-                  className={[
-                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition-all duration-200 active:scale-[0.98]",
-                    tab === "manager"
-                      ? "border-[#00c065] bg-[#00c065]/10 text-gray-900"
-                      : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
-                  ].join(" ")}
+                  onClick={copyPassword}
+                  aria-label={copied ? "Copied" : "Copy password"}
+                  title={copied ? "Copied" : "Copy password"}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                 >
-                  Manager
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetAlerts()
-                    setTab("client")
-                  }}
-                  className={[
-                    "rounded-lg border px-3 py-2 text-sm font-semibold shadow-sm transition-all duration-200 active:scale-[0.98]",
-                    tab === "client"
-                      ? "border-[#00c065] bg-[#00c065]/10 text-gray-900"
-                      : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
-                  ].join(" ")}
-                >
-                  Client
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-[#00c065]" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
                 </button>
               </div>
+            </div>
 
-              <div className="grid gap-1.5">
-                <label className="text-sm text-gray-700">Email</label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    type="email"
-                    placeholder="name@example.com"
-                    className="h-11 w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-3.5 text-sm text-gray-700 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
-                  />
-                </div>
-                <p className="text-[12px] text-gray-500">This should match the email you invited.</p>
+            <div className="flex min-w-[220px] flex-1 flex-col gap-1.5">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Email
+              </label>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  type="email"
+                  placeholder="name@example.com"
+                  className="h-9 w-full rounded-md border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-sm text-gray-700 shadow-sm outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+                />
               </div>
+            </div>
 
-              {(tab === "staff" || tab === "manager") && (
-                <div className="grid gap-1.5">
-                  <label className="text-sm text-gray-700">Generated password</label>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canSubmit}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#00c065] px-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 lg:ml-auto"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              {busy ? "Creating..." : createBtnLabel}
+            </button>
+          </div>
 
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <input
-                      value={generatedPassword}
-                      readOnly
-                      className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-900 shadow-sm outline-none"
-                    />
+          {error && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+              {error}
+            </div>
+          )}
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setGeneratedPassword(generatePassword())}
-                        className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
-                      >
-                        <RefreshCw className="h-4 w-4 text-gray-500" />
-                        Regenerate
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={copyPassword}
-                        className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
-                      >
-                        {copied ? (
-                          <Check className="h-4 w-4 text-gray-500" />
-                        ) : (
-                          <Copy className="h-4 w-4 text-gray-500" />
-                        )}
-                        {copied ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <p className="text-[12px] text-gray-500">
-                    Send this password to the {tab} member. They can change it later in Settings.
-                  </p>
-                </div>
-              )}
-
-              {error && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
-                  {error}
-                </div>
-              )}
-
-              {success && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
-                  {success}
-                </div>
-              )}
-
-              <div className="flex items-center justify-end">
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!canSubmit}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[#00c065] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  {busy ? "Creating..." : createBtnLabel}
-                </button>
-              </div>
+          {success && (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+              {success}
             </div>
           )}
         </div>
 
-        {/* List */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* List — stacked below the create form, fills the remaining
+            viewport height so the section hugs the bottom (with the
+            page padding still visible). */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-gray-200 bg-white p-3 shadow-sm">
+          <div className="flex shrink-0 items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-semibold text-gray-900">All invites</div>
-              <div className="mt-1 text-sm text-gray-600">Admins and managers can manage invites here.</div>
+              <div className="text-sm font-semibold text-gray-900">Invites</div>
+              <div className="mt-0.5 text-xs text-gray-600">Admins and managers can manage invites here.</div>
             </div>
 
             <button
               type="button"
               onClick={loadInvites}
               disabled={listLoading}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <RefreshCw className="h-4 w-4 text-gray-500" />
+              <RefreshCw className="h-3.5 w-3.5 text-gray-500" />
               {listLoading ? "Refreshing..." : "Refresh"}
             </button>
           </div>
 
-          {listError && <div className="mt-3 text-sm font-semibold text-red-600">{listError}</div>}
+          {listError && <div className="mt-2 shrink-0 text-sm font-semibold text-red-600">{listError}</div>}
 
-          <div className="mt-4 overflow-hidden rounded-lg border border-gray-200">
-            {listLoading ? (
-              <div className="p-4 text-sm text-gray-600">Loading invites...</div>
-            ) : invites.length === 0 ? (
-              <div className="p-4 text-sm text-gray-600">No invites found.</div>
-            ) : (
-              invites.map((row) => (
-                <div
-                  key={row.id}
-                  className="flex flex-col gap-3 border-b border-gray-200 p-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-gray-900">{row.email}</div>
+          <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-md border border-gray-200">
+            <div className="h-full overflow-y-auto">
+              {listLoading ? (
+                <div className="p-3 text-sm text-gray-600">Loading invites...</div>
+              ) : invites.length === 0 ? (
+                <div className="p-3 text-sm text-gray-600">No invites found.</div>
+              ) : (
+                invites.map((row) => (
+                  <div
+                    key={row.id}
+                    className="flex flex-col gap-2 border-b border-gray-200 p-2.5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-gray-900">{row.email}</div>
 
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <span
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={[
+                            "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-semibold",
+                            rolePill(row.role),
+                          ].join(" ")}
+                        >
+                          {row.role.toUpperCase()}
+                        </span>
+
+                        <span
+                          className={[
+                            "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-semibold",
+                            statusPill(row.status),
+                          ].join(" ")}
+                        >
+                          {row.status.toUpperCase()}
+                        </span>
+
+                        <span className="text-[11px] text-gray-500">Created: {fmtDate(row.created_at)}</span>
+
+                        {row.used_at && <span className="text-[11px] text-gray-500">Used: {fmtDate(row.used_at)}</span>}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => requestDelete(row)}
+                        disabled={deleteBusyId === row.id}
                         className={[
-                          "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
-                          rolePill(row.role),
+                          "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-semibold shadow-sm",
+                          "bg-red-700 text-white border border-red-800/20",
+                          "transition-all duration-200 ease-out",
+                          "hover:bg-red-600 hover:shadow-md hover:opacity-95",
+                          "active:scale-[0.98]",
+                          "disabled:cursor-not-allowed disabled:opacity-60",
                         ].join(" ")}
                       >
-                        {row.role.toUpperCase()}
-                      </span>
-
-                      <span
-                        className={[
-                          "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
-                          statusPill(row.status),
-                        ].join(" ")}
-                      >
-                        {row.status.toUpperCase()}
-                      </span>
-
-                      <span className="text-xs text-gray-500">Created: {fmtDate(row.created_at)}</span>
-
-                      {row.used_at && <span className="text-xs text-gray-500">Used: {fmtDate(row.used_at)}</span>}
+                        <Trash2 className="h-3.5 w-3.5 text-white/90" />
+                        Delete
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => requestDelete(row)}
-                      disabled={deleteBusyId === row.id}
-                      className={[
-                        "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm",
-                        "bg-red-700 text-white border border-red-800/20",
-                        "transition-all duration-200 ease-out",
-                        "hover:bg-red-600 hover:shadow-md hover:opacity-95",
-                        "active:scale-[0.98]",
-                        "disabled:cursor-not-allowed disabled:opacity-60",
-                      ].join(" ")}
-                    >
-                      <Trash2 className="h-4 w-4 text-white/90" />
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -484,8 +430,8 @@ export default function StaffInvitePage() {
       {/* Delete confirm */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm">
-          <div className="w-[92%] max-w-md rounded-lg bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
+          <div className="w-[92%] max-w-md rounded-md bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">Delete invite?</div>
                 <div className="mt-1 text-sm text-gray-600">
@@ -497,19 +443,19 @@ export default function StaffInvitePage() {
               <button
                 type="button"
                 onClick={() => setConfirmDelete(null)}
-                className="grid h-9 w-9 place-items-center rounded-lg border border-transparent transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
+                className="grid h-8 w-8 place-items-center rounded-md border border-transparent transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
                 aria-label="Close"
               >
-                <X className="h-4 w-4 text-gray-500" />
+                <X className="h-3.5 w-3.5 text-gray-500" />
               </button>
             </div>
 
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <div className="mt-3 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setConfirmDelete(null)}
                 disabled={deleteBusyId === confirmDelete.id}
-                className="inline-flex h-10 items-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:opacity-60"
+                className="inline-flex h-9 items-center rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm transition-all duration-200 hover:bg-gray-50 active:scale-[0.98] disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -518,7 +464,7 @@ export default function StaffInvitePage() {
                 type="button"
                 onClick={doDelete}
                 disabled={deleteBusyId === confirmDelete.id}
-                className="inline-flex h-10 items-center rounded-lg bg-gray-900 px-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gray-800 active:scale-[0.98] disabled:opacity-60"
+                className="inline-flex h-9 items-center rounded-md bg-gray-900 px-3 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gray-800 active:scale-[0.98] disabled:opacity-60"
               >
                 {deleteBusyId === confirmDelete.id ? "Deleting..." : "Delete"}
               </button>

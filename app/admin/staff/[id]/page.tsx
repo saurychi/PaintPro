@@ -2,7 +2,19 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { ChevronDown, ChevronLeft, Loader2, MessageSquare } from "lucide-react"
+import {
+  Archive,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  Loader2,
+  MessageSquare,
+  Pencil,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react"
+import { toast } from "sonner"
 
 import { supabase } from "@/lib/supabaseClient"
 
@@ -48,6 +60,7 @@ type StaffApiUser = {
   profile_image_url: string | null
   status: string | null
   specialty: string | null
+  hourly_wage: number | null
 }
 
 type Staff = {
@@ -58,6 +71,7 @@ type Staff = {
   photoUrl: string | null
   status: string
   specialty: string | null
+  hourlyWage: number | null
 }
 
 // Mirror of the constants in the list page. Kept local so this file
@@ -94,6 +108,10 @@ function mapStaff(u: StaffApiUser): Staff {
     photoUrl: u.profile_image_url ?? null,
     status: u.status ?? "active",
     specialty: u.specialty ?? null,
+    hourlyWage:
+      typeof u.hourly_wage === "number" && Number.isFinite(u.hourly_wage)
+        ? u.hourly_wage
+        : null,
   }
 }
 
@@ -137,13 +155,13 @@ function ratingStyle(r: string | null) {
   return RATING_STYLE[r.toLowerCase()] ?? { text: "text-gray-600", bar: "bg-gray-300", bg: "bg-gray-50", border: "border-gray-200" }
 }
 
-// Format an amount as Philippine pesos. Matches the EmployeeManagement
+// Format an amount as Australian dollars. Matches the EmployeeManagement
 // modal's currency display so the same number reads consistently
 // across the app.
-function formatPHP(amount: number): string {
-  return new Intl.NumberFormat("en-PH", {
+function formatAUD(amount: number): string {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(Number.isFinite(amount) ? amount : 0)
 }
@@ -283,6 +301,40 @@ export default function StaffDetailPage() {
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [messaging, setMessaging] = useState(false)
+
+  // Specialty management modal. Working state lives here so the chips +
+  // dropdown can update locally before the admin hits Save and the
+  // PATCH lands. `teamSpecialties` is the union of every existing
+  // specialty across staff/manager records — populates the dropdown so
+  // adding an existing tag is one click.
+  const [specialtyModalOpen, setSpecialtyModalOpen] = useState(false)
+  const [pendingSpecialties, setPendingSpecialties] = useState<string[]>([])
+  const [selectedToAdd, setSelectedToAdd] = useState("")
+  const [customSpecialty, setCustomSpecialty] = useState("")
+  const [savingSpecialty, setSavingSpecialty] = useState(false)
+  const [teamSpecialties, setTeamSpecialties] = useState<string[]>([])
+
+  // Hourly wage editor (gated, lives in the Payroll card). The input
+  // is only mounted while `editingWage` is true so the regular Payroll
+  // view stays read-only by default. Empty string clears the wage
+  // (stored as null on the server).
+  const [editingWage, setEditingWage] = useState(false)
+  const [wageInput, setWageInput] = useState("")
+  const [savingWage, setSavingWage] = useState(false)
+
+  // Archive flow state. `archiveChecking` covers the assignment
+  // lookup (mirrors the list page's check-active → confirm → patch
+  // sequence); `archiveConfirmOpen` gates the final yes/no modal; the
+  // blocked-by-active-projects reason is surfaced via a sonner toast
+  // rather than persisted in state.
+  const [archiveChecking, setArchiveChecking] = useState(false)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
+  const [archiveBusy, setArchiveBusy] = useState(false)
+  // Restore flow state. No pre-check is needed (reactivating an
+  // inactive member can't violate any constraints), so this is just
+  // a confirm-modal gate before the PATCH.
+  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
+  const [restoreBusy, setRestoreBusy] = useState(false)
   // Flipped true the moment "Back to staff" is clicked so the link
   // can show a spinner during the route transition. Cleared
   // automatically when this page unmounts on navigation.
@@ -497,6 +549,77 @@ export default function StaffDetailPage() {
     [staff?.specialty],
   )
 
+  // Re-seed the input string whenever the saved wage changes so the
+  // visible value reflects the source of truth after fetches/saves.
+  useEffect(() => {
+    setWageInput(
+      staff?.hourlyWage != null && Number.isFinite(staff.hourlyWage)
+        ? String(staff.hourlyWage)
+        : "",
+    )
+  }, [staff?.hourlyWage])
+
+  const trimmedWageInput = wageInput.trim()
+  const parsedWage = trimmedWageInput === "" ? null : Number(trimmedWageInput)
+  const wageInputIsValid =
+    parsedWage === null || (Number.isFinite(parsedWage) && parsedWage >= 0)
+  const wageIsDirty =
+    wageInputIsValid && parsedWage !== (staff?.hourlyWage ?? null)
+
+  async function saveWage() {
+    if (!staff || savingWage || !wageIsDirty || !wageInputIsValid) return
+    setSavingWage(true)
+    try {
+      const res = await fetch("/api/admin/staff", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: staff.id,
+          hourlyWage: parsedWage,
+        }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to update hourly wage.")
+      }
+      setStaff((prev) =>
+        prev ? { ...prev, hourlyWage: parsedWage } : prev,
+      )
+      // Payroll card pulls the wage from /performance, not from the
+      // staff row. Re-fetch so the visible "AUD X / hour" line and
+      // totalSalary recompute against the new wage immediately.
+      void fetchPayroll()
+      setEditingWage(false)
+      toast.success("Hourly wage updated.")
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        e instanceof Error ? e.message : "Failed to update hourly wage.",
+      )
+    } finally {
+      setSavingWage(false)
+    }
+  }
+
+  function openWageEditor() {
+    if (staff?.status === "inactive") return
+    setWageInput(
+      staff?.hourlyWage != null && Number.isFinite(staff.hourlyWage)
+        ? String(staff.hourlyWage)
+        : "",
+    )
+    setEditingWage(true)
+  }
+
+  function cancelWageEditor() {
+    setWageInput(
+      staff?.hourlyWage != null && Number.isFinite(staff.hourlyWage)
+        ? String(staff.hourlyWage)
+        : "",
+    )
+    setEditingWage(false)
+  }
+
   const handleMessage = async () => {
     if (!staff || !currentUserId) return
     setMessaging(true)
@@ -514,6 +637,197 @@ export default function StaffDetailPage() {
       console.error("Failed to open conversation:", e)
     } finally {
       setMessaging(false)
+    }
+  }
+
+  // Pull the union of every existing specialty across staff/manager
+  // so the modal's dropdown can offer common tags as one-click picks.
+  // Runs once on mount; if a tag is brand-new the admin can still add
+  // it via the custom input.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/staff", { cache: "no-store" })
+        if (!res.ok) return
+        const json = await res.json()
+        if (cancelled) return
+        const all = Array.isArray(json?.staff) ? (json.staff as StaffApiUser[]) : []
+        const tags = new Set<string>()
+        for (const u of all) {
+          if (typeof u.specialty !== "string") continue
+          for (const piece of u.specialty.split(",")) {
+            const trimmed = piece.trim()
+            if (trimmed) tags.add(trimmed)
+          }
+        }
+        setTeamSpecialties(Array.from(tags).sort())
+      } catch {
+        // Silent — the modal still works with just the custom input.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function openSpecialtyModal() {
+    setPendingSpecialties(specialties)
+    setSelectedToAdd("")
+    setCustomSpecialty("")
+    setSpecialtyModalOpen(true)
+  }
+
+  function closeSpecialtyModal() {
+    if (savingSpecialty) return
+    setSpecialtyModalOpen(false)
+  }
+
+  function addPendingSpecialty(value: string) {
+    const trimmed = value.trim()
+    if (!trimmed) return
+    setPendingSpecialties((prev) =>
+      prev.some((s) => s.toLowerCase() === trimmed.toLowerCase())
+        ? prev
+        : [...prev, trimmed],
+    )
+  }
+
+  function removePendingSpecialty(value: string) {
+    setPendingSpecialties((prev) =>
+      prev.filter((s) => s.toLowerCase() !== value.toLowerCase()),
+    )
+  }
+
+  async function saveSpecialty() {
+    if (!staff || savingSpecialty) return
+    setSavingSpecialty(true)
+    try {
+      const nextSpecialty = pendingSpecialties.join(", ")
+      const res = await fetch("/api/admin/staff", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: staff.id, specialty: nextSpecialty }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to update specialty.")
+      }
+      setStaff((prev) =>
+        prev ? { ...prev, specialty: nextSpecialty || null } : prev,
+      )
+      // Fold any newly-added tags into the dropdown options.
+      setTeamSpecialties((prev) => {
+        const merged = new Set(prev)
+        for (const s of pendingSpecialties) merged.add(s)
+        return Array.from(merged).sort()
+      })
+      setSpecialtyModalOpen(false)
+      toast.success("Specialty updated.")
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        e instanceof Error ? e.message : "Failed to update specialty.",
+      )
+    } finally {
+      setSavingSpecialty(false)
+    }
+  }
+
+  // Dropdown options = team tags minus what's already pending so the
+  // admin doesn't accidentally pick a duplicate.
+  const availableDropdownOptions = useMemo(() => {
+    const have = new Set(pendingSpecialties.map((s) => s.toLowerCase()))
+    return teamSpecialties.filter((s) => !have.has(s.toLowerCase()))
+  }, [teamSpecialties, pendingSpecialties])
+
+  // Archive flow. Mirrors the list page's behaviour:
+  //   1. Check the user's project_sub_task_staff rows for any
+  //      non-terminal assignments. If found, block with a clear
+  //      explanation toast.
+  //   2. Otherwise open the confirm modal so the admin can change
+  //      their mind before flipping the status.
+  //   3. On confirm, PATCH /api/staff with status="inactive" and
+  //      update the local staff record so the page reflects it.
+  async function initiateArchive() {
+    if (!staff || archiveChecking) return
+    setArchiveChecking(true)
+    try {
+      const res = await fetch(
+        `/api/admin/staff/check-active?userId=${encodeURIComponent(staff.id)}`,
+      )
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Could not verify active assignments.")
+      }
+      if (json?.hasActiveAssignments) {
+        toast.error("Can't archive", {
+          description: `${staff.name} cannot be archived because they still have active project assignments.`,
+        })
+        return
+      }
+      setArchiveConfirmOpen(true)
+    } catch (e) {
+      toast.error("Archive check failed", {
+        description:
+          e instanceof Error
+            ? e.message
+            : "Could not verify active assignments. Please try again.",
+      })
+    } finally {
+      setArchiveChecking(false)
+    }
+  }
+
+  async function confirmArchive() {
+    if (!staff || archiveBusy) return
+    setArchiveBusy(true)
+    try {
+      const res = await fetch("/api/staff", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: staff.id, status: "inactive" }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error ?? "Failed to archive staff.")
+      }
+      setStaff((prev) => (prev ? { ...prev, status: "inactive" } : prev))
+      setArchiveConfirmOpen(false)
+      toast.success(`${staff.name} archived.`)
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        e instanceof Error ? e.message : "Failed to archive staff.",
+      )
+    } finally {
+      setArchiveBusy(false)
+    }
+  }
+
+  async function confirmRestore() {
+    if (!staff || restoreBusy) return
+    setRestoreBusy(true)
+    try {
+      const res = await fetch("/api/staff", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: staff.id, status: "active" }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error ?? "Failed to restore staff.")
+      }
+      setStaff((prev) => (prev ? { ...prev, status: "active" } : prev))
+      setRestoreConfirmOpen(false)
+      toast.success(`${staff.name} restored.`)
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        e instanceof Error ? e.message : "Failed to restore staff.",
+      )
+    } finally {
+      setRestoreBusy(false)
     }
   }
 
@@ -551,7 +865,7 @@ export default function StaffDetailPage() {
     )
   }
 
-  const isArchived = staff.status === "archived"
+  const isArchived = staff.status === "inactive"
 
   return (
     <div className="flex h-[calc(100vh-var(--admin-header-offset,0px))] flex-col overflow-hidden p-4">
@@ -571,18 +885,52 @@ export default function StaffDetailPage() {
 
       <div className="mt-3 shrink-0 flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-900">{staff.name}</h1>
-        <button
-          onClick={handleMessage}
-          disabled={!currentUserId || messaging || isArchived}
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {messaging ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleMessage}
+            disabled={!currentUserId || messaging || isArchived}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {messaging ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MessageSquare className="h-4 w-4" />
+            )}
+            Message
+          </button>
+
+          {/* Archive flips the user's status to "inactive" after
+              confirming no active project assignments. Hidden once the
+              member is already archived — the Restore button takes its
+              place there. */}
+          {!isArchived ? (
+            <button
+              type="button"
+              onClick={initiateArchive}
+              disabled={archiveChecking || archiveBusy}
+              title="Archive staff member"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {archiveChecking ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Archive className="h-4 w-4" />
+              )}
+              {archiveChecking ? "Checking..." : "Archive"}
+            </button>
           ) : (
-            <MessageSquare className="h-4 w-4" />
+            <button
+              type="button"
+              onClick={() => setRestoreConfirmOpen(true)}
+              disabled={restoreBusy}
+              title="Restore staff member"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-emerald-200 bg-white px-3 text-sm font-semibold text-[#00a054] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#00c065]/50 hover:bg-emerald-50 hover:shadow-md active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Restore
+            </button>
           )}
-          Message
-        </button>
+        </div>
       </div>
 
       {/* Profile card. Shrinks to its content height; not part of the
@@ -611,7 +959,7 @@ export default function StaffDetailPage() {
                   "rounded-md px-2 py-0.5 text-[11px] font-semibold",
                   staff.status === "active"
                     ? "bg-emerald-50 text-emerald-700"
-                    : staff.status === "archived"
+                    : staff.status === "inactive"
                       ? "bg-gray-100 text-gray-500"
                       : "bg-amber-50 text-amber-700",
                 ].join(" ")}
@@ -628,21 +976,30 @@ export default function StaffDetailPage() {
               <span className="font-medium text-gray-900">{staff.email}</span>
             </div>
             <div className="sm:col-span-2">
-              <span className="text-gray-500">Specialty:</span>{" "}
-              {specialties.length > 0 ? (
-                <span className="inline-flex flex-wrap gap-1.5">
-                  {specialties.map((s) => (
-                    <span
-                      key={s}
-                      className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600"
-                    >
-                      {s}
-                    </span>
-                  ))}
-                </span>
-              ) : (
-                <span className="text-gray-400">-</span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-gray-500">Specialty:</span>
+                {specialties.length > 0 ? (
+                  <span className="inline-flex flex-wrap gap-1.5">
+                    {specialties.map((s) => (
+                      <span
+                        key={s}
+                        className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600"
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+                <button
+                  type="button"
+                  onClick={openSpecialtyModal}
+                  className="inline-flex items-center rounded-full border border-[#00c065]/30 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-[#00a054] transition-colors hover:border-[#00c065]/50 hover:bg-emerald-100"
+                >
+                  See more
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -737,13 +1094,97 @@ export default function StaffDetailPage() {
               ) : (
                 <>
                   <p className="mt-1 text-2xl font-bold text-gray-900">
-                    {formatPHP(payroll?.totalSalary ?? 0)}
+                    {formatAUD(payroll?.totalSalary ?? 0)}
                   </p>
-                  <p className="mt-1 text-[11px] text-gray-500">
-                    {(payroll?.hourlyWage ?? 0) > 0
-                      ? `${formatPHP(payroll?.hourlyWage ?? 0)} / hour`
-                      : "No hourly rate set"}
-                  </p>
+
+                  {editingWage ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] text-gray-400">AUD</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        autoFocus
+                        value={wageInput}
+                        onChange={(e) => setWageInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            void saveWage()
+                          } else if (e.key === "Escape") {
+                            e.preventDefault()
+                            cancelWageEditor()
+                          }
+                        }}
+                        disabled={savingWage}
+                        placeholder="Not set"
+                        aria-label="Hourly wage"
+                        className={[
+                          "h-8 w-24 rounded-md border bg-white px-2 text-xs font-medium text-gray-900 outline-none transition focus:border-[#00c065] focus:ring-2 focus:ring-emerald-500/15",
+                          wageInputIsValid
+                            ? "border-gray-200"
+                            : "border-red-300 focus:border-red-400 focus:ring-red-400/20",
+                          savingWage ? "cursor-not-allowed bg-gray-50 opacity-70" : "",
+                        ].join(" ")}
+                      />
+                      <span className="text-[11px] text-gray-400">/ hr</span>
+
+                      <button
+                        type="button"
+                        onClick={() => void saveWage()}
+                        disabled={
+                          savingWage || !wageInputIsValid || !wageIsDirty
+                        }
+                        title="Save hourly wage"
+                        aria-label="Save hourly wage"
+                        className="inline-flex h-8 items-center justify-center rounded-md bg-[#00c065] px-2 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#00a054] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingWage ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelWageEditor}
+                        disabled={savingWage}
+                        title="Cancel"
+                        aria-label="Cancel editing hourly wage"
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-gray-200 bg-white px-2 text-[11px] font-medium text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                      {!wageInputIsValid ? (
+                        <span className="text-[11px] font-medium text-red-600">
+                          Must be 0 or more.
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <p className="text-[11px] text-gray-500">
+                        {(payroll?.hourlyWage ?? 0) > 0
+                          ? `${formatAUD(payroll?.hourlyWage ?? 0)} / hour`
+                          : "No hourly rate set"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openWageEditor}
+                        disabled={staff.status === "inactive"}
+                        title={
+                          staff.status === "inactive"
+                            ? "Inactive staff cannot be edited"
+                            : "Edit hourly wage"
+                        }
+                        className="inline-flex h-6 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-600 transition hover:border-[#00c065]/40 hover:bg-emerald-50 hover:text-[#00a054] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit wage
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -885,6 +1326,275 @@ export default function StaffDetailPage() {
           </div>
         </div>
       )}
+
+      {archiveConfirmOpen && staff ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 backdrop-blur-[2px]">
+          <div className="w-full max-w-sm overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
+            <div className="h-1.5 w-full bg-red-600" aria-hidden />
+            <div className="p-5">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Archive {staff.name}?
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-gray-600">
+                Their account will be marked inactive and hidden from
+                future project assignments. Existing records stay on
+                file. You can unarchive later if needed.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setArchiveConfirmOpen(false)}
+                  disabled={archiveBusy}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmArchive}
+                  disabled={archiveBusy}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-600 disabled:opacity-50"
+                >
+                  {archiveBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  {archiveBusy ? "Archiving..." : "Yes, archive"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {restoreConfirmOpen && staff ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 backdrop-blur-[2px]">
+          <div className="w-full max-w-sm overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
+            <div className="h-1.5 w-full bg-[#00c065]" aria-hidden />
+            <div className="p-5">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Restore {staff.name}?
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-gray-600">
+                Their account will be marked active again and become
+                available for project assignments. Specialties and the
+                hourly wage will become editable.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRestoreConfirmOpen(false)}
+                  disabled={restoreBusy}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmRestore}
+                  disabled={restoreBusy}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[#00c065] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#00a054] disabled:opacity-50"
+                >
+                  {restoreBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  )}
+                  {restoreBusy ? "Restoring..." : "Yes, restore"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {specialtyModalOpen && staff ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 backdrop-blur-[2px]">
+          <div className="w-full max-w-md overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
+            <div className="h-1.5 w-full shrink-0 bg-[#00c065]" aria-hidden />
+
+            <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4">
+              <div className="min-w-0">
+                <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold text-[#00a054]">
+                  Specialties
+                </div>
+                <h2 className="mt-2 text-sm font-semibold text-gray-900">
+                  {staff.name}
+                </h2>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  {isArchived
+                    ? `Specialty tags on file for ${staff.name.split(" ")[0] || "this member"}.`
+                    : `Add or remove tags that describe what ${staff.name.split(" ")[0] || "this member"} can do.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeSpecialtyModal}
+                disabled={savingSpecialty}
+                aria-label="Close"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              {isArchived ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
+                  This staff member is inactive. Specialties are read-only
+                  until they're reactivated.
+                </div>
+              ) : null}
+
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                  Current
+                </p>
+                {pendingSpecialties.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {pendingSpecialties.map((s) => (
+                      <span
+                        key={s}
+                        className={`inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 py-0.5 text-xs font-medium text-gray-700 ${
+                          isArchived ? "px-2.5" : "pl-2.5 pr-1"
+                        }`}
+                      >
+                        {s}
+                        {isArchived ? null : (
+                          <button
+                            type="button"
+                            onClick={() => removePendingSpecialty(s)}
+                            aria-label={`Remove ${s}`}
+                            className="grid h-5 w-5 place-items-center rounded-full text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-gray-400">
+                    {isArchived
+                      ? "No specialties on file."
+                      : "No specialties yet. Add one below."}
+                  </p>
+                )}
+              </div>
+
+              {isArchived ? null : (
+                <>
+                  <div>
+                    <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Add from team
+                    </label>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <select
+                        value={selectedToAdd}
+                        onChange={(e) => setSelectedToAdd(e.target.value)}
+                        disabled={availableDropdownOptions.length === 0 || savingSpecialty}
+                        className="h-9 flex-1 rounded-md border border-gray-200 bg-white px-2 text-sm text-gray-900 outline-none transition-colors focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
+                      >
+                        <option value="">
+                          {availableDropdownOptions.length === 0
+                            ? "No more team tags to pick"
+                            : "Select a specialty..."}
+                        </option>
+                        {availableDropdownOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!selectedToAdd) return
+                          addPendingSpecialty(selectedToAdd)
+                          setSelectedToAdd("")
+                        }}
+                        disabled={!selectedToAdd || savingSpecialty}
+                        className="inline-flex h-9 items-center gap-1 rounded-md bg-[#00c065] px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#00a054] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Or add a new one
+                    </label>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <input
+                        value={customSpecialty}
+                        onChange={(e) => setCustomSpecialty(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && customSpecialty.trim()) {
+                            e.preventDefault()
+                            addPendingSpecialty(customSpecialty)
+                            setCustomSpecialty("")
+                          }
+                        }}
+                        placeholder="e.g. Cabinet refinishing"
+                        disabled={savingSpecialty}
+                        className="h-9 flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition-colors focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/20"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!customSpecialty.trim()) return
+                          addPendingSpecialty(customSpecialty)
+                          setCustomSpecialty("")
+                        }}
+                        disabled={!customSpecialty.trim() || savingSpecialty}
+                        className="inline-flex h-9 items-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 bg-gray-50/50 px-5 py-3">
+              {isArchived ? (
+                <button
+                  type="button"
+                  onClick={closeSpecialtyModal}
+                  className="inline-flex h-9 items-center rounded-md bg-gray-900 px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-gray-800"
+                >
+                  Close
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={closeSpecialtyModal}
+                    disabled={savingSpecialty}
+                    className="inline-flex h-9 items-center rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveSpecialty}
+                    disabled={savingSpecialty}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#00a054] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingSpecialty ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    {savingSpecialty ? "Saving..." : "Save"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
