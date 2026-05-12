@@ -56,7 +56,7 @@ function formatDateTime(value?: string | null) {
 
   if (Number.isNaN(date.getTime())) return "—";
 
-  return new Intl.DateTimeFormat("en-PH", {
+  return new Intl.DateTimeFormat("en-AU", {
     month: "short",
     day: "2-digit",
     year: "numeric",
@@ -68,9 +68,9 @@ function formatDateTime(value?: string | null) {
 function formatCurrency(value?: number | null) {
   const safeValue = Number(value ?? 0);
 
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }

@@ -30,10 +30,10 @@ async function getAuthUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function pesos(value: number): string {
-  return new Intl.NumberFormat("en-PH", {
+function aud(value: number): string {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(value);
 }
@@ -54,9 +54,9 @@ function buildCancellationMessage(args: {
   if (Math.abs(args.balance) < 0.005) {
     settlement = " The downpayment exactly covers the work completed, so no further payment is required.";
   } else if (args.balance > 0) {
-    settlement = ` A refund of ${pesos(args.balance)} is due back to you for work that was not performed.`;
+    settlement = ` A refund of ${aud(args.balance)} is due back to you for work that was not performed.`;
   } else {
-    settlement = ` An additional ${pesos(Math.abs(args.balance))} is owed for work already completed beyond the downpayment.`;
+    settlement = ` An additional ${aud(Math.abs(args.balance))} is owed for work already completed beyond the downpayment.`;
   }
 
   // Internal admin notes (now stored on projects.notes) deliberately

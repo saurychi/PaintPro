@@ -11,7 +11,7 @@ import {
   ChevronRight,
   FileText,
   Loader2,
-  PhilippinePeso,
+  DollarSign,
   Search,
   SlidersHorizontal,
   X,
@@ -132,9 +132,9 @@ function formatDateTime(value: string | null) {
 }
 
 function currency(value: number) {
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 0,
   }).format(value);
 }
@@ -382,7 +382,7 @@ export default function ReportListPage() {
         <div className={`${cardShell} ${cardAccent}`}>
           <div className="p-4">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-slate-400">
-              <PhilippinePeso className="h-4 w-4" />
+              <DollarSign className="h-4 w-4" />
               Total Budget
             </div>
             <div className="mt-2 text-xl font-semibold text-gray-950 dark:text-slate-100">
@@ -397,7 +397,7 @@ export default function ReportListPage() {
         <div className={`${cardShell} ${cardAccent}`}>
           <div className="p-4">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-slate-400">
-              <PhilippinePeso className="h-4 w-4" />
+              <DollarSign className="h-4 w-4" />
               Estimated Profit
             </div>
             <div className="mt-2 text-xl font-semibold text-gray-950 dark:text-slate-100">

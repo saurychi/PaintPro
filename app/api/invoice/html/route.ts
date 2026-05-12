@@ -77,18 +77,22 @@ function escapeHtml(value: unknown) {
     .replaceAll("'", "&#39;");
 }
 
+// Generated documents render amounts in AUD to match the rest of
+// the app. Locale is en-AU so the currency symbol/formatting follows
+// Australian conventions on both the in-browser preview and the
+// generated PDF.
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
 
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }
 
 function todayString() {
-  return new Date().toLocaleDateString("en-PH", {
+  return new Date().toLocaleDateString("en-AU", {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -614,7 +618,7 @@ export async function renderInvoiceHtml(args: {
                 </div>
 
                 <div class="summary-row total">
-                  <span>Total Cost</span>
+                  <span>Remaining Balance</span>
                   <span>${escapeHtml(formatCurrency(totalCost))}</span>
                 </div>
               </div>
