@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CalendarClock,
   Hammer,
   Loader2,
@@ -12,6 +13,14 @@ import {
   Users,
   X,
 } from "lucide-react";
+import {
+  LUNCH_END_HOUR,
+  LUNCH_START_HOUR,
+  WORK_END_HOUR,
+  WORK_START_HOUR,
+  isNonWorkingDay,
+  placeWorkSpan,
+} from "@/lib/schedule/workHours";
 
 export type GeneratedTaskMaterial = {
   id: string;
@@ -105,6 +114,97 @@ function staffInitials(label: string) {
   return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toUpperCase();
 }
 
+// Format a Date the way <input type="datetime-local"> expects, in the
+// user's local timezone. Browsers reject ISO strings with offsets here.
+function dateToLocalInputValue(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// Snap an arbitrary moment forward to the next valid working second:
+// past lunch, past 17:00 to next day, past Sunday / blocked day, etc.
+// Mirrors the cursor-normalization loop inside computeWorkSegments so the
+// modal lands on the same start placeWorkSpan would have picked anyway.
+function snapToNextWorkingMoment(
+  start: Date,
+  unavailableSet: Set<string>,
+): Date {
+  const cursor = new Date(start);
+  for (let guard = 0; guard < 365 * 2; guard++) {
+    if (isNonWorkingDay(cursor, unavailableSet)) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+
+    const minutes = cursor.getHours() * 60 + cursor.getMinutes();
+    if (minutes < WORK_START_HOUR * 60) {
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (minutes >= WORK_END_HOUR * 60) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (
+      minutes >= LUNCH_START_HOUR * 60 &&
+      minutes < LUNCH_END_HOUR * 60
+    ) {
+      cursor.setHours(LUNCH_END_HOUR, 0, 0, 0);
+      continue;
+    }
+    return cursor;
+  }
+  return cursor;
+}
+
+type StartIssue =
+  | { kind: "ok" }
+  | { kind: "sunday" }
+  | { kind: "blocked"; date: string }
+  | { kind: "before-work"; suggested: Date }
+  | { kind: "lunch"; suggested: Date }
+  | { kind: "after-work"; suggested: Date };
+
+function describeStartIssue(
+  start: Date,
+  unavailableSet: Set<string>,
+): StartIssue {
+  if (Number.isNaN(start.getTime())) return { kind: "ok" };
+
+  if (start.getDay() === 0) return { kind: "sunday" };
+
+  const dateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(start.getDate()).padStart(2, "0")}`;
+  if (unavailableSet.has(dateKey)) return { kind: "blocked", date: dateKey };
+
+  const minutes = start.getHours() * 60 + start.getMinutes();
+  if (minutes < WORK_START_HOUR * 60) {
+    const suggested = new Date(start);
+    suggested.setHours(WORK_START_HOUR, 0, 0, 0);
+    return { kind: "before-work", suggested };
+  }
+  if (minutes >= WORK_END_HOUR * 60) {
+    const suggested = snapToNextWorkingMoment(start, unavailableSet);
+    return { kind: "after-work", suggested };
+  }
+  if (
+    minutes >= LUNCH_START_HOUR * 60 &&
+    minutes < LUNCH_END_HOUR * 60
+  ) {
+    const suggested = new Date(start);
+    suggested.setHours(LUNCH_END_HOUR, 0, 0, 0);
+    return { kind: "lunch", suggested };
+  }
+
+  return { kind: "ok" };
+}
+
 export default function GeneratedTaskEditModal({
   open,
   task,
@@ -124,6 +224,13 @@ export default function GeneratedTaskEditModal({
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [optionsError, setOptionsError] = useState("");
   const [staffFilter, setStaffFilter] = useState("");
+  // YYYY-MM-DD strings the scheduler treats as full-day blocks: manual
+  // unavailable_days rows + public holidays. Used to flag bad start
+  // times and to feed placeWorkSpan so the auto-computed end skips the
+  // same days the rest of the wizard does.
+  const [unavailableDays, setUnavailableDays] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     if (!open || !task) return;
@@ -149,14 +256,17 @@ export default function GeneratedTaskEditModal({
         setLoadingOptions(true);
         setOptionsError("");
 
-        const [resourceResponse, staffResponse] = await Promise.all([
-          fetch("/api/planning/getSubTaskResourceOptions"),
-          fetch("/api/planning/getStaffUsers"),
-        ]);
+        const [resourceResponse, staffResponse, unavailableResponse] =
+          await Promise.all([
+            fetch("/api/planning/getSubTaskResourceOptions"),
+            fetch("/api/planning/getStaffUsers"),
+            fetch("/api/schedule/unavailable-days"),
+          ]);
 
-        const [resourceData, staffData] = await Promise.all([
+        const [resourceData, staffData, unavailableData] = await Promise.all([
           resourceResponse.json().catch(() => null),
           staffResponse.json().catch(() => null),
+          unavailableResponse.json().catch(() => null),
         ]);
 
         if (!resourceResponse.ok) {
@@ -172,6 +282,22 @@ export default function GeneratedTaskEditModal({
         setMaterialOptions(resourceData?.materials ?? []);
         setEquipmentOptions(resourceData?.equipment ?? []);
         setStaffOptions(staffData?.staffUsers ?? []);
+        // Soft failure on unavailable-days: an unauthenticated client
+        // viewing this modal still gets work-hour validation, just
+        // without the manual blocks / holidays.
+        const days = Array.isArray(unavailableData?.unavailableDays)
+          ? unavailableData.unavailableDays
+          : [];
+        setUnavailableDays(
+          new Set(
+            days
+              .map((entry: { blockedDate?: string }) => entry?.blockedDate)
+              .filter(
+                (value: unknown): value is string =>
+                  typeof value === "string" && value.length === 10,
+              ),
+          ),
+        );
       } catch (error) {
         if (!active) return;
         setOptionsError(
@@ -206,6 +332,61 @@ export default function GeneratedTaskEditModal({
       return label.includes(query);
     });
   }, [staffOptions, staffFilter]);
+
+  // Parse the start input back to a Date so the validation + auto-end
+  // computation can use it. Invalid / empty input falls through to null
+  // so the rest of the modal can render placeholders.
+  const startDate = useMemo(() => {
+    if (!startDatetime) return null;
+    const parsed = new Date(startDatetime);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }, [startDatetime]);
+
+  // Numeric work-hour value, with the same fallback the cascade uses on
+  // the server: prefer the explicit estimate, drop to 0 when the field
+  // is blank or invalid.
+  const estimatedHoursValue = useMemo(() => {
+    const raw = Number(estimatedHours);
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  }, [estimatedHours]);
+
+  // Validation against the shared work-hour rules (Mon-Sat, 9-17, lunch
+  // 12-13 excluded, unavailable_days respected). When valid, placeWorkSpan
+  // also gives us the canonical end so the read-only End field reflects
+  // exactly what the scheduler would have placed.
+  const startIssue = useMemo<StartIssue>(() => {
+    if (!startDate) return { kind: "ok" };
+    return describeStartIssue(startDate, unavailableDays);
+  }, [startDate, unavailableDays]);
+
+  const computedEndDate = useMemo(() => {
+    if (!startDate || estimatedHoursValue <= 0) return null;
+    if (startIssue.kind !== "ok") return null;
+    const placed = placeWorkSpan(
+      startDate,
+      estimatedHoursValue,
+      unavailableDays,
+    );
+    return placed.end;
+  }, [startDate, estimatedHoursValue, startIssue, unavailableDays]);
+
+  // Sync the End field whenever the start or estimated hours change so
+  // the user always sees the scheduler's chosen end rather than an
+  // arbitrary value they typed before tweaking duration.
+  useEffect(() => {
+    if (computedEndDate) {
+      setEndDatetime(dateToLocalInputValue(computedEndDate));
+    } else if (!startDate || estimatedHoursValue <= 0) {
+      setEndDatetime("");
+    }
+  }, [computedEndDate, startDate, estimatedHoursValue]);
+
+  function applySuggestedStart(suggestion: Date) {
+    setStartDatetime(dateToLocalInputValue(suggestion));
+  }
+
+  const startInvalid = startIssue.kind !== "ok";
+  const saveBlocked = startInvalid || estimatedHoursValue <= 0;
 
   if (!open || !task) return null;
 
@@ -315,7 +496,7 @@ export default function GeneratedTaskEditModal({
             <SectionCard
               icon={<CalendarClock className="h-4 w-4" />}
               title="Schedule"
-              hint="Estimated work hours and the window the crew expects to work in.">
+              hint="Work hours 9 AM to 5 PM (Mon to Sat), lunch 12 to 1 excluded. End is calculated from start plus estimated hours and skips blocked days automatically.">
               <div className="grid gap-3 sm:grid-cols-3">
                 <FieldLabel label="Estimated hours" suffix="h">
                   <input
@@ -334,19 +515,31 @@ export default function GeneratedTaskEditModal({
                     type="datetime-local"
                     value={startDatetime}
                     onChange={(event) => setStartDatetime(event.target.value)}
-                    className={fieldInputClass}
+                    className={`${fieldInputClass} ${
+                      startInvalid
+                        ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100 dark:border-rose-500/40 dark:focus:ring-rose-500/20"
+                        : ""
+                    }`}
                   />
                 </FieldLabel>
 
-                <FieldLabel label="End">
+                <FieldLabel label="End (computed)">
                   <input
                     type="datetime-local"
                     value={endDatetime}
-                    onChange={(event) => setEndDatetime(event.target.value)}
-                    className={fieldInputClass}
+                    readOnly
+                    disabled
+                    className={`${fieldInputClass} cursor-not-allowed bg-gray-50 text-gray-600 dark:bg-slate-800/60 dark:text-slate-400`}
                   />
                 </FieldLabel>
               </div>
+
+              {startInvalid ? (
+                <ScheduleIssue
+                  issue={startIssue}
+                  onSnap={(date) => applySuggestedStart(date)}
+                />
+              ) : null}
             </SectionCard>
 
             {/* Staff */}
@@ -619,7 +812,14 @@ export default function GeneratedTaskEditModal({
             </button>
             <button
               type="button"
-              disabled={saving || loadingOptions}
+              disabled={saving || loadingOptions || saveBlocked}
+              title={
+                saveBlocked
+                  ? startInvalid
+                    ? "Fix the schedule before saving."
+                    : "Set a positive estimated hours value before saving."
+                  : undefined
+              }
               onClick={() =>
                 onSave({
                   projectTaskId: task.projectTaskId,
@@ -627,17 +827,23 @@ export default function GeneratedTaskEditModal({
                   materials,
                   equipment,
                   employeeIds,
-                  estimatedHours: estimatedHours
-                    ? Number(estimatedHours)
+                  estimatedHours: estimatedHoursValue,
+                  // Always emit the canonical schedule the work-hour
+                  // helper produced, not the raw input. That keeps the
+                  // saved span aligned with what the rest of the app
+                  // (cascade, schedule wizard) would pick.
+                  scheduledStartDatetime: startDate
+                    ? startDate.toISOString()
                     : null,
-                  scheduledStartDatetime: fromDateTimeLocal(startDatetime),
-                  scheduledEndDatetime: fromDateTimeLocal(endDatetime),
+                  scheduledEndDatetime: computedEndDate
+                    ? computedEndDate.toISOString()
+                    : fromDateTimeLocal(endDatetime),
                 })
               }
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
               style={{ backgroundColor: ACCENT }}
               onMouseEnter={(event) => {
-                if (!saving && !loadingOptions) {
+                if (!saving && !loadingOptions && !saveBlocked) {
                   event.currentTarget.style.backgroundColor = ACCENT_HOVER;
                 }
               }}
@@ -812,6 +1018,61 @@ function LoadingRow() {
     <div className="flex items-center gap-2 px-3 py-3 text-xs text-gray-500 dark:text-slate-400">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
       Loading...
+    </div>
+  );
+}
+
+function ScheduleIssue({
+  issue,
+  onSnap,
+}: {
+  issue: StartIssue;
+  onSnap: (suggested: Date) => void;
+}) {
+  if (issue.kind === "ok") return null;
+
+  const message = (() => {
+    switch (issue.kind) {
+      case "sunday":
+        return "Sundays are non-working days. Pick a Monday to Saturday start.";
+      case "blocked":
+        return `${issue.date} is blocked on the schedule. Pick another date.`;
+      case "before-work":
+        return "Work starts at 9 AM. The chosen time falls before the workday.";
+      case "lunch":
+        return "Lunch break (12 to 1) is excluded from work hours.";
+      case "after-work":
+        return "Work ends at 5 PM. The chosen time falls after the workday.";
+    }
+  })();
+
+  const suggestion =
+    issue.kind === "before-work" ||
+    issue.kind === "lunch" ||
+    issue.kind === "after-work"
+      ? issue.suggested
+      : null;
+
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p>{message}</p>
+        {suggestion ? (
+          <button
+            type="button"
+            onClick={() => onSnap(suggestion)}
+            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold underline-offset-2 hover:underline">
+            Snap to{" "}
+            {suggestion.toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
