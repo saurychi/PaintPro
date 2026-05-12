@@ -53,6 +53,8 @@ type BatchSaveBody = {
   subTasks: IncomingSubTask[];
   materials: IncomingMaterial[];
   markupRate: number;
+  downpayment?: number;
+  downpaymentRate?: number;
   status?: string;
 };
 
@@ -69,6 +71,14 @@ export async function POST(request: NextRequest) {
     const subTasks = Array.isArray(body?.subTasks) ? body.subTasks : [];
     const materials = Array.isArray(body?.materials) ? body.materials : [];
     const markupRate = typeof body?.markupRate === "number" ? body.markupRate : 30;
+    const downpayment =
+      typeof body?.downpayment === "number" && body.downpayment >= 0
+        ? body.downpayment
+        : null;
+    const downpaymentRate =
+      typeof body?.downpaymentRate === "number" && body.downpaymentRate >= 0
+        ? Math.min(100, body.downpaymentRate)
+        : null;
     const status = typeof body?.status === "string" && body.status.trim() ? body.status.trim() : "overview_pending";
 
     const timestamp = new Date().toISOString();
@@ -153,17 +163,88 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── 2. Sync subtasks (project_sub_task) ──────────────────────────────────
-    const existingSubTaskIds = subTasks.map((st) => st.id).filter(Boolean);
+    // Split incoming subtasks into "already in DB" (real UUID id) and
+    // "new this session" (temp-prefixed id from the manual-mode
+    // auto-populate flow in main-task-assignment). Existing ones get
+    // UPDATEd by project_sub_task_id; new ones get INSERTed and we
+    // capture the real ids the DB hands back so downstream steps
+    // (staff assignments, etc.) reference them instead of the temp ids.
+    const TEMP_SUBTASK_ID_RE = /^temp-/;
+    const newSubTasks = subTasks.filter(
+      (st) => !st.id || TEMP_SUBTASK_ID_RE.test(st.id),
+    );
+    const existingSubTasks = subTasks.filter(
+      (st) => st.id && !TEMP_SUBTASK_ID_RE.test(st.id),
+    );
+
+    // temp id → real project_sub_task_id, populated as we insert.
+    const subTaskIdMap = new Map<string, string>();
+    const liveSubTaskIds = new Set<string>(existingSubTasks.map((st) => st.id));
+
+    if (newSubTasks.length > 0) {
+      const insertableNewSubTasks = newSubTasks.filter((st) => {
+        const projectTaskId = ptIdMap.get(st.mainTaskId) ?? st.projectTaskId;
+        return Boolean(projectTaskId);
+      });
+
+      if (insertableNewSubTasks.length > 0) {
+        const rowsToInsert = insertableNewSubTasks.map((st, idx) => ({
+          project_task_id: ptIdMap.get(st.mainTaskId) ?? st.projectTaskId,
+          sub_task_id: st.subTaskId,
+          // project_sub_task.estimated_hours is NOT NULL — manual-mode
+          // subtasks start without an estimate so default to 0 here.
+          // The admin can adjust it on the project-schedule or
+          // cost-estimation pages, and the existing UPDATE path
+          // already accepts null when overwriting an estimate.
+          estimated_hours: Number(st.estimatedHours ?? 0),
+          scheduled_start_datetime: st.scheduledStartDatetime,
+          scheduled_end_datetime: st.scheduledEndDatetime,
+          equipments_used: normalizeEquipmentUsageForStorage(st.equipments),
+          sort_order: typeof st.sortOrder === "number" ? st.sortOrder : idx,
+          status: "pending",
+        }));
+
+        const { data: inserted, error: insertSubTasksError } =
+          await supabaseAdmin
+            .from("project_sub_task")
+            .insert(rowsToInsert)
+            .select("project_sub_task_id");
+
+        if (insertSubTasksError) {
+          console.error(
+            "[batchSaveProject] insert project_sub_task failed:",
+            insertSubTasksError,
+            "rows sample:",
+            rowsToInsert.slice(0, 3),
+          );
+          return NextResponse.json(
+            {
+              error: "Failed to insert new subtasks.",
+              details: insertSubTasksError.message,
+              code: insertSubTasksError.code ?? null,
+              hint: insertSubTasksError.hint ?? null,
+            },
+            { status: 500 },
+          );
+        }
+
+        const insertedRows = inserted ?? [];
+        for (let i = 0; i < insertableNewSubTasks.length && i < insertedRows.length; i++) {
+          const realId = insertedRows[i].project_sub_task_id as string;
+          subTaskIdMap.set(insertableNewSubTasks[i].id, realId);
+          liveSubTaskIds.add(realId);
+        }
+      }
+    }
 
     // Update existing subtasks (schedule + equipment).
     // Process in small chunks rather than firing all updates in parallel —
     // a single Promise.all over dozens of requests can exhaust connection
     // limits (especially behind a VPN), causing Node to throw "fetch failed".
-    if (existingSubTaskIds.length > 0) {
-      const updatable = subTasks.filter((st) => st.id);
+    if (existingSubTasks.length > 0) {
       const CHUNK_SIZE = 8;
-      for (let i = 0; i < updatable.length; i += CHUNK_SIZE) {
-        const chunk = updatable.slice(i, i + CHUNK_SIZE);
+      for (let i = 0; i < existingSubTasks.length; i += CHUNK_SIZE) {
+        const chunk = existingSubTasks.slice(i, i + CHUNK_SIZE);
         const results = await Promise.all(
           chunk.map((st) =>
             supabaseAdmin
@@ -210,7 +291,9 @@ export async function POST(request: NextRequest) {
       // Resolve each material's project_task_id against the current set of
       // valid IDs. If the cache carries a stale projectTaskId (because the
       // row was deleted+recreated above, or because the cache survived
-      // across sessions), translate via main_task_id when possible. Drop
+      // across sessions), translate via main_task_id when possible. Manual
+      // mode seeds materials with the main_task_id directly (no project_task
+      // row exists yet), so try ptIdMap as the primary lookup too. Drop
       // materials whose parent task no longer exists — they're orphans.
       const validPtIds = new Set<string>(ptIdMap.values());
 
@@ -220,8 +303,11 @@ export async function POST(request: NextRequest) {
         .map((m) => {
           let projectTaskId = m.projectTaskId;
           if (!validPtIds.has(projectTaskId)) {
-            const mainTaskId = oldProjectTaskToMainTask.get(projectTaskId);
-            const translated = mainTaskId ? ptIdMap.get(mainTaskId) : undefined;
+            const staleMainTaskId =
+              oldProjectTaskToMainTask.get(projectTaskId);
+            const translated =
+              ptIdMap.get(projectTaskId) ??
+              (staleMainTaskId ? ptIdMap.get(staleMainTaskId) : undefined);
             if (translated) projectTaskId = translated;
           }
           return { material: m, projectTaskId };
@@ -276,12 +362,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── 4. Sync staff assignments (project_sub_task_staff) ──────────────────
-    if (existingSubTaskIds.length > 0) {
+    if (liveSubTaskIds.size > 0) {
+      const liveIds = Array.from(liveSubTaskIds);
+
       // Delete all existing staff for this project's subtasks
       const { error: deleteStaffError } = await supabaseAdmin
         .from("project_sub_task_staff")
         .delete()
-        .in("project_sub_task_id", existingSubTaskIds);
+        .in("project_sub_task_id", liveIds);
 
       if (deleteStaffError) {
         return NextResponse.json(
@@ -290,33 +378,34 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Confirm which of the cached subtask IDs actually exist in the DB
-      // right now — staff assignments referencing a deleted subtask would
-      // FK-fail the insert. The earlier project_task delete cascades into
-      // project_sub_task, so cache rows from a removed main task become
-      // orphans here.
+      // Confirm which subtask IDs actually exist in the DB right now —
+      // staff assignments referencing a deleted subtask would FK-fail
+      // the insert. The earlier project_task delete cascades into
+      // project_sub_task, so cache rows from a removed main task
+      // become orphans here.
       const { data: liveSubTaskRows } = await supabaseAdmin
         .from("project_sub_task")
         .select("project_sub_task_id")
-        .in("project_sub_task_id", existingSubTaskIds);
+        .in("project_sub_task_id", liveIds);
 
-      const liveSubTaskIds = new Set(
+      const liveIdsSet = new Set(
         (liveSubTaskRows ?? []).map(
           (r) => r.project_sub_task_id as string,
         ),
       );
 
-      // Insert current assignments
-      const staffRows = subTasks.flatMap((st) =>
-        liveSubTaskIds.has(st.id)
-          ? (st.assignedEmployeeIds ?? []).map((userId) => ({
-              project_sub_task_id: st.id,
-              user_id: userId,
-              role: "staff",
-              assignment_status: "assigned",
-            }))
-          : [],
-      );
+      // Insert current assignments — temp ids from the cache need to be
+      // resolved to the real DB ids we captured during the insert pass.
+      const staffRows = subTasks.flatMap((st) => {
+        const resolvedId = subTaskIdMap.get(st.id) ?? st.id;
+        if (!liveIdsSet.has(resolvedId)) return [];
+        return (st.assignedEmployeeIds ?? []).map((userId) => ({
+          project_sub_task_id: resolvedId,
+          user_id: userId,
+          role: "staff",
+          assignment_status: "assigned",
+        }));
+      });
 
       if (staffRows.length > 0) {
         const { error: insertStaffError } = await supabaseAdmin
@@ -419,17 +508,25 @@ export async function POST(request: NextRequest) {
     const estimation = calculateProjectCostEstimation(costInput);
 
     // ─── 6. Update project record ─────────────────────────────────────────────
+    const projectUpdatePayload: Record<string, unknown> = {
+      status,
+      estimated_cost: estimation.summary.totalCost,
+      estimated_budget: estimation.summary.quotationTotal,
+      materials_cost: estimation.summary.materialTotal,
+      labor_cost: estimation.summary.laborTotal,
+      markup_rate: markupRate,
+      updated_at: timestamp,
+    };
+    if (downpayment !== null) {
+      projectUpdatePayload.downpayment = downpayment;
+    }
+    if (downpaymentRate !== null) {
+      projectUpdatePayload.downpayment_rate = downpaymentRate;
+    }
+
     const { error: projectUpdateError } = await supabaseAdmin
       .from("projects")
-      .update({
-        status,
-        estimated_cost: estimation.summary.totalCost,
-        estimated_budget: estimation.summary.quotationTotal,
-        materials_cost: estimation.summary.materialTotal,
-        labor_cost: estimation.summary.laborTotal,
-        markup_rate: markupRate,
-        updated_at: timestamp,
-      })
+      .update(projectUpdatePayload)
       .eq("project_id", projectId);
 
     if (projectUpdateError) {

@@ -74,12 +74,33 @@ export type WizardCache = {
   siteAddress: string | null;
   description: string | null;
   clientId: string | null;
+  // Full ISO timestamp from projects.scheduled_start_datetime. Stored so
+  // pages that seed staff/equipment can pass the right date to the
+  // employee-assignment logic without re-querying the project record.
+  scheduledStartDatetime: string | null;
   currentStep: WizardStep;
   mainTasks: CachedMainTask[];
   subTasks: CachedSubTask[];
   materials: CachedMaterial[];
   markupRate: number;
+  // Downpayment amount the admin sets on the cost-estimation step. Persisted
+  // to projects.downpayment via batchSaveProject when the user advances to
+  // the overview step, then surfaced on the generated quotation document.
+  downpayment: number;
+  // Editable as a percentage of the quotation total on the cost-estimation
+  // page. The dollar `downpayment` field above is recomputed from
+  // (downpaymentPercent / 100) * quotationTotal whenever the percent or
+  // pricing changes, so the existing consumers (batchSaveProject,
+  // quotation document) keep working unchanged. Optional so old caches
+  // that pre-date this field still hydrate cleanly — callers fall back
+  // to deriving the percent from `downpayment / quotationTotal`.
+  downpaymentPercent?: number;
   refData: CachedRefData;
+  // Manual mode skips the AI draft step in basic-details, so downstream
+  // pages need to know the project was hand-built (different defaults
+  // for the schedule view, etc.). Optional so we can read old caches
+  // that pre-date this flag without breaking.
+  manualMode?: boolean;
   dirty: boolean; // true when user has made changes not yet saved to DB
   savedAt: string; // ISO timestamp
 };
@@ -185,9 +206,29 @@ export function getCachedMarkupRate(projectId: string): number | null {
   return cache?.markupRate ?? null;
 }
 
+export function getCachedDownpayment(projectId: string): number | null {
+  const cache = getWizardCache(projectId);
+  return cache?.downpayment ?? null;
+}
+
+export function getCachedDownpaymentPercent(
+  projectId: string,
+): number | null {
+  const cache = getWizardCache(projectId);
+  if (!cache) return null;
+  return typeof cache.downpaymentPercent === "number"
+    ? cache.downpaymentPercent
+    : null;
+}
+
 export function getCachedRefData(projectId: string): CachedRefData | null {
   const cache = getWizardCache(projectId);
   return cache?.refData ?? null;
+}
+
+export function getCachedManualMode(projectId: string): boolean {
+  const cache = getWizardCache(projectId);
+  return cache?.manualMode === true;
 }
 
 export function getCachedProjectMeta(projectId: string) {
@@ -199,7 +240,18 @@ export function getCachedProjectMeta(projectId: string) {
     siteAddress: cache.siteAddress,
     description: cache.description,
     clientId: cache.clientId,
+    scheduledStartDatetime: cache.scheduledStartDatetime ?? null,
   };
+}
+
+export function setCachedScheduledStartDatetime(
+  projectId: string,
+  scheduledStartDatetime: string | null,
+): void {
+  const cache = getWizardCache(projectId);
+  if (!cache) return;
+  cache.scheduledStartDatetime = scheduledStartDatetime;
+  setWizardCache(projectId, cache);
 }
 
 // ─── Section Setters ──────────────────────────────────────────────────────────
@@ -210,7 +262,32 @@ export function setCachedMainTasks(
 ): void {
   const cache = getWizardCache(projectId);
   if (!cache) return;
+
+  // Cascade: drop any subtasks or materials that belonged to a main
+  // task the caller just removed. Without this, the next page (sub-
+  // task assignment, materials, employee assignment, …) reads stale
+  // entries from the cache for main tasks that no longer exist, and
+  // the user sees ghost rows with no employees / no assignments.
+  // Subtasks already carry their own equipment + assignedEmployeeIds
+  // nested, so dropping the subtask cleans those up too.
+  // Manual-mode tasks have no project_task_id yet, so materials are
+  // keyed by main_task_id — accept either form when deciding what
+  // survives.
+  const survivingMainTaskIds = new Set(tasks.map((t) => t.id));
+  const survivingProjectTaskIds = new Set(
+    tasks.map((t) => t.project_task_id).filter((v): v is string => Boolean(v)),
+  );
+
   cache.mainTasks = tasks;
+  cache.subTasks = cache.subTasks.filter((st) =>
+    survivingMainTaskIds.has(st.mainTaskId),
+  );
+  cache.materials = cache.materials.filter(
+    (m) =>
+      survivingProjectTaskIds.has(m.projectTaskId) ||
+      survivingMainTaskIds.has(m.projectTaskId),
+  );
+
   setWizardCache(projectId, cache);
 }
 
@@ -241,6 +318,30 @@ export function setCachedMarkupRate(
   const cache = getWizardCache(projectId);
   if (!cache) return;
   cache.markupRate = rate;
+  setWizardCache(projectId, cache);
+}
+
+export function setCachedDownpayment(
+  projectId: string,
+  downpayment: number,
+): void {
+  const cache = getWizardCache(projectId);
+  if (!cache) return;
+  cache.downpayment = downpayment;
+  setWizardCache(projectId, cache);
+}
+
+export function setCachedDownpaymentPercent(
+  projectId: string,
+  percent: number,
+): void {
+  const cache = getWizardCache(projectId);
+  if (!cache) return;
+  // Clamp to [0, 100] so a stray paste / bad input never lands in cache.
+  const clamped = Number.isFinite(percent)
+    ? Math.max(0, Math.min(100, percent))
+    : 0;
+  cache.downpaymentPercent = clamped;
   setWizardCache(projectId, cache);
 }
 
@@ -322,11 +423,21 @@ export async function ensureWizardCacheHydrated(
         siteAddress: data.siteAddress ?? null,
         description: data.description ?? null,
         clientId: data.clientId ?? null,
+        scheduledStartDatetime: data.scheduledStartDatetime ?? null,
         currentStep: step,
         mainTasks: data.mainTasks ?? [],
         subTasks: data.subTasks ?? [],
         materials: data.materials ?? [],
         markupRate: data.markupRate ?? 30,
+        downpayment: Number(data.downpayment ?? 0),
+        // Only carry the percent into the cache when the DB had a non-zero
+        // value. Leaving it unset for legacy projects (downpayment_rate
+        // defaulted to 0 by the migration) lets the cost-estimation page
+        // derive it from downpayment / quotationTotal, matching what the
+        // admin originally entered.
+        ...(Number(data.downpaymentRate ?? 0) > 0
+          ? { downpaymentPercent: Number(data.downpaymentRate) }
+          : {}),
         refData: data.refData ?? {},
       });
 

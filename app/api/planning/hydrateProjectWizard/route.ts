@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
       supabaseAdmin
         .from("projects")
         .select(
-          "project_id, project_code, title, site_address, description, client_id, status, markup_rate",
+          "project_id, project_code, title, site_address, description, client_id, status, markup_rate, downpayment, downpayment_rate, scheduled_start_datetime",
         )
         .eq("project_id", projectId)
         .single(),
@@ -253,11 +253,14 @@ export async function GET(request: NextRequest) {
       siteAddress: project.site_address,
       description: project.description,
       clientId: project.client_id,
+      scheduledStartDatetime: project.scheduled_start_datetime ?? null,
       status: project.status,
       mainTasks,
       subTasks,
       materials,
       markupRate: Number(project.markup_rate ?? 30),
+      downpayment: Number((project as { downpayment?: number | null }).downpayment ?? 0),
+      downpaymentRate: Number((project as { downpayment_rate?: number | null }).downpayment_rate ?? 0),
       refData: {
         staffUsers: staffUsers ?? [],
         equipmentCatalog: (equipmentCatalog ?? []).map((item: any) => ({

@@ -87,9 +87,9 @@ const ACCENT = "#00c065";
 
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }
@@ -100,7 +100,7 @@ function formatDateTime(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not scheduled";
 
-  return date.toLocaleString("en-PH", {
+  return date.toLocaleString("en-AU", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -367,6 +367,12 @@ export default function OverviewPage() {
             subTasks: cache.subTasks,
             materials: cache.materials,
             markupRate: cache.markupRate,
+            // Intentionally omit `downpayment`. projects.downpayment is the
+            // cumulative amount the client has actually paid (tracked by
+            // DownpaymentModal via /api/planning/manageDownpayment).
+            // The TARGET downpayment is derived from downpaymentRate *
+            // quotationTotal whenever it needs to be displayed.
+            downpaymentRate: cache.downpaymentPercent ?? 0,
             status: "overview_pending",
           }),
         });

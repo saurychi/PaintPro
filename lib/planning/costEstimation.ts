@@ -51,6 +51,8 @@ export type CostEstimationInput = {
     description: string | null;
     siteAddress: string | null;
     status: string | null;
+    downpayment?: number;
+    downpaymentRate?: number;
   };
   markupRate: number;
   mainTasks: CostEstimationMainTask[];
@@ -158,6 +160,8 @@ export function calculateProjectCostEstimation(input: CostEstimationInput) {
       description: input.project.description,
       site_address: input.project.siteAddress,
       status: input.project.status,
+      downpayment: input.project.downpayment ?? 0,
+      downpayment_rate: input.project.downpaymentRate ?? 0,
     },
     markupRate,
     mainTasks,
