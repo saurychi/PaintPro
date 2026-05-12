@@ -25,6 +25,37 @@ type LeaveRequest = {
   createdAt: string | null;
 };
 
+type AssignmentWindow = {
+  subtaskId: string;
+  projectId: string;
+  projectTitle: string | null;
+  projectCode: string | null;
+  subtaskTitle: string;
+  startDatetime: string;
+  endDatetime: string;
+};
+
+function rangesOverlap(
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string,
+) {
+  const aS = new Date(aStart).getTime();
+  const aE = new Date(aEnd).getTime();
+  const bS = new Date(bStart).getTime();
+  const bE = new Date(bEnd).getTime();
+  if (
+    Number.isNaN(aS) ||
+    Number.isNaN(aE) ||
+    Number.isNaN(bS) ||
+    Number.isNaN(bE)
+  ) {
+    return false;
+  }
+  return aS < bE && aE > bS;
+}
+
 const STATUS_STYLES: Record<string, string> = {
   pending: "border-amber-200 bg-amber-50 text-amber-700",
   approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -114,6 +145,7 @@ export default function StaffLeaveRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [assignments, setAssignments] = useState<AssignmentWindow[]>([]);
 
   // startDatetime / endDatetime hold the `datetime-local` value strings
   // (YYYY-MM-DDTHH:MM). `new Date(value).toISOString()` converts them
@@ -151,9 +183,29 @@ export default function StaffLeaveRequestsPage() {
     }
   }, []);
 
+  const loadAssignments = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch("/api/schedule/getMyAssignedWindows", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+      setAssignments(Array.isArray(data?.windows) ? data.windows : []);
+    } catch {
+      // Pre-check is best-effort; server-side validation is authoritative.
+    }
+  }, []);
+
   useEffect(() => {
     void loadRequests();
-  }, [loadRequests]);
+    void loadAssignments();
+  }, [loadRequests, loadAssignments]);
+
+  useEffect(() => {
+    if (showModal) void loadAssignments();
+  }, [showModal, loadAssignments]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -171,6 +223,27 @@ export default function StaffLeaveRequestsPage() {
     }
     if (!form.reason.trim()) {
       toast.error("Please provide a reason.");
+      return;
+    }
+
+    const requestStartIso = new Date(form.startDatetime).toISOString();
+    const requestEndIso = form.endDatetime
+      ? new Date(form.endDatetime).toISOString()
+      : requestStartIso;
+    const conflict = assignments.find((a) =>
+      rangesOverlap(
+        a.startDatetime,
+        a.endDatetime,
+        requestStartIso,
+        requestEndIso,
+      ),
+    );
+    if (conflict) {
+      const label =
+        conflict.projectCode || conflict.projectTitle || "an assignment";
+      toast.error(
+        `You're assigned to ${label} during this window. Pick a time with no assignments.`,
+      );
       return;
     }
 
