@@ -149,6 +149,39 @@ export async function openRouterChat(
           continue
         }
 
+        // 402 Payment Required = OpenRouter account is out of credits
+        // (or the requested model needs more than the balance covers).
+        // Retrying won't help — surface a human-readable message instead
+        // of the raw JSON so the user knows to top up the account
+        // rather than thinking it's a transient outage. Same idea for
+        // 401 / 403 (auth + permission) which also can't be fixed by
+        // retrying.
+        if (response.status === 402) {
+          throw new Error(
+            `OpenRouter is out of credit for model "${model}". Top up the OpenRouter account or switch OPENROUTER_MODEL to a cheaper variant. (raw: ${rawText.slice(0, 200)})`,
+          )
+        }
+        if (response.status === 401) {
+          throw new Error(
+            "OpenRouter API key is invalid or missing. Check OPENROUTER_API_KEY in the environment.",
+          )
+        }
+        if (response.status === 403) {
+          throw new Error(
+            `OpenRouter rejected the request for model "${model}". The key may not be authorised for this model.`,
+          )
+        }
+        if (response.status === 404) {
+          throw new Error(
+            `OpenRouter does not recognise model "${model}". Check OPENROUTER_MODEL for a typo / deprecated slug.`,
+          )
+        }
+        if (response.status === 429) {
+          throw new Error(
+            `OpenRouter rate-limited the request for model "${model}". Wait a moment and try again.`,
+          )
+        }
+
         throw new Error(`OpenRouter request failed (${response.status}): ${rawText}`)
       }
 
