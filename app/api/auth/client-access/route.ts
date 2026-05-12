@@ -16,7 +16,9 @@ export async function POST(request: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from("projects")
-      .select("project_id, project_code, status, cancellation_phase")
+      .select(
+        "project_id, project_code, status, cancellation_phase, updated_at",
+      )
       .eq("project_code", projectCode)
       .maybeSingle()
 
@@ -28,20 +30,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Project code not found." }, { status: 404 })
     }
 
-    // Terminal projects are archive-state — block code sign-in so old
-    // codes can't be reused to peek at a closed-out project. "Terminal"
-    // = status flipped to "completed" or the project was cancelled and
-    // the post-cancel wrap-up reached cancellation_phase "done".
+    // Terminal projects get a 24-hour grace window so the client can
+    // still sign in and download their documents after the admin
+    // concludes the work. "Terminal" = status flipped to "completed" or
+    // the project was cancelled and the post-cancel wrap-up reached
+    // cancellation_phase "done". We use `updated_at` as the reference
+    // since the status flip bumps it; once the window expires, the code
+    // stops working.
     const status = String(data.status ?? "").trim().toLowerCase()
     const phase = String(data.cancellation_phase ?? "").trim().toLowerCase()
-    if (
-      status === "completed" ||
-      (status === "cancelled" && phase === "done")
-    ) {
-      return NextResponse.json(
-        { error: "This project has been closed and is no longer accessible." },
-        { status: 403 },
-      )
+    const isTerminal =
+      status === "completed" || (status === "cancelled" && phase === "done")
+    if (isTerminal) {
+      const updatedAtMs = data.updated_at
+        ? new Date(data.updated_at).getTime()
+        : 0
+      const ageMs = Date.now() - updatedAtMs
+      const GRACE_MS = 24 * 60 * 60 * 1000
+      if (!Number.isFinite(updatedAtMs) || ageMs > GRACE_MS) {
+        return NextResponse.json(
+          {
+            error:
+              "This project has been closed and is no longer accessible.",
+          },
+          { status: 403 },
+        )
+      }
     }
 
     const response = NextResponse.json({
