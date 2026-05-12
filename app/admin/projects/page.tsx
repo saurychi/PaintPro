@@ -35,6 +35,11 @@ type RawProject = {
   rawStatus?: string | null;
   scheduledStartDatetime?: string | null;
   scheduledEndDatetime?: string | null;
+  // Only set when status is "cancelled". Used by getProjectRoute to
+  // decide whether to land the admin on the report list (done /
+  // concluded) or the dashboard with the next cancellation action
+  // ready to run (review / document / payment / employee / conclude).
+  cancellationPhase?: string | null;
 };
 
 type ProjectsResponse = {
@@ -597,7 +602,13 @@ export default function AdminProjectsPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        router.push(getProjectRoute(project.id, key))
+                        router.push(
+                          getProjectRoute(
+                            project.id,
+                            key,
+                            project.cancellationPhase ?? null,
+                          ),
+                        )
                       }
                       className="inline-flex items-center justify-center rounded-md px-4 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
                       style={{ backgroundColor: ACCENT }}

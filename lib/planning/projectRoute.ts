@@ -15,9 +15,14 @@
 //     (dashboard auto-opens FinalPaymentModal — admin's next action is
 //     receiving payment, not editing the invoice)
 //   • completed → /admin/report/report-list/<id> (per-project report)
-//   • cancelled → /admin/report/report-list/<id> (per-project report —
-//     cancelled projects are archive-state too, so the report view is
-//     the right landing instead of bouncing back to the list)
+//   • cancelled — depends on cancellation_phase:
+//       phase="done" (or null/concluded) → /admin/report/report-list/<id>
+//         (fully wrapped up, archive surface)
+//       phase="payment" → /admin?projectId=<id>&openCancellationPayment=<id>
+//         (settlement modal auto-pops)
+//       any other phase (review / document / employee / conclude) →
+//         /admin?projectId=<id> (dashboard with the JobProgressCard
+//         showing the next cancellation action)
 
 export type ProjectStatusKey =
   | "main_task_pending"
@@ -80,9 +85,44 @@ export function normalizeProjectStatus(
   return "unknown";
 }
 
+// Cancellation phases recognised by the dashboard. "done" is the fully
+// concluded state — same archive semantics as a completed project, so
+// the route falls through to the report list. The other phases mean
+// the wrap-up is still in progress and the admin needs to take an
+// action from the dashboard.
+type CancellationPhaseHint =
+  | "review"
+  | "document"
+  | "payment"
+  | "employee"
+  | "conclude"
+  | "done";
+
+function normalizeCancellationPhaseHint(
+  value: string | null | undefined,
+): CancellationPhaseHint | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "review":
+    case "document":
+    case "payment":
+    case "employee":
+    case "conclude":
+    case "done":
+      return normalized;
+    default:
+      return null;
+  }
+}
+
 export function getProjectRoute(
   projectId: string,
   status: ProjectStatusKey | "unknown",
+  // Only honoured when status === "cancelled". Lets the caller route
+  // mid-wrap-up cancellations to the dashboard (where the admin can
+  // still advance the cancellation phase) while concluded cancellations
+  // go straight to the report list.
+  cancellationPhase?: string | null,
 ): string {
   switch (status) {
     case "main_task_pending":
@@ -127,8 +167,27 @@ export function getProjectRoute(
       // their JobProgressCard pre-selected so the admin can advance them.
       return `/admin?projectId=${projectId}`;
     case "completed":
-    case "cancelled":
       return `/admin/report/report-list/${projectId}`;
+    case "cancelled": {
+      const phase = normalizeCancellationPhaseHint(cancellationPhase);
+      // Concluded cancellation (or no phase known yet — old data fallback):
+      // archive surface.
+      if (phase === null || phase === "done") {
+        return `/admin/report/report-list/${projectId}`;
+      }
+      // Settlement modal auto-pops only when the wrap-up has reached
+      // the payment step. JobProgressCard's effect ignores the param
+      // when the phase isn't payment, so passing it on every cancel
+      // would be a no-op rather than a problem; we scope it for clarity.
+      if (phase === "payment") {
+        return `/admin?projectId=${projectId}&openCancellationPayment=${projectId}`;
+      }
+      // review / document / employee / conclude → dashboard, project
+      // pre-selected. The JobProgressCard surfaces the cancellation
+      // group with the active phase highlighted so the admin can take
+      // the next action.
+      return `/admin?projectId=${projectId}`;
+    }
     case "unknown":
     default:
       return `/admin/projects`;

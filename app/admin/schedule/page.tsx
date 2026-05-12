@@ -53,6 +53,10 @@ type ScheduleProject = {
   scheduledEndDatetime: string | null;
   status: ProjectStatus;
   rawStatus: string;
+  // Cancellation phase (review / document / payment / employee /
+  // conclude / done). Used by getProjectRoute to decide whether a
+  // cancelled project routes to the dashboard or the report list.
+  cancellationPhase?: string | null;
   dateLabel: string;
   activeDays?: string[];
 };
@@ -1076,10 +1080,15 @@ export default function AdminSchedule() {
   // belongs on (e.g. downpayment_pending → dashboard with the modal
   // pre-opened, in_progress → dashboard with this project pre-selected).
   // See lib/planning/projectRoute.ts.
-  function getProjectRoute(projectId: string, rawStatus: string) {
+  function getProjectRoute(
+    projectId: string,
+    rawStatus: string,
+    cancellationPhase?: string | null,
+  ) {
     return resolveProjectRoute(
       projectId,
       normalizeProjectStatus(rawStatus),
+      cancellationPhase ?? null,
     );
   }
 
@@ -2003,6 +2012,7 @@ export default function AdminSchedule() {
                                   getProjectRoute(
                                     project.id,
                                     project.rawStatus,
+                                    project.cancellationPhase ?? null,
                                   ),
                                 );
                                 setSelectedDate(null);
