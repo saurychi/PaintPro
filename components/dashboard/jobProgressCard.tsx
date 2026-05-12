@@ -2749,7 +2749,15 @@ function JobProgressCard({
                                             />
                                           </div>
 
-                                          {/* Mobile-only date subtext */}
+                                          {/* Mobile-only date subtext.
+                                              Pre-completion the only useful
+                                              number is the scheduled start
+                                              (when it WILL run / IS running);
+                                              the "Finished" line only shows
+                                              once the subtask is actually
+                                              done, so the placeholder dashes
+                                              on active / pending rows
+                                              disappear. */}
                                           <div
                                             className={[
                                               "mt-1.5 space-y-0.5 text-[11px] md:hidden",
@@ -2758,7 +2766,9 @@ function JobProgressCard({
                                                 : "text-gray-500 dark:text-slate-400",
                                             ].join(" ")}>
                                             <div>
-                                              Scheduled:{" "}
+                                              {effectiveChildStatus === "done"
+                                                ? "Started: "
+                                                : "Scheduled: "}
                                               <span
                                                 className={
                                                   dim
@@ -2768,21 +2778,26 @@ function JobProgressCard({
                                                 {child.startLabel || "-"}
                                               </span>
                                             </div>
-                                            <div>
-                                              Finished:{" "}
-                                              <span
-                                                className={
-                                                  dim
-                                                    ? "text-gray-300"
-                                                    : "text-gray-700 dark:text-slate-300"
-                                                }>
-                                                {child.endLabel || "-"}
-                                              </span>
-                                            </div>
+                                            {effectiveChildStatus === "done" ? (
+                                              <div>
+                                                Finished:{" "}
+                                                <span
+                                                  className={
+                                                    dim
+                                                      ? "text-gray-300"
+                                                      : "text-gray-700 dark:text-slate-300"
+                                                  }>
+                                                  {child.endLabel || "-"}
+                                                </span>
+                                              </div>
+                                            ) : null}
                                           </div>
                                         </div>
 
-                                        {/* Start date (desktop only) */}
+                                        {/* Start date (desktop only). Always
+                                            visible: the ongoing subtask and
+                                            every pending subtask after it
+                                            care about when they begin. */}
                                         <div className="hidden md:col-span-3 md:block">
                                           <div
                                             className={[
@@ -2795,7 +2810,13 @@ function JobProgressCard({
                                           </div>
                                         </div>
 
-                                        {/* End date + detail chevron (desktop only) */}
+                                        {/* End date + detail chevron
+                                            (desktop only). The end label is
+                                            only meaningful once the subtask
+                                            is finished; for active / pending
+                                            rows the column collapses to just
+                                            the chevron so the eye isn't
+                                            drawn to a placeholder dash. */}
                                         <div className="hidden md:col-span-3 md:block">
                                           <div
                                             className={[
@@ -2804,7 +2825,11 @@ function JobProgressCard({
                                                 ? "text-gray-200"
                                                 : "text-gray-700 dark:text-slate-300",
                                             ].join(" ")}>
-                                            <span>{child.endLabel || "-"}</span>
+                                            {effectiveChildStatus === "done" ? (
+                                              <span>
+                                                {child.endLabel || "-"}
+                                              </span>
+                                            ) : null}
                                             {hasDetail ? (
                                               <ChevronRight
                                                 className={[
