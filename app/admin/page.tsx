@@ -246,6 +246,30 @@ function formatDateTime(value?: string | null) {
   });
 }
 
+// "Job Creation" and "Start of Work" are meta phases — they don't have
+// a real per-row scheduled_start. Pin them to the standard workday
+// start (09:00 local) on the project's scheduled date so the label
+// always reads "9:00 AM" regardless of what literal value the project's
+// scheduled_start_datetime carries (08:00 from create, post-snap value
+// from shiftProjectSchedule, etc.).
+function formatScheduledWorkdayStart(value?: string | null) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  const localKickoff = new Date(date);
+  localKickoff.setHours(9, 0, 0, 0);
+
+  return localKickoff.toLocaleString("en-US", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatDateInputValue(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -887,7 +911,11 @@ function buildProcessItems(args: {
       id: "job-creation",
       title: "Job Creation",
       status: jobCreationStatus,
-      startLabel: formatDateTime(projectStart),
+      // Pin the displayed start to 09:00 of the scheduled day. Job
+      // Creation is a meta phase, not a per-row scheduled item, so the
+      // label should read as the standard workday start rather than
+      // mirror whatever literal value scheduled_start_datetime carries.
+      startLabel: formatScheduledWorkdayStart(projectStart),
       endLabel:
         jobCreationStatus === "done"
           ? "Completed"
@@ -925,14 +953,19 @@ function buildProcessItems(args: {
   const showStartOfWork = !isCancelled || startOfWorkStatus !== "pending";
 
   if (showStartOfWork) {
+    // Pin Start of Work + Project Kickoff to 09:00 local of the
+    // scheduled date. These rows describe the start of the workday,
+    // not a per-task schedule, so they should always read as 9:00 AM
+    // regardless of any time-of-day drift on scheduled_start_datetime.
+    const workdayStartLabel = formatScheduledWorkdayStart(projectStart);
     items.push({
       id: "start-of-work",
       title: "Start of Work",
       status: startOfWorkStatus,
-      startLabel: formatDateTime(projectStart),
+      startLabel: workdayStartLabel,
       endLabel:
         startOfWorkStatus === "done"
-          ? formatDateTime(projectStart)
+          ? workdayStartLabel
           : startOfWorkStatus === "active"
             ? "Working on it..."
             : "-",
@@ -941,10 +974,10 @@ function buildProcessItems(args: {
           id: "project-kickoff",
           title: "Project Kickoff",
           status: startOfWorkStatus,
-          startLabel: formatDateTime(projectStart),
+          startLabel: workdayStartLabel,
           endLabel:
             startOfWorkStatus === "done"
-              ? formatDateTime(projectStart)
+              ? workdayStartLabel
               : startOfWorkStatus === "active"
                 ? "Working on it..."
                 : "-",
