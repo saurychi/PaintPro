@@ -324,7 +324,7 @@ function ClientShell({
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
-      <AppSidebar role={role} user={user} />
+      <AppSidebar role={role} user={user} maskIdentity />
       <ClientPendingDocumentBadge />
       <ClientMessagesBadge />
       <ClientProjectTerminalWatcher

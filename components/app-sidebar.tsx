@@ -323,6 +323,7 @@ const FALLBACK_SIDEBAR_USER: SidebarUser = {
 type AppSidebarProps = {
   role: Role;
   user?: SidebarUser | null;
+  maskIdentity?: boolean;
 };
 
 const AVATAR_BG = [
@@ -351,6 +352,30 @@ function firstLetter(nameOrEmail?: string | null) {
   return v[0]!.toUpperCase();
 }
 
+function maskWord(word: string) {
+  if (word.length <= 1) return word;
+  if (word.length === 2) return `${word[0]}*`;
+  const first = word[0]!;
+  const last = word[word.length - 1]!;
+  return `${first}${"*".repeat(word.length - 2)}${last}`;
+}
+
+function maskName(name?: string | null) {
+  const v = (name ?? "").trim();
+  if (!v) return "";
+  return v.split(/\s+/).filter(Boolean).map(maskWord).join(" ");
+}
+
+function maskEmail(email?: string | null) {
+  const v = (email ?? "").trim();
+  if (!v) return "";
+  const atIndex = v.indexOf("@");
+  if (atIndex <= 0) return v;
+  const local = v.slice(0, atIndex);
+  const domain = v.slice(atIndex);
+  return `${maskWord(local)}${domain}`;
+}
+
 function roleBadgeClass(r: string | null | undefined) {
   switch (r) {
     case "admin":
@@ -366,7 +391,7 @@ function roleBadgeClass(r: string | null | undefined) {
   }
 }
 
-export function AppSidebar({ role, user }: AppSidebarProps) {
+export function AppSidebar({ role, user, maskIdentity }: AppSidebarProps) {
   const { open, setOpen } = useSidebar();
   const pathname = usePathname();
   const menuItems = ITEMS_BY_ROLE[role];
@@ -551,6 +576,16 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
     resolvedUser.role === "client"
       ? resolvedUser.role
       : role) || role;
+
+  const isClientView =
+    maskIdentity === true ||
+    effectiveRole === "client" ||
+    pathname === "/client" ||
+    pathname.startsWith("/client/");
+  const visibleName = isClientView ? maskName(displayName) : displayName;
+  const visibleEmail = isClientView
+    ? maskEmail(resolvedUser.email)
+    : resolvedUser.email || "";
 
   function toggleMenu(key: string) {
     setOpenMenus((prev) => ({
@@ -777,10 +812,10 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold text-gray-900">
-                    {displayName || "User"}
+                    {visibleName || "User"}
                   </div>
                   <div className="truncate text-xs text-gray-500">
-                    {resolvedUser.email || ""}
+                    {visibleEmail}
                   </div>
 
                   <div className="mt-2 flex items-center gap-2">
@@ -1100,7 +1135,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                   !resolvedUser.profile_image_url && avatarClass,
                 )}
                 aria-label="User avatar"
-                title={displayName || resolvedUser.email || "User"}
+                title={visibleName || visibleEmail || "User"}
               >
                 {resolvedUser.profile_image_url ? (
                   <Image
@@ -1141,10 +1176,10 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
               {open && (
                 <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-gray-900">
-                  {displayName || "User"}
+                  {visibleName || "User"}
                 </div>
                 <div className="truncate text-xs text-gray-500">
-                  {resolvedUser.email || ""}
+                  {visibleEmail}
                 </div>
 
                   <div className="mt-2 flex items-center gap-2">
