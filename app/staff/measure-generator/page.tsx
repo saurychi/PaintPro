@@ -930,6 +930,44 @@ export default function MeasureGeneratorPage() {
                   </span>
                 </div>
 
+                {/* `appearance-none` strips the native thumb. Without
+                    explicit ::-webkit-slider-thumb / ::-moz-range-thumb
+                    styles below, the track renders but the draggable
+                    thumb is invisible — staff can't move the slider.
+                    The thumb rules are scoped to .quick-estimate-slider
+                    so the bump-up doesn't bleed into other inputs. */}
+                <style>{`
+                  .quick-estimate-slider::-webkit-slider-thumb {
+                    -webkit-appearance: none;
+                    appearance: none;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9999px;
+                    background: ${ACCENT};
+                    border: 2px solid #ffffff;
+                    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+                    cursor: pointer;
+                  }
+                  .quick-estimate-slider::-moz-range-thumb {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9999px;
+                    background: ${ACCENT};
+                    border: 2px solid #ffffff;
+                    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+                    cursor: pointer;
+                  }
+                  .quick-estimate-slider:focus {
+                    outline: none;
+                  }
+                  .quick-estimate-slider:focus::-webkit-slider-thumb {
+                    box-shadow: 0 0 0 4px rgba(0, 192, 101, 0.18);
+                  }
+                  .quick-estimate-slider:focus::-moz-range-thumb {
+                    box-shadow: 0 0 0 4px rgba(0, 192, 101, 0.18);
+                  }
+                `}</style>
+
                 <input
                   type="range"
                   min={0}
@@ -942,7 +980,7 @@ export default function MeasureGeneratorPage() {
                       bandFromIndex(Number(e.target.value)),
                     )
                   }
-                  className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-emerald-100 dark:bg-emerald-900/40"
+                  className="quick-estimate-slider h-2 w-full cursor-pointer appearance-none rounded-lg bg-emerald-100 dark:bg-emerald-900/40"
                   style={{ accentColor: ACCENT }}
                 />
 

@@ -41,11 +41,51 @@ function formatDate(value: string | null) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-PH", {
+  return d.toLocaleDateString("en-AU", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-AU", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+// "Full-day-ish" = both ends sit on a midnight boundary, which is what
+// the legacy date-only picker produced. Anything else came from the
+// datetime-local picker and should surface time-of-day to be useful.
+function isFullDayBoundary(iso: string | null) {
+  if (!iso) return true;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return true;
+  return (
+    d.getHours() === 0 &&
+    d.getMinutes() === 0 &&
+    d.getSeconds() === 0 &&
+    d.getMilliseconds() === 0
+  );
+}
+
+function formatRequestRange(start: string | null, end: string | null) {
+  const startIsMidnight = isFullDayBoundary(start);
+  const endIsMidnight = end ? isFullDayBoundary(end) : true;
+  const isDateOnly = startIsMidnight && endIsMidnight;
+  const startLabel = isDateOnly ? formatDate(start) : formatDateTime(start);
+
+  if (!end || end === start) return startLabel;
+  const endLabel = isDateOnly ? formatDate(end) : formatDateTime(end);
+  if (endLabel === startLabel) return startLabel;
+  return `${startLabel} - ${endLabel}`;
 }
 
 function formatSubmitted(value: string | null) {
@@ -57,10 +97,10 @@ function formatSubmitted(value: string | null) {
   const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) {
-    return `Today, ${d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`;
+    return `Today, ${d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}`;
   }
   if (diffDays === 1) {
-    return `Yesterday, ${d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`;
+    return `Yesterday, ${d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}`;
   }
   return formatDate(value);
 }
@@ -75,9 +115,12 @@ export default function StaffLeaveRequestsPage() {
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // startDatetime / endDatetime hold the `datetime-local` value strings
+  // (YYYY-MM-DDTHH:MM). `new Date(value).toISOString()` converts them
+  // to the UTC timestamps the API + DB expect.
   const [form, setForm] = useState({
-    startDate: "",
-    endDate: "",
+    startDatetime: "",
+    endDatetime: "",
     reason: "",
   });
 
@@ -114,8 +157,16 @@ export default function StaffLeaveRequestsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.startDate) {
-      toast.error("Please select a start date.");
+    if (!form.startDatetime) {
+      toast.error("Please select a start date and time.");
+      return;
+    }
+    if (
+      form.endDatetime &&
+      new Date(form.endDatetime).getTime() <
+        new Date(form.startDatetime).getTime()
+    ) {
+      toast.error("End must be on or after start.");
       return;
     }
     if (!form.reason.trim()) {
@@ -135,9 +186,9 @@ export default function StaffLeaveRequestsPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          startDatetime: new Date(form.startDate).toISOString(),
-          endDatetime: form.endDate
-            ? new Date(form.endDate).toISOString()
+          startDatetime: new Date(form.startDatetime).toISOString(),
+          endDatetime: form.endDatetime
+            ? new Date(form.endDatetime).toISOString()
             : null,
           reason: form.reason.trim(),
         }),
@@ -148,7 +199,7 @@ export default function StaffLeaveRequestsPage() {
 
       toast.success("Leave request submitted.");
       setShowModal(false);
-      setForm({ startDate: "", endDate: "", reason: "" });
+      setForm({ startDatetime: "", endDatetime: "", reason: "" });
       await loadRequests();
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Failed to submit request."));
@@ -223,14 +274,13 @@ export default function StaffLeaveRequestsPage() {
                   >
                     <div>
                       <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-                        Date
+                        When
                       </p>
                       <p className="mt-0.5 text-xs font-medium text-gray-800">
-                        {formatDate(request.startDatetime)}
-                        {request.endDatetime &&
-                        request.endDatetime !== request.startDatetime
-                          ? ` — ${formatDate(request.endDatetime)}`
-                          : ""}
+                        {formatRequestRange(
+                          request.startDatetime,
+                          request.endDatetime,
+                        )}
                       </p>
                     </div>
 
@@ -283,7 +333,7 @@ export default function StaffLeaveRequestsPage() {
                 type="button"
                 onClick={() => {
                   setShowModal(false);
-                  setForm({ startDate: "", endDate: "", reason: "" });
+                  setForm({ startDatetime: "", endDatetime: "", reason: "" });
                 }}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-50"
               >
@@ -294,13 +344,16 @@ export default function StaffLeaveRequestsPage() {
             <form onSubmit={handleSubmit} className="space-y-4 px-5 py-4">
               <div>
                 <label className="text-xs font-medium text-gray-700">
-                  Start Date <span className="text-red-500">*</span>
+                  Start <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="date"
-                  value={form.startDate}
+                  type="datetime-local"
+                  value={form.startDatetime}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, startDate: e.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      startDatetime: e.target.value,
+                    }))
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
                   required
@@ -309,17 +362,20 @@ export default function StaffLeaveRequestsPage() {
 
               <div>
                 <label className="text-xs font-medium text-gray-700">
-                  End Date{" "}
+                  End{" "}
                   <span className="text-[11px] font-normal text-gray-400">
-                    (optional, if more than one day)
+                    (optional, for a multi-hour or multi-day block)
                   </span>
                 </label>
                 <input
-                  type="date"
-                  value={form.endDate}
-                  min={form.startDate}
+                  type="datetime-local"
+                  value={form.endDatetime}
+                  min={form.startDatetime}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, endDate: e.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      endDatetime: e.target.value,
+                    }))
                   }
                   className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-[#00c065] focus:ring-2 focus:ring-[#00c065]/10"
                 />
@@ -346,7 +402,11 @@ export default function StaffLeaveRequestsPage() {
                   type="button"
                   onClick={() => {
                     setShowModal(false);
-                    setForm({ startDate: "", endDate: "", reason: "" });
+                    setForm({
+                      startDatetime: "",
+                      endDatetime: "",
+                      reason: "",
+                    });
                   }}
                   className="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
                 >

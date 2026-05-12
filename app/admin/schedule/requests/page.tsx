@@ -45,11 +45,50 @@ function formatDate(value: string | null) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-PH", {
+  return d.toLocaleDateString("en-AU", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-AU", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+// "Full-day-ish" boundary = midnight local time. Anything else came
+// from a datetime-local pick and should render with time-of-day.
+function isFullDayBoundary(iso: string | null) {
+  if (!iso) return true;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return true;
+  return (
+    d.getHours() === 0 &&
+    d.getMinutes() === 0 &&
+    d.getSeconds() === 0 &&
+    d.getMilliseconds() === 0
+  );
+}
+
+function formatRequestRange(start: string | null, end: string | null) {
+  const startIsMidnight = isFullDayBoundary(start);
+  const endIsMidnight = end ? isFullDayBoundary(end) : true;
+  const isDateOnly = startIsMidnight && endIsMidnight;
+  const startLabel = isDateOnly ? formatDate(start) : formatDateTime(start);
+
+  if (!end || end === start) return startLabel;
+  const endLabel = isDateOnly ? formatDate(end) : formatDateTime(end);
+  if (endLabel === startLabel) return startLabel;
+  return `${startLabel} - ${endLabel}`;
 }
 
 function formatSubmitted(value: string | null) {
@@ -62,10 +101,10 @@ function formatSubmitted(value: string | null) {
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) {
-    return `Today, ${d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`;
+    return `Today, ${d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}`;
   }
   if (diffDays === 1) {
-    return `Yesterday, ${d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`;
+    return `Yesterday, ${d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}`;
   }
   return formatDate(value);
 }
@@ -259,14 +298,13 @@ export default function ScheduleRequestsPage() {
 
                       <div>
                         <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-                          Requested Date
+                          Requested
                         </p>
                         <p className="mt-0.5 text-xs font-medium text-gray-800">
-                          {formatDate(request.startDatetime)}
-                          {request.endDatetime &&
-                          request.endDatetime !== request.startDatetime
-                            ? ` — ${formatDate(request.endDatetime)}`
-                            : ""}
+                          {formatRequestRange(
+                            request.startDatetime,
+                            request.endDatetime,
+                          )}
                         </p>
                       </div>
 

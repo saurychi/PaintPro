@@ -889,19 +889,19 @@ export default function StaffSchedulePage() {
       `}</style>
 
       <div className="flex min-h-screen flex-col bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 lg:grid lg:h-screen lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden lg:px-[1.4%] lg:py-[1.2%]">
-        <h1 className="shrink-0 text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
+        <h1 className="shrink-0 truncate text-lg font-semibold leading-8 text-gray-900 sm:text-xl lg:text-2xl">
           Schedule
         </h1>
 
         <div className="mt-3 lg:min-h-0">
-          <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
+          <div className="flex flex-col rounded-md border border-gray-200 bg-white shadow-sm lg:h-full lg:min-h-0 lg:overflow-hidden">
             <div className="flex-1 p-2 lg:min-h-0 lg:overflow-hidden">
               {loading ? (
                 <ScheduleSkeleton />
               ) : (
                 <div className="grid grid-cols-12 gap-2 lg:h-full lg:min-h-0">
-                  <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                  <div className="col-span-12 flex flex-col rounded-md border border-gray-200 bg-white p-2 shadow-sm lg:col-span-9 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
                       {/* Left: view toggle */}
                       <div className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
                         {(["calendar", "timeline"] as const).map((mode) => {
@@ -926,8 +926,11 @@ export default function StaffSchedulePage() {
                         })}
                       </div>
 
-                      {/* Center: legend */}
-                      <div className="flex flex-wrap items-center justify-center gap-3">
+                      {/* Center: legend. Hidden on phone (the 7 items
+                          wrap into 2-3 cluttered rows) — staff can still
+                          read status from the colored event dots on the
+                          calendar. Visible from md+ where there's room. */}
+                      <div className="hidden md:flex md:flex-wrap md:items-center md:justify-center md:gap-3">
                         {[
                           { label: "Current", color: "#00c065" },
                           { label: "Behind", color: "#ef4444" },
@@ -969,7 +972,7 @@ export default function StaffSchedulePage() {
                     </div>
 
                     <div
-                      className={`mt-2 h-[60vh] rounded-xl border ${BORDER} bg-white p-1.5 sm:h-[70vh] lg:mt-0 lg:h-auto lg:min-h-0 lg:flex-1 lg:overflow-hidden`}
+                      className={`mt-2 h-[55vh] rounded-md border ${BORDER} bg-white p-1.5 sm:h-[65vh] lg:mt-0 lg:h-auto lg:min-h-0 lg:flex-1 lg:overflow-hidden`}
                     >
                       <div className="h-full min-h-0">
                         <FullCalendar
@@ -1084,8 +1087,8 @@ export default function StaffSchedulePage() {
                     </div>
                   </div>
 
-                  <div className="col-span-12 flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm lg:col-span-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
-                    <div className="flex flex-col p-4 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                  <div className="col-span-12 flex flex-col rounded-md border border-gray-200 bg-white shadow-sm lg:col-span-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                    <div className="flex flex-col p-3 sm:p-4 lg:h-full lg:min-h-0 lg:overflow-hidden">
                       <section className="flex flex-col pb-4 lg:basis-[20%]">
                         <div className="mb-3 flex items-center gap-2">
                           <p className="text-xs font-semibold text-gray-900">
@@ -1222,20 +1225,20 @@ export default function StaffSchedulePage() {
 
         {selectedDate ? (
           <div
-            className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-50 grid place-items-center bg-black/50 px-3 backdrop-blur-sm sm:px-4"
             onClick={() => setSelectedDate(null)}
           >
             <div
-              className="w-[92%] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+              className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl sm:w-[92%]"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="border-b border-gray-200 px-5 py-4">
+              <div className="border-b border-gray-200 px-4 py-3 sm:px-5 sm:py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">
+                    <p className="text-xs font-semibold text-gray-900 sm:text-sm">
                       Day Details
                     </p>
-                    <h3 className="mt-2 text-lg font-bold text-gray-900">
+                    <h3 className="mt-1 truncate text-base font-bold text-gray-900 sm:text-lg">
                       {formatLongDate(selectedDate)}
                     </h3>
                   </div>
@@ -1243,7 +1246,7 @@ export default function StaffSchedulePage() {
                   <button
                     type="button"
                     onClick={() => setSelectedDate(null)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
                     aria-label="Close"
                   >
                     x
@@ -1251,8 +1254,8 @@ export default function StaffSchedulePage() {
                 </div>
               </div>
 
-              <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
-                <div className="grid gap-4">
+              <div className="max-h-[55vh] overflow-y-auto px-4 py-3 sm:max-h-[60vh] sm:px-5 sm:py-4">
+                <div className="grid gap-3 sm:gap-4">
                   <div>
                     <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                       <BriefcaseBusiness className="h-4 w-4" />
@@ -1262,7 +1265,7 @@ export default function StaffSchedulePage() {
                     <div className="mt-2 grid gap-2">
                       {selectedDayProjects.length === 0 ? (
                         <div
-                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500`}
+                          className={`rounded-md border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-xs text-gray-500 sm:text-sm`}
                         >
                           No projects scheduled.
                         </div>
@@ -1272,7 +1275,7 @@ export default function StaffSchedulePage() {
                           return (
                             <div
                               key={project.id}
-                              className={`flex items-center justify-between gap-3 rounded-xl border ${BORDER} bg-white px-3 py-3 text-left shadow-sm`}
+                              className={`flex items-center justify-between gap-3 rounded-md border ${BORDER} bg-white px-3 py-2.5 text-left shadow-sm`}
                             >
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -1307,7 +1310,7 @@ export default function StaffSchedulePage() {
                     <div className="grid gap-2">
                       {selectedDayUnavailableItems.length === 0 ? (
                         <div
-                          className={`rounded-xl border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-sm text-gray-500`}
+                          className={`rounded-md border border-dashed ${BORDER} bg-gray-50 px-3 py-4 text-center text-xs text-gray-500 sm:text-sm`}
                         >
                           No unavailable days recorded.
                         </div>
@@ -1315,7 +1318,7 @@ export default function StaffSchedulePage() {
                         selectedDayUnavailableItems.map((item) => (
                           <div
                             key={item.id}
-                            className={`rounded-xl border px-3 py-3 ${
+                            className={`rounded-md border px-3 py-2.5 ${
                               item.source === "holiday"
                                 ? "border-amber-200 bg-amber-50"
                                 : item.source === "personal-approved"
@@ -1347,7 +1350,7 @@ export default function StaffSchedulePage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
+              <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 px-4 py-3 sm:px-5 sm:py-4">
                 {selectedDate ? (
                   <button
                     type="button"
@@ -1365,14 +1368,14 @@ export default function StaffSchedulePage() {
                         `/staff?date=${encodeURIComponent(targetDate)}`,
                       );
                     }}
-                    className="rounded-lg bg-[#00c065] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00a054]">
+                    className="rounded-md bg-[#00c065] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] sm:px-4 sm:text-sm">
                     Go to dashboard
                   </button>
                 ) : null}
                 <button
                   type="button"
                   onClick={() => setSelectedDate(null)}
-                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800"
+                  className="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-gray-800 sm:px-4 sm:text-sm"
                 >
                   Close
                 </button>
