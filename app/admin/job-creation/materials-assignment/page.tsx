@@ -72,9 +72,9 @@ const ACCENT = "#00c065";
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
 
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(safeValue);
@@ -425,11 +425,19 @@ export default function MaterialsAssignment() {
         );
       }
 
-      if (cachedMaterials && cachedMaterials.length > 0) {
+      // Render from cache whenever we have either materials already
+      // entered OR main tasks the admin has just picked. The
+      // main-tasks-only path covers manual mode (no project_task rows
+      // in the DB yet), where the materials list starts empty but the
+      // groups still need to render so the admin can add materials per
+      // main task.
+      const hasCachedTasks = (cachedMainTasks?.length ?? 0) > 0;
+      const hasCachedMaterials = (cachedMaterials?.length ?? 0) > 0;
+      if (hasCachedMaterials || hasCachedTasks) {
         // Show cached materials immediately, then refresh only the live stock
         // fields so the user can see progress while inventory data loads.
         const groupedServices = buildCachedServiceGroups(
-          cachedMaterials,
+          cachedMaterials ?? [],
           cachedMainTasks,
         );
 

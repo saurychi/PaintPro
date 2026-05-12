@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown,
@@ -1874,6 +1874,9 @@ export default function BasicDetails() {
         siteAddress,
         description: description.trim() || null,
         clientId: savedClientId,
+        scheduledStartDatetime: scheduledStart
+          ? new Date(`${scheduledStart}T08:00:00`).toISOString()
+          : null,
         currentStep: "main_task_pending",
         mainTasks: nextTasks.map((task) => ({
           id: "", // populated when main-task-assignment first loads from API
@@ -1882,7 +1885,9 @@ export default function BasicDetails() {
         subTasks: [], // populated on first visit to each page
         materials: [],
         markupRate: 30,
+        downpayment: 0,
         refData: {},
+        manualMode,
       });
 
       setCachedStep(projectRow.project_id, "main_task_pending");
@@ -1939,114 +1944,130 @@ export default function BasicDetails() {
     applyClientToForm(selectedClient);
   }, [clients, selectedClientId]);
 
+  // Hoisted from the prior inline useEffect so the schedule calendar
+  // modal can re-invoke it on demand from its refresh button. Returns
+  // the computed background-event list; callers decide what to do with
+  // it (initial effect applies it, refresh handler applies it too).
+  const loadUnavailableScheduleDates = useCallback(async () => {
+    const response = await fetch("/api/schedule/getUnavailableDates", {
+      method: "GET",
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error || "Failed to load unavailable schedule dates.",
+      );
+    }
+
+    const unavailableDates: string[] = Array.isArray(data?.unavailableDates)
+      ? data.unavailableDates
+      : [];
+
+    let holidayDates: Set<string> = new Set();
+
+    if (holidaySettings.enabled && holidaySettings.countryCode) {
+      const today = projectNow;
+      const years = Array.from(
+        new Set([today.getFullYear(), today.getFullYear() + 1]),
+      );
+
+      const holidayResults = await Promise.all(
+        years.map(async (year) => {
+          try {
+            const res = await fetch(
+              `/api/holidays?country=${encodeURIComponent(
+                holidaySettings.countryCode,
+              )}&year=${year}`,
+            );
+            if (!res.ok) return [] as string[];
+            const json = await res.json();
+            return Array.isArray(json?.holidays)
+              ? (json.holidays as Array<{ date: string }>).map((h) => h.date)
+              : [];
+          } catch {
+            return [] as string[];
+          }
+        }),
+      );
+
+      holidayDates = new Set(holidayResults.flat());
+    }
+
+    const today = projectNow;
+    const events: Array<{
+      title: string;
+      date: string;
+      display: "background";
+      className: string;
+    }> = [];
+
+    for (let i = 0; i < 60; i += 1) {
+      const current = new Date(today);
+      current.setDate(today.getDate() + i);
+
+      const dateKey = current.toISOString().slice(0, 10);
+      const isUnavailable = unavailableDates.includes(dateKey);
+      const isHoliday = holidayDates.has(dateKey);
+
+      let className: string;
+      let title: string;
+
+      if (isUnavailable) {
+        className = "fc-unavailable-day";
+        title = "Unavailable";
+      } else if (isHoliday) {
+        className = "fc-holiday-day";
+        title = "Holiday";
+      } else {
+        className = "fc-available-day";
+        title = "Available";
+      }
+
+      events.push({
+        title,
+        date: dateKey,
+        display: "background",
+        className,
+      });
+    }
+
+    return events;
+  }, [holidaySettings.enabled, holidaySettings.countryCode, projectNow]);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function loadUnavailableScheduleDates() {
+    void (async () => {
       try {
-        const response = await fetch("/api/schedule/getUnavailableDates", {
-          method: "GET",
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data?.error || "Failed to load unavailable schedule dates.",
-          );
-        }
-
-        const unavailableDates: string[] = Array.isArray(data?.unavailableDates)
-          ? data.unavailableDates
-          : [];
-
-        let holidayDates: Set<string> = new Set();
-
-        if (holidaySettings.enabled && holidaySettings.countryCode) {
-          const today = projectNow;
-          const years = Array.from(
-            new Set([today.getFullYear(), today.getFullYear() + 1]),
-          );
-
-          const holidayResults = await Promise.all(
-            years.map(async (year) => {
-              try {
-                const res = await fetch(
-                  `/api/holidays?country=${encodeURIComponent(
-                    holidaySettings.countryCode,
-                  )}&year=${year}`,
-                );
-                if (!res.ok) return [] as string[];
-                const json = await res.json();
-                return Array.isArray(json?.holidays)
-                  ? (json.holidays as Array<{ date: string }>).map(
-                      (h) => h.date,
-                    )
-                  : [];
-              } catch {
-                return [] as string[];
-              }
-            }),
-          );
-
-          holidayDates = new Set(holidayResults.flat());
-        }
-
+        const events = await loadUnavailableScheduleDates();
         if (cancelled) return;
-
-        const today = projectNow;
-        const events: Array<{
-          title: string;
-          date: string;
-          display: "background";
-          className: string;
-        }> = [];
-
-        for (let i = 0; i < 60; i += 1) {
-          const current = new Date(today);
-          current.setDate(today.getDate() + i);
-
-          const dateKey = current.toISOString().slice(0, 10);
-          const isUnavailable = unavailableDates.includes(dateKey);
-          const isHoliday = holidayDates.has(dateKey);
-
-          let className: string;
-          let title: string;
-
-          if (isUnavailable) {
-            className = "fc-unavailable-day";
-            title = "Unavailable";
-          } else if (isHoliday) {
-            className = "fc-holiday-day";
-            title = "Holiday";
-          } else {
-            className = "fc-available-day";
-            title = "Available";
-          }
-
-          events.push({
-            title,
-            date: dateKey,
-            display: "background",
-            className,
-          });
-        }
-
         setAvailableDateEvents(events);
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to load unavailable schedule dates:", error);
-
         setAvailableDateEvents([]);
       }
-    }
-
-    loadUnavailableScheduleDates();
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [holidaySettings.enabled, holidaySettings.countryCode, projectNow]);
+  }, [loadUnavailableScheduleDates]);
+
+  // Awaitable refresh exposed to ScheduleCalendarModal — the modal
+  // toggles its own spinner around this Promise so admins can re-pull
+  // the schedule without closing/reopening the modal.
+  const refreshScheduleAvailability = useCallback(async () => {
+    try {
+      const events = await loadUnavailableScheduleDates();
+      setAvailableDateEvents(events);
+    } catch (error) {
+      console.error("Failed to refresh unavailable schedule dates:", error);
+      throw error;
+    }
+  }, [loadUnavailableScheduleDates]);
 
   const isBusy = saving || loading;
 
@@ -2552,33 +2573,39 @@ export default function BasicDetails() {
                           Project Name
                         </label>
 
-                        <button
-                          type="button"
-                          onClick={handleGenerateProjectName}
-                          disabled={isGeneratingProjectName}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
-                          style={{ backgroundColor: ACCENT }}
-                          onMouseEnter={(e) => {
-                            if (!isGeneratingProjectName) {
-                              e.currentTarget.style.backgroundColor =
-                                ACCENT_HOVER;
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isGeneratingProjectName) {
-                              e.currentTarget.style.backgroundColor = ACCENT;
-                            }
-                          }}
-                        >
-                          {isGeneratingProjectName ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                          {isGeneratingProjectName
-                            ? "Generating..."
-                            : "Generate"}
-                        </button>
+                        {/* Project-name AI generation is part of the
+                            automated flow. Manual mode hides it so the
+                            admin types the name themselves without an
+                            AI nudge. */}
+                        {!manualMode ? (
+                          <button
+                            type="button"
+                            onClick={handleGenerateProjectName}
+                            disabled={isGeneratingProjectName}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+                            style={{ backgroundColor: ACCENT }}
+                            onMouseEnter={(e) => {
+                              if (!isGeneratingProjectName) {
+                                e.currentTarget.style.backgroundColor =
+                                  ACCENT_HOVER;
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isGeneratingProjectName) {
+                                e.currentTarget.style.backgroundColor = ACCENT;
+                              }
+                            }}
+                          >
+                            {isGeneratingProjectName ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                            {isGeneratingProjectName
+                              ? "Generating..."
+                              : "Generate"}
+                          </button>
+                        ) : null}
                       </div>
 
                       <input
@@ -3104,6 +3131,7 @@ export default function BasicDetails() {
         selectedDate={scheduledStart}
         initialDate={projectNow}
         availableDateEvents={availableDateEvents}
+        onRefresh={refreshScheduleAvailability}
         onClose={() => setIsScheduleCalendarOpen(false)}
         onSelectDate={(date) => {
           setScheduledStart(date);

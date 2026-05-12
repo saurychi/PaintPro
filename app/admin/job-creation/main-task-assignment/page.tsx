@@ -16,10 +16,17 @@ import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import {
   getCachedMainTasks,
   setCachedMainTasks,
+  getCachedSubTasks,
+  setCachedSubTasks,
+  getCachedMaterials,
+  setCachedMaterials,
+  setCachedScheduledStartDatetime,
   setCachedStep,
   getCachedProjectMeta,
   ensureWizardCacheHydrated,
   markWizardDirty,
+  type CachedSubTask,
+  type CachedMaterial,
 } from "@/lib/wizardCache";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import CreateTaskModal from "@/components/project-creation/CreateTaskModal";
@@ -34,6 +41,32 @@ type Task = {
   name: string;
   project_task_id?: string;
 };
+
+// project_task / projects.scheduled_start_datetime is stored as a full ISO
+// timestamp. /api/planning/getEmployees expects a YYYY-MM-DD slice so it
+// can resolve the weekday and the staff-unavailability blocks for that
+// day. Returns "" when the project has no scheduled start yet.
+function extractScheduledDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Number of employees we seed onto every default subtask when the admin
+// adds a main task in manual mode. Matches the project's "team of four"
+// default crew size; the admin can adjust on the employee-assignment
+// page if a particular subtask needs a different head count.
+const DEFAULT_SUBTASK_EMPLOYEE_COUNT = 4;
+
+// Fallback estimated hours per subtask when the catalog has no duration
+// signal. Without this the project-schedule page renders zero-length
+// rows that collapse to a single point in the timeline; one hour gives
+// the admin a visible slot to drag/resize.
+const DEFAULT_SUBTASK_ESTIMATED_HOURS = 1;
 
 // ── Add Task Modal ────────────────────────────────────────────────────────────
 function AddTaskModal({
@@ -194,6 +227,10 @@ export default function MainTaskAssignment() {
 
   const [jobNo, setJobNo] = useState("");
   const [siteName, setSiteName] = useState("");
+  // YYYY-MM-DD slice of the project's scheduled start. Passed to the
+  // employees endpoint when seeding default staff for a newly-added
+  // main task so unavailability blocks for that date are honored.
+  const [scheduledDate, setScheduledDate] = useState<string>("");
   const [loadingProject, setLoadingProject] = useState(true);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -232,12 +269,11 @@ export default function MainTaskAssignment() {
     if (dragIndex === null) return;
     if (dragIndex !== targetIndex) {
       pushSelectedHistory();
-      setSelected((prev) => {
-        const next = [...prev];
-        const [moved] = next.splice(dragIndex, 1);
-        next.splice(targetIndex, 0, moved);
-        return next;
-      });
+      const next = [...selected];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      setSelected(next);
+      commitSelectedToCache(next);
       setIsDirty(true); markWizardDirty(projectId);
     }
     setDragIndex(null);
@@ -255,20 +291,396 @@ export default function MainTaskAssignment() {
     setSelectedHistory((prev) => [...prev, selected]);
   }
 
+  // Push the user's current main-task selection into the wizard cache.
+  // setCachedMainTasks cascades to drop subtasks + materials belonging
+  // to tasks that are no longer in the list, which is what keeps the
+  // project-schedule (and every other downstream page) from showing
+  // ghost rows for tasks the admin removed here.
+  function commitSelectedToCache(updated: Task[]) {
+    if (!projectId) return;
+    setCachedMainTasks(
+      projectId,
+      updated.map((t) => ({
+        id: t.id,
+        name: t.name,
+        project_task_id: t.project_task_id,
+      })),
+    );
+  }
+
   function addTask(task: Task) {
     pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
     pushSelectedHistory();
-    setSelected((prev) => {
-      if (prev.some((item) => item.id === task.id)) return prev;
-      return [...prev, task];
-    });
+    const isNew = !selected.some((item) => item.id === task.id);
+    const updated = isNew ? [...selected, task] : selected;
+    setSelected(updated);
+    commitSelectedToCache(updated);
     setIsDirty(true); markWizardDirty(projectId);
+
+    // Fire-and-forget: pre-populate the wizard cache with the
+    // catalog's default subtasks for this main task. In AI mode the
+    // cache already has them via the generated draft, so we skip in
+    // that case. In manual mode this is what makes the
+    // sub-task-assignment page land with subtasks ready to review
+    // instead of an empty picker the admin would have to click
+    // through for every main task.
+    if (isNew) {
+      void prefetchDefaultSubTasks(task);
+    }
+  }
+
+  async function prefetchDefaultSubTasks(task: Task) {
+    if (!projectId) return;
+    try {
+      const existing = getCachedSubTasks(projectId) ?? [];
+      // Skip if the cache already has subtasks for this main task —
+      // means we're either replaying the AI flow or the admin
+      // re-added a main task they just removed.
+      if (existing.some((st) => st.mainTaskId === task.id)) return;
+
+      const response = await fetch(
+        `/api/planning/getSubTasksByMainTask?mainTaskIds=${encodeURIComponent(task.id)}`,
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      const fetched: Array<{ id: string; name: string; sortOrder?: number }> =
+        Array.isArray(data?.subTasks) ? data.subTasks : [];
+      if (fetched.length === 0) return;
+
+      // Build the (taskName, subTaskTitle) pairs once — the batched
+      // catalog lookups (equipment, materials) and the employee
+      // assignment endpoint all key off the same shape.
+      const pairs = fetched.map((sub) => ({
+        taskName: task.name,
+        subTaskTitle: sub.name,
+      }));
+
+      // Equipment / materials / employees defaults are independent —
+      // fan them out in parallel. Each failure is non-fatal: the admin
+      // can still fill the gap on the downstream pages, so we treat
+      // missing data as "empty default" rather than aborting the seed.
+      const [equipmentResult, materialsResult, employeesResult] =
+        await Promise.allSettled([
+          fetch("/api/planning/getEquipmentBatch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items: pairs }),
+          }).then((r) => (r.ok ? r.json() : null)),
+          fetch("/api/planning/getMaterialsBatch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items: pairs }),
+          }).then((r) => (r.ok ? r.json() : null)),
+          fetch("/api/planning/getEmployees", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              scheduledDate: scheduledDate || undefined,
+              tasks: [
+                {
+                  taskName: task.name,
+                  subTasks: fetched.map((sub) => ({
+                    title: sub.name,
+                    requiredEmployeeCount: DEFAULT_SUBTASK_EMPLOYEE_COUNT,
+                  })),
+                },
+              ],
+            }),
+          }).then((r) => (r.ok ? r.json() : null)),
+        ]);
+
+      const equipmentBySubTaskTitle = new Map<
+        string,
+        Array<{ equipment_id: string; name: string }>
+      >();
+      if (
+        equipmentResult.status === "fulfilled" &&
+        equipmentResult.value &&
+        Array.isArray(equipmentResult.value.results)
+      ) {
+        for (const row of equipmentResult.value.results) {
+          const subTaskTitle =
+            typeof row?.subTaskTitle === "string" ? row.subTaskTitle : "";
+          if (!subTaskTitle) continue;
+          equipmentBySubTaskTitle.set(
+            subTaskTitle.toLowerCase(),
+            Array.isArray(row.equipment) ? row.equipment : [],
+          );
+        }
+      }
+
+      // Materials live on the main-task-level cache slot, so we union
+      // every subtask's default catalog into one deduped list keyed
+      // by material_id.
+      type DefaultMaterial = {
+        material_id: string;
+        name: string;
+        unit: string;
+        unit_cost: number;
+      };
+      const dedupedMaterials = new Map<string, DefaultMaterial>();
+      if (
+        materialsResult.status === "fulfilled" &&
+        materialsResult.value &&
+        Array.isArray(materialsResult.value.results)
+      ) {
+        for (const row of materialsResult.value.results) {
+          for (const mat of Array.isArray(row?.materials)
+            ? row.materials
+            : []) {
+            if (!mat?.material_id) continue;
+            if (dedupedMaterials.has(mat.material_id)) continue;
+            dedupedMaterials.set(mat.material_id, {
+              material_id: mat.material_id,
+              name: String(mat.name ?? ""),
+              unit: String(mat.unit ?? ""),
+              unit_cost: Number(mat.unit_cost ?? 0) || 0,
+            });
+          }
+        }
+      }
+
+      const employeesBySubTaskTitle = new Map<string, string[]>();
+      if (
+        employeesResult.status === "fulfilled" &&
+        employeesResult.value &&
+        Array.isArray(employeesResult.value.assignments)
+      ) {
+        for (const group of employeesResult.value.assignments) {
+          for (const assignment of Array.isArray(group?.assignments)
+            ? group.assignments
+            : []) {
+            const subTaskTitle =
+              typeof assignment?.subTaskTitle === "string"
+                ? assignment.subTaskTitle
+                : "";
+            if (!subTaskTitle) continue;
+            const ids = Array.isArray(assignment.employees)
+              ? assignment.employees
+                  .map((emp: { id?: string }) =>
+                    typeof emp?.id === "string" ? emp.id : "",
+                  )
+                  .filter(Boolean)
+              : [];
+            employeesBySubTaskTitle.set(subTaskTitle.toLowerCase(), ids);
+          }
+        }
+      }
+
+      const additions: CachedSubTask[] = fetched.map((sub, idx) => {
+        const titleKey = sub.name.toLowerCase();
+        const subEquipment = equipmentBySubTaskTitle.get(titleKey) ?? [];
+        const subEmployees = employeesBySubTaskTitle.get(titleKey) ?? [];
+        // One piece of equipment per assigned crew member. If the
+        // assignment endpoint returned zero employees (no eligible
+        // staff for that day), fall back to the requested crew size
+        // so the admin still sees a meaningful default count.
+        const equipmentQuantity =
+          subEmployees.length > 0
+            ? subEmployees.length
+            : DEFAULT_SUBTASK_EMPLOYEE_COUNT;
+        return {
+          // Temp id so the cache slot is unique; batchSaveProject at
+          // the overview step replaces these with real DB ids.
+          id: `temp-${task.id}-${sub.id}`,
+          subTaskId: sub.id,
+          mainTaskId: task.id,
+          projectTaskId: task.project_task_id ?? "",
+          title: sub.name,
+          sortOrder:
+            typeof sub.sortOrder === "number" ? sub.sortOrder : idx,
+          estimatedHours: DEFAULT_SUBTASK_ESTIMATED_HOURS,
+          scheduledStartDatetime: null,
+          scheduledEndDatetime: null,
+          assignedEmployeeIds: subEmployees,
+          equipments: subEquipment.map((eq, i) => ({
+            id: `temp-eq-${task.id}-${sub.id}-${i}`,
+            equipmentId: eq.equipment_id,
+            name: eq.name,
+            quantity: equipmentQuantity,
+            unitCost: 0,
+          })),
+        };
+      });
+
+      // Re-read the cache before merging so we don't clobber any
+      // updates that landed while the fetch was in flight.
+      const latest = getCachedSubTasks(projectId) ?? [];
+      if (latest.some((st) => st.mainTaskId === task.id)) return;
+      setCachedSubTasks(projectId, [...latest, ...additions]);
+
+      // Manual-mode tasks have no project_task_id yet — group the
+      // seeded materials under the main_task_id, which the materials
+      // page already treats as the fallback group id and which the
+      // batch save translates back to the real project_task_id at
+      // overview time.
+      const materialProjectTaskId =
+        task.project_task_id && task.project_task_id.length > 0
+          ? task.project_task_id
+          : task.id;
+      const seededMaterials: CachedMaterial[] = Array.from(
+        dedupedMaterials.values(),
+      ).map((mat) => {
+        const quantity = 1;
+        return {
+          id: `temp-mat-${task.id}-${mat.material_id}`,
+          projectTaskId: materialProjectTaskId,
+          materialId: mat.material_id,
+          name: mat.name,
+          unit: mat.unit || null,
+          quantity,
+          unitCost: mat.unit_cost,
+          estimatedCost: quantity * mat.unit_cost,
+        };
+      });
+      if (seededMaterials.length > 0) {
+        const latestMaterials = getCachedMaterials(projectId) ?? [];
+        // Avoid duplicating a material the admin already has on this
+        // task (e.g. when re-adding a main task after removal).
+        const existingKeys = new Set(
+          latestMaterials.map(
+            (m) => `${m.projectTaskId}::${m.materialId}`,
+          ),
+        );
+        const newMaterials = seededMaterials.filter(
+          (m) => !existingKeys.has(`${m.projectTaskId}::${m.materialId}`),
+        );
+        if (newMaterials.length > 0) {
+          setCachedMaterials(projectId, [...latestMaterials, ...newMaterials]);
+        }
+      }
+
+      // With subtasks + estimated hours + assigned staff now in cache,
+      // ask the scheduler to lay them out over the project's work
+      // calendar. The endpoint already respects work hours, lunch, and
+      // unavailable days (manual blocks + holidays), so manual mode
+      // gets the same gating as the AI flow.
+      await scheduleCachedSubTasks();
+    } catch {
+      // Silent — sub-task-assignment still lets the admin add
+      // subtasks via the picker. The auto-populate is a convenience.
+    }
+  }
+
+  async function scheduleCachedSubTasks() {
+    if (!projectId) return;
+    const meta = getCachedProjectMeta(projectId);
+    const projectStart = meta?.scheduledStartDatetime ?? null;
+    if (!projectStart) return;
+
+    const cachedMainTasks = getCachedMainTasks(projectId) ?? [];
+    const cachedSubTasks = getCachedSubTasks(projectId) ?? [];
+    if (cachedMainTasks.length === 0 || cachedSubTasks.length === 0) return;
+
+    const subTasksByMain = new Map<string, CachedSubTask[]>();
+    for (const st of cachedSubTasks) {
+      const list = subTasksByMain.get(st.mainTaskId) ?? [];
+      list.push(st);
+      subTasksByMain.set(st.mainTaskId, list);
+    }
+    for (const list of subTasksByMain.values()) {
+      list.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+
+    const generatedTasks = cachedMainTasks
+      .filter((mt) => (subTasksByMain.get(mt.id)?.length ?? 0) > 0)
+      .map((mt, mainIdx) => ({
+        name: mt.name,
+        priority: mainIdx,
+        sub_tasks: (subTasksByMain.get(mt.id) ?? []).map((st, subIdx) => ({
+          title: st.title,
+          priority: subIdx,
+          duration: {
+            estimatedHours:
+              st.estimatedHours ?? DEFAULT_SUBTASK_ESTIMATED_HOURS,
+          },
+          employees: st.assignedEmployeeIds.map((id) => ({ id })),
+        })),
+      }));
+
+    if (generatedTasks.length === 0) return;
+
+    let scheduleData:
+      | {
+          scheduledItems?: Array<{
+            taskName: string;
+            subTaskTitle: string;
+            scheduledStartDatetime?: string | null;
+            scheduledEndDatetime?: string | null;
+          }>;
+        }
+      | null = null;
+    try {
+      const response = await fetch("/api/planning/getProjectSchedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: {
+            scheduled_start_datetime: projectStart,
+            scheduled_end_datetime: null,
+          },
+          generatedTasks,
+        }),
+      });
+      if (!response.ok) return;
+      scheduleData = await response.json();
+    } catch {
+      return;
+    }
+
+    const items = Array.isArray(scheduleData?.scheduledItems)
+      ? scheduleData.scheduledItems
+      : [];
+    if (items.length === 0) return;
+
+    const scheduleMap = new Map<
+      string,
+      { start: string | null; end: string | null }
+    >();
+    for (const item of items) {
+      scheduleMap.set(`${item.taskName}__${item.subTaskTitle}`, {
+        start: item.scheduledStartDatetime ?? null,
+        end: item.scheduledEndDatetime ?? null,
+      });
+    }
+
+    // Re-read the cache one more time before merging — subtask edits
+    // (renames, removals) may have landed while the scheduler was
+    // running, and we don't want to resurrect deleted rows.
+    const latestSubTasks = getCachedSubTasks(projectId) ?? [];
+    const mainTaskNameById = new Map(
+      (getCachedMainTasks(projectId) ?? []).map((mt) => [mt.id, mt.name]),
+    );
+
+    const updated = latestSubTasks.map((st) => {
+      const taskName = mainTaskNameById.get(st.mainTaskId) ?? "";
+      const schedule = scheduleMap.get(`${taskName}__${st.title}`);
+      if (!schedule || !schedule.start || !schedule.end) return st;
+      // Skip rewriting subtasks whose schedule already matches — keeps
+      // setCachedSubTasks idempotent and lets a no-op pass through
+      // without touching sessionStorage.
+      if (
+        st.scheduledStartDatetime === schedule.start &&
+        st.scheduledEndDatetime === schedule.end
+      ) {
+        return st;
+      }
+      return {
+        ...st,
+        scheduledStartDatetime: schedule.start,
+        scheduledEndDatetime: schedule.end,
+      };
+    });
+
+    setCachedSubTasks(projectId, updated);
   }
 
   function removeSelected(taskId: string) {
     pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
     pushSelectedHistory();
-    setSelected((prev) => prev.filter((item) => item.id !== taskId));
+    const updated = selected.filter((item) => item.id !== taskId);
+    setSelected(updated);
+    commitSelectedToCache(updated);
     setSelectedTaskIdsForDelete((prev) => {
       const next = new Set(prev);
       next.delete(taskId);
@@ -281,7 +693,9 @@ export default function MainTaskAssignment() {
     if (taskIds.size === 0) return;
     pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
     pushSelectedHistory();
-    setSelected((prev) => prev.filter((item) => !taskIds.has(item.id)));
+    const updated = selected.filter((item) => !taskIds.has(item.id));
+    setSelected(updated);
+    commitSelectedToCache(updated);
     setSelectedTaskIdsForDelete(new Set());
     setIsDirty(true); markWizardDirty(projectId);
   }
@@ -399,10 +813,11 @@ export default function MainTaskAssignment() {
     }
 
     pushSelectedHistory();
-    setSelected((prev) => {
-      if (prev.some((item) => item.id === newTask.id)) return prev;
-      return [...prev, newTask];
-    });
+    const updated = selected.some((item) => item.id === newTask.id)
+      ? selected
+      : [...selected, newTask];
+    setSelected(updated);
+    commitSelectedToCache(updated);
     setIsDirty(true); markWizardDirty(projectId);
     toast.success(`Task "${newTask.name}" created.`, {
       description: linkSummary,
@@ -418,6 +833,7 @@ export default function MainTaskAssignment() {
       if (previousSelected) {
         pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
         setSelected(previousSelected);
+        commitSelectedToCache(previousSelected);
       }
       return nextHistory;
     });
@@ -516,6 +932,9 @@ export default function MainTaskAssignment() {
       if (cached && cached.length > 0 && cached[0].id) {
         setJobNo(meta?.projectCode || "");
         setSiteName(meta?.projectTitle || "");
+        setScheduledDate(
+          extractScheduledDate(meta?.scheduledStartDatetime ?? null),
+        );
         setSelected(cached.map((t) => ({ id: t.id, name: t.name, project_task_id: t.project_task_id })));
         setLoadingProject(false);
         return;
@@ -548,6 +967,10 @@ export default function MainTaskAssignment() {
 
         setJobNo(projectRow?.project_code || "");
         setSiteName(projectRow?.title || "");
+        const scheduledStartIso =
+          projectRow?.scheduled_start_datetime ?? null;
+        setScheduledDate(extractScheduledDate(scheduledStartIso));
+        setCachedScheduledStartDatetime(projectId, scheduledStartIso);
 
         const loadedTasks: Task[] = projectTasks
           .map((item: any) => ({

@@ -11,6 +11,7 @@ type MaterialOut = {
   material_id: string;
   name: string;
   unit: string;
+  unit_cost: number;
   notes?: string;
 };
 
@@ -126,6 +127,7 @@ export async function POST(req: Request) {
         material_id: mat.id,
         name: mat.name,
         unit: mat.unit,
+        unit_cost: Number(mat.unitCost ?? 0),
         notes: mat.notes ?? undefined,
       }));
 

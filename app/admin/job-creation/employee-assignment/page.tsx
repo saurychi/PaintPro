@@ -246,6 +246,11 @@ function buildGroupsFromCache(
   for (const st of cachedSubTasks) {
     const mainTaskId = st.mainTaskId;
 
+    // Skip orphan subtasks — the parent main task is no longer in the
+    // cache, so the user has removed it. Without this filter the page
+    // would render an unnamed "Main Task" group for the orphan.
+    if (!mainTaskNameMap.has(mainTaskId)) continue;
+
     if (!groupedMap.has(mainTaskId)) {
       groupedMap.set(mainTaskId, {
         id: mainTaskId,
@@ -419,25 +424,44 @@ export default function EmployeeAssignmentPage() {
       }
 
       if (loadedRows.length > 0) {
-        const groupedServices = buildGroupsFromRows(loadedRows);
-        setServices(groupedServices);
-        setExpanded(new Set(groupedServices.map((group) => group.id)));
-
-        // Sync cache with DB data: update assignedEmployeeIds in cached subtasks
-        if (cachedSubTasks) {
-          const employeeMap = new Map<string, string[]>();
-          for (const group of groupedServices) {
-            for (const step of group.children) {
-              employeeMap.set(step.id, step.employees.map((e) => e.id));
-            }
+        // Build a map of project_sub_task_id → assigned employees from
+        // whatever the API returned. We then overlay it onto the cache
+        // (the authoritative subtask list — subtasks deleted in this
+        // session live only in the cache, not yet flushed to the DB)
+        // so we never re-introduce a row the user has already removed.
+        const apiEmployeeMap = new Map<string, AssignedEmployee[]>();
+        for (const group of buildGroupsFromRows(loadedRows)) {
+          for (const step of group.children) {
+            apiEmployeeMap.set(step.id, step.employees);
           }
-          const updatedSubTasks = cachedSubTasks.map((st) => {
-            const empIds = employeeMap.get(st.id);
-            return empIds !== undefined
-              ? { ...st, assignedEmployeeIds: empIds }
+        }
+
+        if (cachedSubTasks && cachedSubTasks.length > 0) {
+          // Cache is the source of truth for which subtasks exist.
+          // For each cached subtask, if the API has matching staff,
+          // copy them in; otherwise keep whatever the cache already
+          // had (empty list, or a previously-set draft).
+          const hydratedSubTasks = cachedSubTasks.map((st) => {
+            const apiEmployees = apiEmployeeMap.get(st.id);
+            return apiEmployees !== undefined
+              ? { ...st, assignedEmployeeIds: apiEmployees.map((e) => e.id) }
               : st;
           });
-          setCachedSubTasks(projectId, updatedSubTasks);
+          setCachedSubTasks(projectId, hydratedSubTasks);
+
+          const groupedServices = buildGroupsFromCache(
+            projectId,
+            hydratedSubTasks,
+            loadedStaffUsers,
+          );
+          setServices(groupedServices);
+          setExpanded(new Set(groupedServices.map((group) => group.id)));
+        } else {
+          // No cache (cold load) — fall back to rendering whatever the
+          // API gave us.
+          const groupedServices = buildGroupsFromRows(loadedRows);
+          setServices(groupedServices);
+          setExpanded(new Set(groupedServices.map((group) => group.id)));
         }
 
         if (loadedProject) {
@@ -455,6 +479,22 @@ export default function EmployeeAssignmentPage() {
           setCardSubtitle(subLabel);
         }
 
+        return;
+      }
+
+      // No API rows came back. In manual mode the wizard cache holds
+      // the freshly-picked main tasks + subtasks even though the DB
+      // doesn't have project_task rows yet — render straight from the
+      // cache so the admin can keep going instead of seeing an empty
+      // page.
+      if (cachedSubTasks && cachedSubTasks.length > 0) {
+        const groupedServices = buildGroupsFromCache(
+          projectId,
+          cachedSubTasks,
+          loadedStaffUsers,
+        );
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
         return;
       }
 
@@ -658,28 +698,39 @@ export default function EmployeeAssignmentPage() {
         ? reloadData.projectSubTaskStaff
         : [];
 
-      const groupedServices = buildGroupsFromRows(rows);
-      setServices(groupedServices);
-      setExpanded(new Set(groupedServices.map((group) => group.id)));
+      // Build a project_sub_task_id → employees map from the API response,
+      // then overlay it onto the cache (the authoritative subtask list).
+      // Rendering buildGroupsFromRows(rows) directly would expose subtasks
+      // the user already removed in sub-task-assignment but that still
+      // live in the DB until the overview-step batch save.
+      const apiGroups = buildGroupsFromRows(rows);
+      const apiEmployeeMap = new Map<string, AssignedEmployee[]>();
+      for (const group of apiGroups) {
+        for (const step of group.children) {
+          apiEmployeeMap.set(step.id, step.employees);
+        }
+      }
 
-      // Update the cache with the newly generated assignments
       const cachedSubTasks = getCachedSubTasks(projectId);
-      if (cachedSubTasks) {
+      if (cachedSubTasks && cachedSubTasks.length > 0) {
         const updatedSubTasks = cachedSubTasks.map((st) => {
-          // Find matching service step to get the new employee IDs
-          for (const group of groupedServices) {
-            for (const step of group.children) {
-              if (step.id === st.id) {
-                return {
-                  ...st,
-                  assignedEmployeeIds: step.employees.map((e) => e.id),
-                };
-              }
-            }
-          }
-          return st;
+          const apiEmployees = apiEmployeeMap.get(st.id);
+          return apiEmployees !== undefined
+            ? { ...st, assignedEmployeeIds: apiEmployees.map((e) => e.id) }
+            : st;
         });
         setCachedSubTasks(projectId, updatedSubTasks);
+
+        const groupedServices = buildGroupsFromCache(
+          projectId,
+          updatedSubTasks,
+          staffUsers,
+        );
+        setServices(groupedServices);
+        setExpanded(new Set(groupedServices.map((group) => group.id)));
+      } else {
+        setServices(apiGroups);
+        setExpanded(new Set(apiGroups.map((group) => group.id)));
       }
 
       toast.success("Employee assignments generated.");
