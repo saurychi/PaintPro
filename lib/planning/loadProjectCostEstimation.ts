@@ -21,6 +21,8 @@ type ProjectRow = {
   status: string | null;
   client_id: string | null;
   markup_rate: number | null;
+  downpayment: number | null;
+  downpayment_rate: number | null;
 };
 
 type ProjectTaskRow = {
@@ -133,7 +135,7 @@ export async function loadProjectCostEstimation(
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
     .select(
-      "project_id, project_code, title, description, site_address, status, client_id, markup_rate",
+      "project_id, project_code, title, description, site_address, status, client_id, markup_rate, downpayment, downpayment_rate",
     )
     .eq("project_id", projectId)
     .maybeSingle<ProjectRow>();
@@ -482,6 +484,8 @@ export async function loadProjectCostEstimation(
       description: project.description,
       siteAddress: project.site_address,
       status: project.status,
+      downpayment: Number(project.downpayment ?? 0),
+      downpaymentRate: Number(project.downpayment_rate ?? 0),
     },
     markupRate,
     mainTasks: projectTasks

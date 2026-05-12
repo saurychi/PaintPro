@@ -33,6 +33,7 @@ type ProjectOverviewResponse = {
     estimated_cost?: number | null;
     estimated_profit?: number | null;
     downpayment?: number | null;
+    downpayment_rate?: number | null;
   };
   error?: string;
   details?: string;
@@ -55,9 +56,9 @@ type DocumentType = "quotation" | "invoice" | "none";
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
 
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }
@@ -1258,15 +1259,6 @@ export default function ClientPendingDocumentsPage() {
                   <div className="space-y-3">
                     <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
                       <p className="text-[11px] font-medium text-gray-500">
-                        Project
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-gray-900">
-                        {project?.title || "Untitled Project"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                      <p className="text-[11px] font-medium text-gray-500">
                         Project Code
                       </p>
                       <p className="mt-1 font-mono text-sm font-semibold text-gray-900">
@@ -1274,19 +1266,40 @@ export default function ClientPendingDocumentsPage() {
                       </p>
                     </div>
 
-                    {/* Shared layout for both quotation and invoice —
-                        same fields rendered the same way regardless of
-                        document type. The signing buttons below stay
-                        type-specific (quotation only shows on
-                        quotation, invoice only on invoice). */}
-                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
-                      <p className="text-[11px] font-medium text-gray-500">
-                        Site Address
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-gray-900">
-                        {project?.site_address || "No address provided"}
-                      </p>
-                    </div>
+                    {/* Project title + site address removed from the
+                        quotation/invoice sidebar — the document preview on
+                        the left already shows both prominently, and the
+                        project code below is enough for reference. */}
+
+                    {documentType === "quotation" ? (() => {
+                      // Required downpayment for the client to see. Derived
+                      // from the stored rate × quotation total, NOT from
+                      // projects.downpayment — that column is the cumulative
+                      // amount the admin has already collected from the
+                      // client (tracked in the DownpaymentModal).
+                      const quotationTotal = Number(
+                        costSummary?.quotationTotal ??
+                          project?.estimated_budget ??
+                          0,
+                      );
+                      const rate = Math.max(
+                        0,
+                        Math.min(100, Number(project?.downpayment_rate ?? 0)),
+                      );
+                      const required =
+                        Math.round(((rate / 100) * quotationTotal) * 100) / 100;
+                      const label = rate > 0 ? `Downpayment (${rate}%)` : "Downpayment";
+                      return (
+                        <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                          <p className="text-[11px] font-medium text-gray-500">
+                            {label}
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900">
+                            {formatCurrency(required)}
+                          </p>
+                        </div>
+                      );
+                    })() : null}
 
                     <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
                       <p className="text-[11px] font-medium text-gray-500">
@@ -1294,18 +1307,10 @@ export default function ClientPendingDocumentsPage() {
                       </p>
                       <p className="mt-1 text-sm font-semibold text-gray-900">
                         {formatCurrency(
-                          Math.max(
+                          costSummary?.quotationTotal ??
+                            project?.estimated_budget ??
                             0,
-                            Number(
-                              costSummary?.quotationTotal ??
-                                project?.estimated_budget ??
-                                0,
-                            ) - Number(project?.downpayment ?? 0),
-                          ),
                         )}
-                      </p>
-                      <p className="mt-1 text-[11px] text-gray-500">
-                        Total cost less the downpayment already paid.
                       </p>
                     </div>
 

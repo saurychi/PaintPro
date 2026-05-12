@@ -7,7 +7,7 @@ import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import { toast } from "sonner";
 import JobCreationTimeline from "@/components/project-creation/JobCreationTimeline";
 import { normalizeMarkupRate, calculateProjectCostEstimation, type CostEstimationInput, type CostEstimationMainTask } from "@/lib/planning/costEstimation";
-import { getCachedSubTasks, getCachedMainTasks, getCachedMaterials, getCachedMarkupRate, setCachedMarkupRate, setCachedStep, getCachedRefData, getCachedProjectMeta, ensureWizardCacheHydrated, markWizardDirty } from "@/lib/wizardCache";
+import { getCachedSubTasks, getCachedMainTasks, getCachedMaterials, getCachedMarkupRate, setCachedMarkupRate, getCachedDownpayment, setCachedDownpayment, getCachedDownpaymentPercent, setCachedDownpaymentPercent, setCachedStep, getCachedRefData, getCachedProjectMeta, ensureWizardCacheHydrated, markWizardDirty } from "@/lib/wizardCache";
 
 type CostEstimationResponse = {
   project: {
@@ -75,9 +75,9 @@ const ACCENT = "#00c065";
 
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }
@@ -86,7 +86,7 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return "Not scheduled";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not scheduled";
-  return date.toLocaleString("en-PH", {
+  return date.toLocaleString("en-AU", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -208,6 +208,11 @@ export default function CostEstimationPage() {
   const [loading, setLoading] = useState(true);
   const [isNavigating, setIsNavigating] = useState<"back" | "next" | null>(null);
   const [markupInput, setMarkupInput] = useState("30");
+  // Editable as a percentage (0-100). The dollar amount is derived
+  // from `(percent / 100) * quotationTotal` and pushed to cache as
+  // `downpayment` so existing consumers (overview / batchSaveProject /
+  // quotation document) keep reading the same field they always have.
+  const [downpaymentPercentInput, setDownpaymentPercentInput] = useState("0");
   const [data, setData] = useState<CostEstimationResponse | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -227,6 +232,38 @@ export default function CostEstimationPage() {
     setExpanded(nextExpandedTasks);
     setExpandedSections(nextExpandedSections);
     setMarkupInput(String((result.markupRate ?? 0) * 100));
+
+    // Seed the downpayment percent. Prefer the cached percent (set on
+    // this page); fall back to deriving from the legacy dollar amount
+    // so older drafts that pre-date the percent input still hydrate
+    // correctly. If neither is set, default to 0%.
+    const cachedPercent = getCachedDownpaymentPercent(projectId);
+    if (cachedPercent !== null) {
+      setDownpaymentPercentInput(String(cachedPercent));
+    } else {
+      const cachedDownpayment = getCachedDownpayment(projectId);
+      const baseCost = Number(result.summary?.totalCost ?? 0);
+      // result.markupRate is a fraction (e.g. 0.30 for 30%) per the
+      // calculateProjectCostEstimation contract.
+      const markupRate = Number.isFinite(result.markupRate)
+        ? Number(result.markupRate)
+        : 0;
+      const quotationTotal = roundMoney(baseCost + baseCost * markupRate);
+      if (
+        cachedDownpayment !== null &&
+        cachedDownpayment > 0 &&
+        quotationTotal > 0
+      ) {
+        const derived = Math.round(
+          (cachedDownpayment / quotationTotal) * 100,
+        );
+        const clamped = Math.max(0, Math.min(100, derived));
+        setDownpaymentPercentInput(String(clamped));
+        setCachedDownpaymentPercent(projectId, clamped);
+      } else {
+        setDownpaymentPercentInput("0");
+      }
+    }
 
     if (resetDirty) setIsDirty(false);
   }
@@ -308,6 +345,8 @@ export default function CostEstimationPage() {
   function handleNext() {
     setIsNavigating("next");
     setCachedMarkupRate(projectId, Number(markupInput));
+    setCachedDownpaymentPercent(projectId, downpaymentPercent);
+    setCachedDownpayment(projectId, downpaymentAmount);
     setIsDirty(false);
     setCachedStep(projectId, "overview_pending");
     setOptimisticProjectStatus(projectId, "overview_pending");
@@ -317,6 +356,8 @@ export default function CostEstimationPage() {
   function handleGoBack() {
     setIsNavigating("back");
     setCachedMarkupRate(projectId, Number(markupInput));
+    setCachedDownpaymentPercent(projectId, downpaymentPercent);
+    setCachedDownpayment(projectId, downpaymentAmount);
     setIsDirty(false);
     setCachedStep(projectId, "employee_assignment_pending");
     setOptimisticProjectStatus(projectId, "employee_assignment_pending");
@@ -336,6 +377,34 @@ export default function CostEstimationPage() {
     const quotationTotal = roundMoney(baseCost + markupPrice);
     return { materialTotal, laborTotal, baseCost, markupPrice, quotationTotal };
   }, [data, markupInput]);
+
+  // Clamp the typed percent into [0, 100] for both display and pricing
+  // math. An empty input reads as 0% so the balance shows as the full
+  // quotation total instead of NaN.
+  const downpaymentPercent = useMemo(() => {
+    const raw = Number(downpaymentPercentInput);
+    if (!Number.isFinite(raw)) return 0;
+    return Math.max(0, Math.min(100, raw));
+  }, [downpaymentPercentInput]);
+
+  const downpaymentAmount = useMemo(() => {
+    if (!pricingSummary) return 0;
+    return roundMoney((downpaymentPercent / 100) * pricingSummary.quotationTotal);
+  }, [downpaymentPercent, pricingSummary]);
+
+  const balanceDue = useMemo(() => {
+    if (!pricingSummary) return 0;
+    return Math.max(0, roundMoney(pricingSummary.quotationTotal - downpaymentAmount));
+  }, [downpaymentAmount, pricingSummary]);
+
+  // Keep the legacy `downpayment` cache field in sync with the
+  // derived dollar amount whenever either input drives it. Other
+  // wizard steps (overview / batchSaveProject / quotation document)
+  // still read that field, so we have to push the derived value there.
+  useEffect(() => {
+    if (!projectId || !pricingSummary) return;
+    setCachedDownpayment(projectId, downpaymentAmount);
+  }, [projectId, downpaymentAmount, pricingSummary]);
 
   return (
     <div className="w-full h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100">
@@ -436,7 +505,7 @@ export default function CostEstimationPage() {
                               setMarkupInput(e.target.value);
                               setIsDirty(true); markWizardDirty(projectId);
                             }}
-                            className="h-8 w-full max-w-[126px] rounded-md border border-slate-200 bg-white pl-2.5 pr-6 text-[13px] font-medium text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                            className="h-8 w-full max-w-[84px] rounded-md border border-slate-200 bg-white pl-2 pr-5 text-[13px] font-medium text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                           />
                           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-slate-400 dark:text-slate-500">
                             %
@@ -466,6 +535,102 @@ export default function CostEstimationPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Downpayment row — admin sets a percentage of the
+                    quotation total. The dollar amount auto-derives and
+                    is what gets persisted to projects.downpayment via
+                    batchSaveProject on the overview step. */}
+                {pricingSummary ? (
+                  <div className="mt-3 grid grid-cols-1 items-stretch gap-3 border-t border-slate-200 pt-3 dark:border-slate-700 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)_minmax(0,1fr)]">
+                    {/* Percent input + quick picks */}
+                    <div className="flex min-w-0 flex-col rounded-md border border-emerald-200 bg-emerald-50/40 px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                        Downpayment %
+                      </span>
+                      <div className="mt-1 flex items-center gap-2">
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            placeholder="0"
+                            value={downpaymentPercentInput}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setDownpaymentPercentInput(raw);
+                              const parsed = Number(raw);
+                              const clamped = Number.isFinite(parsed)
+                                ? Math.max(0, Math.min(100, parsed))
+                                : 0;
+                              setCachedDownpaymentPercent(projectId, clamped);
+                              setIsDirty(true);
+                              markWizardDirty(projectId);
+                            }}
+                            className="h-8 w-[88px] rounded-md border border-emerald-300 bg-white pl-2 pr-6 text-[13px] font-semibold text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 dark:border-emerald-500/40 dark:bg-slate-950 dark:text-slate-100"
+                          />
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[12px] text-slate-400 dark:text-slate-500">
+                            %
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {[0, 10, 25, 50].map((p) => {
+                            const active =
+                              Number(downpaymentPercentInput) === p;
+                            return (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => {
+                                  setDownpaymentPercentInput(String(p));
+                                  setCachedDownpaymentPercent(projectId, p);
+                                  setIsDirty(true);
+                                  markWizardDirty(projectId);
+                                }}
+                                className={`h-6 rounded-full border px-2 text-[10px] font-semibold transition ${
+                                  active
+                                    ? "border-[#00c065] bg-[#00c065] text-white"
+                                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                                }`}
+                              >
+                                {p}%
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        Share of the quotation total collected upfront.
+                      </p>
+                    </div>
+
+                    {/* Downpayment amount (derived) */}
+                    <div className="flex min-w-0 flex-col justify-center rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/40">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Downpayment amount
+                      </span>
+                      <span className="mt-1 truncate text-[15px] font-semibold text-slate-900 dark:text-slate-100">
+                        {formatCurrency(downpaymentAmount)}
+                      </span>
+                      <span className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                        {downpaymentPercent}% of {formatCurrency(pricingSummary.quotationTotal)}
+                      </span>
+                    </div>
+
+                    {/* Balance due */}
+                    <div className="flex min-w-0 flex-col justify-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-500/30 dark:bg-emerald-500/15">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                        Balance due
+                      </span>
+                      <span className="mt-1 truncate text-[16px] font-bold text-slate-900 dark:text-slate-100">
+                        {formatCurrency(balanceDue)}
+                      </span>
+                      <span className="mt-0.5 text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
+                        Quotation total less downpayment.
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
 

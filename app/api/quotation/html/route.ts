@@ -13,6 +13,8 @@ type CostEstimationResponse = {
     description: string | null;
     site_address: string | null;
     status: string | null;
+    downpayment?: number | null;
+    downpayment_rate?: number | null;
   };
   client: {
     client_id: string;
@@ -75,17 +77,21 @@ function escapeHtml(value: unknown) {
     .replaceAll("'", "&#39;");
 }
 
+// Generated documents render amounts in AUD to match the rest of
+// the app. Locale is en-AU so the currency symbol/formatting follows
+// Australian conventions on both the in-browser preview and the
+// generated PDF.
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }
 
 function todayString() {
-  return new Date().toLocaleDateString("en-PH", {
+  return new Date().toLocaleDateString("en-AU", {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -598,14 +604,42 @@ export async function renderQuotationHtml(args: {
         </ul>
       </div>
 
+      ${(() => {
+        // Client-facing summary: only the headline figures. Total Payment
+        // and the required Downpayment. Internal numbers (subtotal, markup
+        // rate, balance breakdown) are deliberately omitted so the client
+        // sees what they're paying, not how it was costed.
+        //
+        // The displayed Downpayment is the TARGET amount (rate × total),
+        // not whatever has actually been collected so far. The actual
+        // running tally lives in projects.downpayment and is managed by
+        // the admin's DownpaymentModal — the quotation document only
+        // tells the client what they owe.
+        const quotationTotal = Math.max(0, Number(summary.quotationTotal ?? 0));
+        const downpaymentPercent = Math.max(
+          0,
+          Math.min(100, Number(project.downpayment_rate ?? 0)),
+        );
+        const downpayment =
+          Math.round(((downpaymentPercent / 100) * quotationTotal) * 100) / 100;
+        const downpaymentLabel =
+          downpayment > 0 && downpaymentPercent > 0
+            ? `Downpayment (${downpaymentPercent}%)`
+            : "Downpayment";
+        return `
       <div class="section">
         <div class="summary-box">
           <div class="summary-row total">
-            <span>Total Quotation</span>
+            <span>Total Payment</span>
             <span>${escapeHtml(formatCurrency(summary.quotationTotal))}</span>
           </div>
+          <div class="summary-row">
+            <span>${escapeHtml(downpaymentLabel)}</span>
+            <span>${escapeHtml(formatCurrency(downpayment))}</span>
+          </div>
         </div>
-      </div>
+      </div>`;
+      })()}
 
       <div class="section card">
         <div class="heading">Terms and Conditions</div>

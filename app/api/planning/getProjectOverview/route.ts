@@ -19,6 +19,7 @@ type ProjectRow = {
   estimated_cost: number | null;
   estimated_profit: number | null;
   downpayment: number | null;
+  downpayment_rate: number | null;
   cancelled_at: string | null;
   cancelled_from_status: string | null;
   cancellation_phase: string | null;
@@ -50,6 +51,8 @@ type ProjectSubTaskRow = {
   sort_order: number | null;
   scheduled_start_datetime: string | null;
   scheduled_end_datetime: string | null;
+  actual_start_datetime: string | null;
+  actual_end_datetime: string | null;
   updated_at: string | null;
 };
 
@@ -138,6 +141,8 @@ type ProjectSubTaskOverviewRow = {
   estimated_hours: number | null;
   scheduled_start_datetime: string | null;
   scheduled_end_datetime: string | null;
+  actual_start_datetime: string | null;
+  actual_end_datetime: string | null;
   updated_at: string | null;
   status: string | null;
   sort_order: number | null;
@@ -232,6 +237,7 @@ export async function GET(request: Request) {
           estimated_cost,
           estimated_profit,
           downpayment,
+          downpayment_rate,
           cancelled_at,
           cancelled_from_status,
           cancellation_phase,
@@ -311,6 +317,8 @@ export async function GET(request: Request) {
                 sort_order,
                 scheduled_start_datetime,
                 scheduled_end_datetime,
+                actual_start_datetime,
+                actual_end_datetime,
                 updated_at
               `,
               )
@@ -627,6 +635,8 @@ export async function GET(request: Request) {
         estimated_hours: row.estimated_hours,
         scheduled_start_datetime: row.scheduled_start_datetime,
         scheduled_end_datetime: row.scheduled_end_datetime,
+        actual_start_datetime: row.actual_start_datetime,
+        actual_end_datetime: row.actual_end_datetime,
         updated_at: row.updated_at,
         status: row.status,
         sort_order: row.sort_order,
