@@ -1,27 +1,22 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { buildUnavailableDateSet } from "@/lib/schedule/snapPastUnavailable";
 import {
-  buildUnavailableDateSet,
-  snapStartPastUnavailableSpan,
-} from "@/lib/schedule/snapPastUnavailable";
-import { placeWorkSpan, snapToNextWorkingMoment } from "@/lib/schedule/workHours";
+  placeWorkSpan,
+  snapToNextWorkingMoment,
+} from "@/lib/schedule/workHours";
 
-// Shared "shift every later subtask by the delta between the anchor task's
-// old position and a new reference time" helper. Two callers:
+// Shared cascade helper used by:
 //
-//   1. /api/planning/updateSubTaskStatus — when a staff member marks a
-//      subtask done, every later sibling slides so the next task starts
-//      at the actual finish time.
+//   1. /api/planning/updateSubTaskStatus — staff marks a subtask done.
+//   2. /api/planning/updateGeneratedSubTask — admin edits the schedule
+//      on the Generated Task modal.
 //
-//   2. /api/planning/updateGeneratedSubTask — when an admin edits the
-//      schedule on the Generated Task modal, every later sibling slides
-//      so the chain keeps the same relative spacing relative to the
-//      new end of the edited task.
-//
-// Both flows want identical downstream behaviour (respect work hours,
-// skip lunch, snap past unavailable days, preserve estimated_hours), so
-// the math lives here once.
-
-const CASCADE_THRESHOLD_MS = 60 * 1000;
+// Both flows want every subtask AFTER the changed one to land in valid
+// working windows (9-17 Mon-Sat, lunch 12-13 excluded, blocked days
+// skipped) starting from the anchor task's new end. The helper walks a
+// cursor through the candidates in canonical schedule order and runs
+// each one through placeWorkSpan, so legacy data with multiple subtasks
+// pinned to the same timestamp can't pile back up at a boundary.
 
 type ProjectTaskRow = {
   project_task_id: string;
@@ -35,6 +30,7 @@ type ProjectSubTaskRow = {
   scheduled_start_datetime?: string | null;
   scheduled_end_datetime?: string | null;
   estimated_hours?: number | null;
+  sort_order?: number | null;
 };
 
 function normalizeStatus(value: string | null | undefined) {
@@ -55,12 +51,6 @@ function parseDate(value: string | null | undefined) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function shiftIso(value: string | null | undefined, deltaMs: number) {
-  const date = parseDate(value);
-  if (!date) return null;
-  return new Date(date.getTime() + deltaMs).toISOString();
 }
 
 export async function cascadeShiftLaterSubtasks(args: {
@@ -116,10 +106,14 @@ export async function cascadeShiftLaterSubtasks(args: {
   if (projectTaskIds.length === 0)
     return { shifted: 0, deltaMs: 0, error: null };
 
+  // Pull sort_order alongside the schedule so we can stable-sort
+  // candidates by (project_task.sort_order, project_sub_task.sort_order)
+  // when their original starts collide — common in the legacy data
+  // where multiple subtasks share the same scheduled_start_datetime.
   const { data: subTaskRows, error: subTaskError } = await supabaseAdmin
     .from("project_sub_task")
     .select(
-      "project_sub_task_id, project_task_id, status, scheduled_start_datetime, scheduled_end_datetime, estimated_hours",
+      "project_sub_task_id, project_task_id, status, scheduled_start_datetime, scheduled_end_datetime, estimated_hours, sort_order",
     )
     .in("project_task_id", projectTaskIds)
     .returns<ProjectSubTaskRow[]>();
@@ -144,21 +138,41 @@ export async function cascadeShiftLaterSubtasks(args: {
   if (candidates.length === 0)
     return { shifted: 0, deltaMs: 0, error: null };
 
-  let earliestStartMs = Infinity;
-  for (const row of candidates) {
-    const startDate = parseDate(row.scheduled_start_datetime);
-    if (!startDate) continue;
-    if (startDate.getTime() < earliestStartMs) {
-      earliestStartMs = startDate.getTime();
-    }
+  // Need the project_task sort_order so the candidate ordering matches
+  // what the schedule wizard / dashboard would render. Without this,
+  // candidates whose subtask-level sort_order happens to be lower could
+  // pack BEFORE a sibling that belongs to an earlier main-task group.
+  const { data: orderRows } = await supabaseAdmin
+    .from("project_task")
+    .select("project_task_id, sort_order")
+    .in("project_task_id", projectTaskIds);
+  const taskGroupOrder = new Map<string, number>();
+  for (const row of orderRows ?? []) {
+    taskGroupOrder.set(
+      String(row.project_task_id),
+      Number((row as { sort_order?: number | null }).sort_order ?? 0),
+    );
   }
-  if (!Number.isFinite(earliestStartMs))
-    return { shifted: 0, deltaMs: 0, error: null };
 
-  const deltaMs = args.referenceEndMs - earliestStartMs;
-  if (Math.abs(deltaMs) < CASCADE_THRESHOLD_MS) {
-    return { shifted: 0, deltaMs: 0, error: null };
-  }
+  // Stable ordering: original scheduled start (so a chain that was
+  // correctly spaced keeps its order), then the project_task sort_order
+  // (so legacy rows pinned to the same timestamp pack in the order the
+  // admin laid them out), then the per-row sort_order (final tie-break).
+  candidates.sort((a, b) => {
+    const aStart = parseDate(a.scheduled_start_datetime)?.getTime() ?? 0;
+    const bStart = parseDate(b.scheduled_start_datetime)?.getTime() ?? 0;
+    if (aStart !== bStart) return aStart - bStart;
+
+    const aTaskOrder = taskGroupOrder.get(String(a.project_task_id)) ?? 0;
+    const bTaskOrder = taskGroupOrder.get(String(b.project_task_id)) ?? 0;
+    if (aTaskOrder !== bTaskOrder) return aTaskOrder - bTaskOrder;
+
+    const aSubOrder = Number(a.sort_order ?? 0);
+    const bSubOrder = Number(b.sort_order ?? 0);
+    if (aSubOrder !== bSubOrder) return aSubOrder - bSubOrder;
+
+    return a.project_sub_task_id.localeCompare(b.project_sub_task_id);
+  });
 
   const { data: blockedRows } = await supabaseAdmin
     .from("unavailable_days")
@@ -171,97 +185,122 @@ export async function cascadeShiftLaterSubtasks(args: {
       .map((iso) => iso.slice(0, 10)),
   );
 
+  // SEQUENTIAL PACKING.
+  //
+  // Old behaviour computed a single `delta = referenceEnd - earliestCandidateStart`
+  // and applied it uniformly to every candidate. That preserves relative
+  // spacing but lets bad data through: when several siblings are pinned
+  // to the exact same scheduled_start (e.g. multiple rows stuck at
+  // 5:00 PM), the cascade walks them all forward by the same offset
+  // and they end up stacked at the same new moment too — usually a
+  // boundary like 17:00 where snapToNextWorkingMoment can also misfire
+  // if the wall clock happens to align.
+  //
+  // The new flow walks a single cursor through the candidate list, in
+  // canonical schedule order, placing each one immediately after the
+  // previous via placeWorkSpan. The cursor starts at the finishing
+  // task's actual end (referenceEndMs). placeWorkSpan handles every
+  // boundary (lunch, 17:00, Sundays, blocked days), so the writes are
+  // guaranteed to land in valid working windows AND remain non-overlapping.
+  // No threshold check: if the saved chain already matches, the row
+  // updates are idempotent no-ops at the DB layer.
+  let cursor = snapToNextWorkingMoment(
+    new Date(args.referenceEndMs),
+    unavailableSet,
+  );
+
+  // Track the running delta from each candidate's original position to
+  // its new position. Reported as the delta of the FIRST candidate to
+  // stay backward-compatible with callers that wanted a single number.
+  let firstShiftDeltaMs = 0;
+  let firstSeen = false;
+  let shiftedCount = 0;
+
   // Chunked to avoid exhausting Supabase connections on large projects.
+  // Even though the placement is sequential, the DB writes are still
+  // independent and can fan out per chunk.
   const CHUNK_SIZE = 8;
-  for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
-    const chunk = candidates.slice(i, i + CHUNK_SIZE);
-    const updates = await Promise.all(
-      chunk.map((row) => {
-        const naiveStartIso = shiftIso(row.scheduled_start_datetime, deltaMs);
-        const naiveEndIso = shiftIso(row.scheduled_end_datetime, deltaMs);
+  type WriteRow = {
+    projectSubTaskId: string;
+    payload: Record<string, unknown>;
+  };
+  const writes: WriteRow[] = [];
 
-        const originalStart = parseDate(row.scheduled_start_datetime);
-        const originalEnd = parseDate(row.scheduled_end_datetime);
-        const originalDurationMs =
-          originalStart && originalEnd
-            ? originalEnd.getTime() - originalStart.getTime()
-            : 0;
+  for (const row of candidates) {
+    const originalStart = parseDate(row.scheduled_start_datetime);
+    const originalEnd = parseDate(row.scheduled_end_datetime);
+    const originalDurationMs =
+      originalStart && originalEnd
+        ? originalEnd.getTime() - originalStart.getTime()
+        : 0;
 
-        // Prefer the persisted work-hours estimate over the clock span:
-        // spans that cross lunch or overnight measure wider in clock
-        // time than they do in actual work hours, and feeding the wider
-        // number into placeWorkSpan grows the span on every cascade.
-        const estimatedWorkHours = Number(row.estimated_hours);
-        const durationHours =
-          Number.isFinite(estimatedWorkHours) && estimatedWorkHours > 0
-            ? estimatedWorkHours
-            : originalDurationMs > 0
-              ? originalDurationMs / (60 * 60 * 1000)
-              : 0;
+    // estimated_hours is canonical (idempotent across cascades).
+    // Fall back to clock duration only when the column is empty.
+    const estimatedWorkHours = Number(row.estimated_hours);
+    const durationHours =
+      Number.isFinite(estimatedWorkHours) && estimatedWorkHours > 0
+        ? estimatedWorkHours
+        : originalDurationMs > 0
+          ? originalDurationMs / (60 * 60 * 1000)
+          : 0;
 
-        const snapped = snapStartPastUnavailableSpan(
-          naiveStartIso,
-          durationHours,
-          unavailableSet,
-        );
+    let finalStart: Date;
+    let finalEnd: Date;
 
-        let finalStart = snapped.iso ? new Date(snapped.iso) : null;
-        let finalEnd =
-          finalStart && originalDurationMs > 0
-            ? new Date(finalStart.getTime() + originalDurationMs)
-            : naiveEndIso
-              ? new Date(naiveEndIso)
-              : null;
+    if (durationHours > 0) {
+      const placed = placeWorkSpan(cursor, durationHours, unavailableSet);
+      finalStart = placed.start;
+      finalEnd = placed.end;
+    } else {
+      // Zero-duration row: keep it at the cursor (which is already a
+      // valid working moment), end follows start.
+      finalStart = new Date(cursor);
+      finalEnd = new Date(cursor);
+    }
 
-        // ALWAYS normalize the start to a valid working moment. The
-        // earlier code only ran this step when durationHours > 0
-        // (because it piggy-backed on placeWorkSpan to do the snap),
-        // which meant a candidate without an estimated_hours value
-        // could land its start at 17:00 / Sunday / inside lunch / on
-        // a blocked day. snapToNextWorkingMoment pushes any moment
-        // forward to the next valid working second so the same rules
-        // hold for every subtask, with or without a duration.
-        if (finalStart) {
-          finalStart = snapToNextWorkingMoment(finalStart, unavailableSet);
-        }
+    if (!firstSeen) {
+      firstSeen = true;
+      const originalStartMs = originalStart?.getTime();
+      if (typeof originalStartMs === "number") {
+        firstShiftDeltaMs = finalStart.getTime() - originalStartMs;
+      }
+    }
+    shiftedCount += 1;
 
-        if (finalStart && durationHours > 0) {
-          // placeWorkSpan handles the multi-block layout (carve out
-          // lunch / overnight / blocked days inside the span) so the
-          // saved [start, end] envelope is the same the scheduler
-          // would have picked from scratch.
-          const placed = placeWorkSpan(
-            finalStart,
-            durationHours,
-            unavailableSet,
-          );
-          finalStart = placed.start;
-          finalEnd = placed.end;
-        } else if (finalStart) {
-          // Zero-duration row: end follows start so the row stays
-          // consistent without inflating its clock span.
-          finalEnd = new Date(finalStart);
-        }
+    writes.push({
+      projectSubTaskId: row.project_sub_task_id,
+      payload: {
+        scheduled_start_datetime: finalStart.toISOString(),
+        scheduled_end_datetime: finalEnd.toISOString(),
+        updated_at: args.timestampIso,
+      },
+    });
 
-        const payload: Record<string, unknown> = {
-          updated_at: args.timestampIso,
-        };
-        if (finalStart)
-          payload.scheduled_start_datetime = finalStart.toISOString();
-        if (finalEnd) payload.scheduled_end_datetime = finalEnd.toISOString();
+    // Advance the cursor past the candidate's end, then re-snap so the
+    // next candidate skips lunch / overnight gaps cleanly.
+    cursor = snapToNextWorkingMoment(new Date(finalEnd), unavailableSet);
+  }
 
-        return supabaseAdmin
+  for (let i = 0; i < writes.length; i += CHUNK_SIZE) {
+    const chunk = writes.slice(i, i + CHUNK_SIZE);
+    const results = await Promise.all(
+      chunk.map((entry) =>
+        supabaseAdmin
           .from("project_sub_task")
-          .update(payload)
-          .eq("project_sub_task_id", row.project_sub_task_id);
-      }),
+          .update(entry.payload)
+          .eq("project_sub_task_id", entry.projectSubTaskId),
+      ),
     );
 
-    const failed = updates.find((result) => result.error);
+    const failed = results.find((result) => result.error);
     if (failed?.error) {
       return { shifted: 0, deltaMs: 0, error: failed.error.message };
     }
   }
 
-  return { shifted: candidates.length, deltaMs, error: null };
+  return {
+    shifted: shiftedCount,
+    deltaMs: firstShiftDeltaMs,
+    error: null,
+  };
 }
