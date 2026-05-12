@@ -112,13 +112,18 @@ export async function openRouterChat(
   }
 
   const baseUrl = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1"
-  // Default to a fast Haiku-tier model. The wizard's planning prompts
-  // are catalog-mapping work (no deep reasoning), so a small model is
-  // both significantly faster than the previous "openrouter/free" default
-  // and still produces correct task indices. Override per-call via
-  // `options.model` or globally via OPENROUTER_MODEL.
+  // Default to OpenRouter's free Gemini 2.0 Flash experimental tier.
+  // The wizard's planning prompts are catalog-mapping work (no deep
+  // reasoning), so a small / free model is both faster than a paid
+  // alternative and still produces correct task indices. Override per
+  // call via `options.model` or globally via OPENROUTER_MODEL. Note that
+  // OpenRouter's free tier rate-limits at ~20 req/min and a few hundred
+  // requests/day per account; the catch-all error translator in this
+  // file surfaces a clear "rate limited" message if that ceiling is hit.
   const model =
-    options.model ?? process.env.OPENROUTER_MODEL ?? "anthropic/claude-3.5-haiku"
+    options.model ??
+    process.env.OPENROUTER_MODEL ??
+    "google/gemini-2.0-flash-exp:free"
   const retries = options.retries ?? 2
 
   let lastErr: unknown = null
