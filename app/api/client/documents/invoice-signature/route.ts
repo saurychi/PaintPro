@@ -196,27 +196,28 @@ export async function POST(request: Request) {
         clientSignedName: signedName,
       });
 
-      const { getPdfBrowser } = await import("@/lib/server/pdfBrowser");
-      const browser = await getPdfBrowser();
-      const context = await browser.newContext();
-      try {
-        const page = await context.newPage();
-        await page.setContent(html, { waitUntil: "networkidle" });
-        await page.emulateMedia({ media: "screen" });
-        const pdfBytes = await page.pdf({
-          format: "A4",
-          printBackground: true,
-          margin: {
-            top: "12mm",
-            right: "12mm",
-            bottom: "12mm",
-            left: "12mm",
-          },
-        });
-        signedPdfBuffer = Buffer.from(pdfBytes);
-      } finally {
-        await context.close().catch(() => {});
-      }
+      const { withFreshPdfBrowser } = await import("@/lib/server/pdfBrowser");
+      signedPdfBuffer = await withFreshPdfBrowser(async (browser) => {
+        const context = await browser.newContext();
+        try {
+          const page = await context.newPage();
+          await page.setContent(html, { waitUntil: "networkidle" });
+          await page.emulateMedia({ media: "screen" });
+          const pdfBytes = await page.pdf({
+            format: "A4",
+            printBackground: true,
+            margin: {
+              top: "12mm",
+              right: "12mm",
+              bottom: "12mm",
+              left: "12mm",
+            },
+          });
+          return Buffer.from(pdfBytes);
+        } finally {
+          await context.close().catch(() => {});
+        }
+      });
     }
 
     // Upload the signed PDF, then run the two DB writes in parallel.

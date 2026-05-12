@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { BrowserContext } from "playwright-core";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureBucket } from "@/lib/supabase/ensureBucket";
-import { getPdfBrowser } from "@/lib/server/pdfBrowser";
+import { withFreshPdfBrowser } from "@/lib/server/pdfBrowser";
 
 // Dynamic import below — same reason as the other signature endpoints:
 // Turbopack's static graph doesn't like a route.ts statically importing
@@ -144,30 +144,35 @@ export async function POST(request: Request) {
       clientSignedName: signedName,
     });
 
-    let context: BrowserContext | null = null;
-    let pdfBuffer: Buffer;
-    try {
-      const browser = await getPdfBrowser();
-      context = await browser.newContext();
-      const page = await context.newPage();
-      await page.setContent(html, { waitUntil: "networkidle" });
-      await page.emulateMedia({ media: "screen" });
-      const pdfBytes = await page.pdf({
-        format: "A4",
-        printBackground: true,
-        margin: {
-          top: "12mm",
-          right: "12mm",
-          bottom: "12mm",
-          left: "12mm",
-        },
-      });
-      pdfBuffer = Buffer.from(pdfBytes);
-    } finally {
-      if (context) {
-        await context.close().catch(() => {});
+    // withFreshPdfBrowser retries once on "browser has been closed" errors
+    // by tearing down the cached Chromium handle and relaunching. Vercel's
+    // freeze/thaw cycle occasionally zombie-reaps the underlying process
+    // even though Playwright's isConnected() still says it's alive, which
+    // is exactly the failure mode the client signing flow was hitting.
+    const pdfBuffer = await withFreshPdfBrowser(async (browser) => {
+      let context: BrowserContext | null = null;
+      try {
+        context = await browser.newContext();
+        const page = await context.newPage();
+        await page.setContent(html, { waitUntil: "networkidle" });
+        await page.emulateMedia({ media: "screen" });
+        const pdfBytes = await page.pdf({
+          format: "A4",
+          printBackground: true,
+          margin: {
+            top: "12mm",
+            right: "12mm",
+            bottom: "12mm",
+            left: "12mm",
+          },
+        });
+        return Buffer.from(pdfBytes);
+      } finally {
+        if (context) {
+          await context.close().catch(() => {});
+        }
       }
-    }
+    });
 
     const { error: uploadPdfError } = await supabaseAdmin.storage
       .from(quotationStorageBucket)

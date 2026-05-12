@@ -124,3 +124,50 @@ export async function getPdfBrowser(): Promise<Browser> {
 export async function launchPdfBrowser(): Promise<Browser> {
   return getPdfBrowser();
 }
+
+// Force the next getPdfBrowser() call to relaunch instead of handing back
+// the cached handle. Used by withFreshPdfBrowser when the underlying
+// Chromium process is dead but the cache still thinks it's healthy.
+export async function invalidatePdfBrowser(): Promise<void> {
+  const stale = cache.browser;
+  cache.browser = null;
+  if (stale) {
+    try {
+      await stale.close();
+    } catch {
+      // The browser is already gone — that's why we're invalidating.
+    }
+  }
+}
+
+// Pattern matched against caught errors to decide "is this a dead-browser
+// case worth retrying?". Playwright surfaces the same Chromium tear-down
+// under a few different wordings depending on whether newContext, newPage,
+// or an in-flight call was the one that landed on the closed handle.
+const BROWSER_CLOSED_RE =
+  /(Target page, context or browser has been closed|browser has been closed|disconnected from|browserType\.launch)/i;
+
+// Runs `fn` against a healthy PDF browser. If the first attempt fails with
+// a closed-browser error, the cached handle is torn down and the work runs
+// again on a fresh launch. Used by the PDF / signature routes whose cached
+// browser can otherwise zombie-reap between Vercel function freezes.
+export async function withFreshPdfBrowser<T>(
+  fn: (browser: Browser) => Promise<T>,
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    const browser = await getPdfBrowser();
+    try {
+      return await fn(browser);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "");
+      if (attempt === 0 && BROWSER_CLOSED_RE.test(message)) {
+        attempt++;
+        await invalidatePdfBrowser();
+        continue;
+      }
+      throw error;
+    }
+  }
+}

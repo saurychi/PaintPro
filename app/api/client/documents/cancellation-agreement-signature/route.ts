@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { BrowserContext } from "playwright-core";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureBucket } from "@/lib/supabase/ensureBucket";
-import { getPdfBrowser } from "@/lib/server/pdfBrowser";
+import { withFreshPdfBrowser } from "@/lib/server/pdfBrowser";
 
 // Dynamic import below — Turbopack chokes on static cross-route imports
 // between two route.ts files (the dependency graph thinks the importer
@@ -164,34 +164,35 @@ export async function POST(request: Request) {
       clientSignedAt: now,
     });
 
-    // Convert HTML → PDF in-process. Mirrors the /pdf route's options
+    // Convert HTML to PDF in-process. Mirrors the /pdf route's options
     // (A4, 12mm margins, print backgrounds on) but skips the HTTP hop
     // to /api/cancellation-agreement/html, which would have lost our
-    // inline signature.
-    let context: BrowserContext | null = null;
-    let pdfBuffer: Buffer;
-    try {
-      const browser = await getPdfBrowser();
-      context = await browser.newContext();
-      const page = await context.newPage();
-      await page.setContent(html, { waitUntil: "networkidle" });
-      await page.emulateMedia({ media: "screen" });
-      const pdfBytes = await page.pdf({
-        format: "A4",
-        printBackground: true,
-        margin: {
-          top: "12mm",
-          right: "12mm",
-          bottom: "12mm",
-          left: "12mm",
-        },
-      });
-      pdfBuffer = Buffer.from(pdfBytes);
-    } finally {
-      if (context) {
-        await context.close().catch(() => {});
+    // inline signature. withFreshPdfBrowser retries once on a stale
+    // cached browser.
+    const pdfBuffer = await withFreshPdfBrowser(async (browser) => {
+      let context: BrowserContext | null = null;
+      try {
+        context = await browser.newContext();
+        const page = await context.newPage();
+        await page.setContent(html, { waitUntil: "networkidle" });
+        await page.emulateMedia({ media: "screen" });
+        const pdfBytes = await page.pdf({
+          format: "A4",
+          printBackground: true,
+          margin: {
+            top: "12mm",
+            right: "12mm",
+            bottom: "12mm",
+            left: "12mm",
+          },
+        });
+        return Buffer.from(pdfBytes);
+      } finally {
+        if (context) {
+          await context.close().catch(() => {});
+        }
       }
-    }
+    });
 
     const { error: uploadPdfError } = await supabaseAdmin.storage
       .from(agreementStorageBucket)

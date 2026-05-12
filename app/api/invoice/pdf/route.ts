@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
-import type { Browser } from "playwright-core";
-import { launchPdfBrowser } from "@/lib/server/pdfBrowser";
+import type { BrowserContext } from "playwright-core";
+import { withFreshPdfBrowser } from "@/lib/server/pdfBrowser";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  let browser: Browser | null = null;
-
   try {
     const url = new URL(request.url);
     const projectId = url.searchParams.get("projectId")?.trim() || "";
@@ -24,25 +22,37 @@ export async function GET(request: Request) {
       projectId,
     )}&markupRate=${encodeURIComponent(markupRate)}`;
 
-    browser = await launchPdfBrowser();
+    // Old version called launchPdfBrowser() and then awaited browser.close()
+    // in finally. That tore the cached Chromium handle down on every
+    // request, defeated the cache, and left the next caller staring at the
+    // "Target page, context or browser has been closed" error. Use the
+    // shared withFreshPdfBrowser wrapper instead: it leaves the browser
+    // alive between requests, isolates each render in its own context,
+    // and transparently relaunches if the cache is stale.
+    const pdfBuffer = await withFreshPdfBrowser(async (browser) => {
+      let context: BrowserContext | null = null;
+      try {
+        context = await browser.newContext();
+        const page = await context.newPage();
 
-    const page = await browser.newPage();
+        await page.goto(htmlUrl, { waitUntil: "networkidle" });
+        await page.emulateMedia({ media: "screen" });
 
-    await page.goto(htmlUrl, {
-      waitUntil: "networkidle",
-    });
-
-    await page.emulateMedia({ media: "screen" });
-
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: {
-        top: "12mm",
-        right: "12mm",
-        bottom: "12mm",
-        left: "12mm",
-      },
+        return await page.pdf({
+          format: "A4",
+          printBackground: true,
+          margin: {
+            top: "12mm",
+            right: "12mm",
+            bottom: "12mm",
+            left: "12mm",
+          },
+        });
+      } finally {
+        if (context) {
+          await context.close().catch(() => {});
+        }
+      }
     });
 
     const pdfBytes = new Uint8Array(pdfBuffer);
@@ -66,9 +76,5 @@ export async function GET(request: Request) {
       },
       { status: 500 },
     );
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
   }
 }

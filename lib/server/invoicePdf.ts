@@ -1,7 +1,7 @@
 import type { BrowserContext } from "playwright-core";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-import { getPdfBrowser } from "@/lib/server/pdfBrowser";
+import { withFreshPdfBrowser } from "@/lib/server/pdfBrowser";
 
 // Stamp coordinates for the client signature box, expressed in PDF
 // points relative to the bottom-left of the last page. These values
@@ -59,22 +59,23 @@ export async function renderUnsignedInvoicePdf(args: {
     markupRate: args.markupRate,
   });
 
-  const browser = await getPdfBrowser();
-  let context: BrowserContext | null = null;
-  try {
-    context = await browser.newContext();
-    const page = await context.newPage();
-    await page.setContent(html, { waitUntil: "networkidle" });
-    await page.emulateMedia({ media: "screen" });
-    const pdfBytes = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
-    });
-    return Buffer.from(pdfBytes);
-  } finally {
-    if (context) await context.close().catch(() => {});
-  }
+  return withFreshPdfBrowser(async (browser) => {
+    let context: BrowserContext | null = null;
+    try {
+      context = await browser.newContext();
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "networkidle" });
+      await page.emulateMedia({ media: "screen" });
+      const pdfBytes = await page.pdf({
+        format: "A4",
+        printBackground: true,
+        margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
+      });
+      return Buffer.from(pdfBytes);
+    } finally {
+      if (context) await context.close().catch(() => {});
+    }
+  });
 }
 
 // Overlay the client signature image + signed name onto an existing
