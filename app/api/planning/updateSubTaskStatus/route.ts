@@ -81,6 +81,15 @@ function shiftIso(value: string | null | undefined, deltaMs: number) {
 async function cascadeShiftLaterSubtasks(args: {
   finishingSubTaskId: string;
   projectTaskId: string;
+  // The finishing task's ORIGINAL scheduled bounds. We anchor the
+  // candidate filter to whichever of these is earlier so the cascade
+  // also picks up sibling subtasks that were scheduled at the same
+  // time as the finishing one (or were overlapping it). A real example
+  // we hit: a subtask scheduled to start at 5 PM finished at 10:30 AM,
+  // but the next sibling subtask was also pinned at 5 PM the same day,
+  // so a "start >= end" filter missed it and the schedule never
+  // recovered.
+  originalScheduledStartMs: number;
   originalScheduledEndMs: number;
   // Actual finish time. The shift is computed so the IMMEDIATE next
   // subtask's start lines up with this value, then every later subtask
@@ -131,12 +140,21 @@ async function cascadeShiftLaterSubtasks(args: {
     return { shifted: 0, deltaMs: 0, error: subTaskError.message };
   }
 
+  // Use the earlier of (start, end) so the filter also catches sibling
+  // subtasks scheduled in parallel with or overlapping the finishing
+  // one. Forward-only tasks are unaffected since their start is past
+  // the finishing task's end anyway.
+  const finishingAnchorMs = Math.min(
+    args.originalScheduledStartMs,
+    args.originalScheduledEndMs,
+  );
+
   const candidates = (subTaskRows ?? []).filter((row) => {
     if (row.project_sub_task_id === args.finishingSubTaskId) return false;
     if (isFinishedSubTaskStatus(row.status)) return false;
     const startDate = parseDate(row.scheduled_start_datetime);
     if (!startDate) return false;
-    return startDate.getTime() >= args.originalScheduledEndMs;
+    return startDate.getTime() >= finishingAnchorMs;
   });
 
   if (candidates.length === 0)
@@ -316,6 +334,9 @@ export async function POST(request: Request) {
     }
 
     const isCompleting = isCompletionStatus(status);
+    const originalScheduledStartDate = parseDate(
+      existingSubTask.scheduled_start_datetime,
+    );
     const originalScheduledEndDate = parseDate(
       existingSubTask.scheduled_end_datetime,
     );
@@ -356,10 +377,15 @@ export async function POST(request: Request) {
     ) {
       const projectTaskId = existingSubTask.project_task_id;
       const originalScheduledEndMs = originalScheduledEndDate.getTime();
+      // Fall back to the end timestamp if start is missing, so the
+      // cascade can still anchor itself on a sensible value.
+      const originalScheduledStartMs =
+        originalScheduledStartDate?.getTime() ?? originalScheduledEndMs;
 
       void cascadeShiftLaterSubtasks({
         finishingSubTaskId: projectSubTaskId,
         projectTaskId,
+        originalScheduledStartMs,
         originalScheduledEndMs,
         actualEndMs: referenceNow.getTime(),
         timestampIso,
