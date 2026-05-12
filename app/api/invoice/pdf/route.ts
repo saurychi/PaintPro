@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { BrowserContext } from "playwright-core";
 import { withFreshPdfBrowser } from "@/lib/server/pdfBrowser";
+import { renderInvoiceHtml } from "@/app/api/invoice/html/route";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,11 +17,14 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
     }
 
-    const origin = url.origin;
-
-    const htmlUrl = `${origin}/api/invoice/html?projectId=${encodeURIComponent(
+    // Render via the shared helper instead of `page.goto(htmlUrl)` against
+    // a sibling Lambda. The self-HTTP hop was causing Chromium to hit
+    // net::ERR_INSUFFICIENT_RESOURCES on Vercel under load.
+    const html = await renderInvoiceHtml({
       projectId,
-    )}&markupRate=${encodeURIComponent(markupRate)}`;
+      origin: url.origin,
+      markupRate,
+    });
 
     // Old version called launchPdfBrowser() and then awaited browser.close()
     // in finally. That tore the cached Chromium handle down on every
@@ -35,7 +39,7 @@ export async function GET(request: Request) {
         context = await browser.newContext();
         const page = await context.newPage();
 
-        await page.goto(htmlUrl, { waitUntil: "networkidle" });
+        await page.setContent(html, { waitUntil: "domcontentloaded" });
         await page.emulateMedia({ media: "screen" });
 
         return await page.pdf({

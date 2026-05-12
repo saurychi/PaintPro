@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { BrowserContext } from "playwright-core";
 import { withFreshPdfBrowser } from "@/lib/server/pdfBrowser";
+import { renderQuotationHtml } from "@/app/api/quotation/html/route";
 
 // Playwright + @sparticuz/chromium need a long-running Node runtime; the Edge
 // runtime can't load the binary. maxDuration covers cold-start + render time
@@ -19,10 +20,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing projectId." }, { status: 400 });
     }
 
-    const origin = url.origin;
-    const htmlUrl = `${origin}/api/quotation/html?projectId=${encodeURIComponent(
-      projectId,
-    )}&markupRate=${encodeURIComponent(markupRate)}`;
+    // Render via the shared helper instead of `page.goto(htmlUrl)` against
+    // a sibling Lambda. The self-HTTP hop was causing Chromium to hit
+    // net::ERR_INSUFFICIENT_RESOURCES on Vercel under load.
+    const html = await renderQuotationHtml({ projectId, markupRate });
 
     // Reuse the cached browser across requests (~1-2s saved per call).
     // Each render gets its own isolated context so concurrent renders
@@ -35,11 +36,7 @@ export async function GET(request: Request) {
         context = await browser.newContext();
         const page = await context.newPage();
 
-        // domcontentloaded is enough since the HTML page server-renders
-        // the quotation body inline (no client-side fetch waterfall).
-        // Switching away from networkidle saves ~500ms of "wait for
-        // nothing" time.
-        await page.goto(htmlUrl, { waitUntil: "domcontentloaded" });
+        await page.setContent(html, { waitUntil: "domcontentloaded" });
         await page.emulateMedia({ media: "screen" });
 
         return await page.pdf({
