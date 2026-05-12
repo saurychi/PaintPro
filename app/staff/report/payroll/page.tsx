@@ -39,9 +39,9 @@ const STATUS_META: Record<
 function formatMoney(amount?: number | null) {
   if (amount == null || !Number.isFinite(amount)) return "--";
 
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(amount);

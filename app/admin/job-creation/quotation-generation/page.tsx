@@ -44,9 +44,9 @@ const ACCENT = "#00c065";
 function formatCurrency(value: number | null | undefined) {
   const safeValue = Number(value ?? 0);
 
-  return new Intl.NumberFormat("en-PH", {
+  return new Intl.NumberFormat("en-AU", {
     style: "currency",
-    currency: "PHP",
+    currency: "AUD",
     maximumFractionDigits: 2,
   }).format(safeValue);
 }
@@ -173,6 +173,31 @@ export default function JobQuotation() {
         setStatus(
           APPROVED_STATUSES.has(projectStatus) ? "Approved" : "Not yet Approved",
         );
+
+        // While the quotation hasn't been signed yet, regenerate the PDF so
+        // the document reflects the latest project state — chiefly the
+        // downpayment, which gets saved upstream (cost estimation) and
+        // surfaces in the document via the Subtotal / Downpayment / Balance
+        // Due rows. Skipped post-sign so the client-signed PDF isn't
+        // overwritten.
+        if (
+          projectStatus === "quotation_pending" ||
+          projectStatus === "grant_access_quotation"
+        ) {
+          try {
+            const regenResponse = await fetch("/api/quotation/save-generated", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectId }),
+            });
+            if (regenResponse.ok) {
+              setQuotationMissing(false);
+              setPreviewVersion((v) => v + 1);
+            }
+          } catch {
+            // Silent — the user can still see whatever's in the bucket.
+          }
+        }
       } catch (error: any) {
         console.error(error);
         toast.error(error?.message || "Failed to load quotation project data.");

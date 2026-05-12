@@ -113,6 +113,14 @@ function StaffShell({ children, user }: { children: React.ReactNode; user: Sideb
         className={cn(
           "min-h-screen min-w-0 overflow-auto",
           "transition-[padding-left] duration-300 ease-in-out",
+          // Mobile burger lives at top-4 left-4 (40x40), so reserve
+          // 56px at the top on phones. Pages that already key their
+          // height off `var(--admin-header-offset,0px)` (e.g. the
+          // schedule / inventory / settings shells) auto-adapt to
+          // the reserved space, and `pt-14` covers the remaining
+          // pages that flow naturally from the top.
+          "[--admin-header-offset:56px] md:[--admin-header-offset:0px]",
+          "pt-14 md:pt-0",
           open ? "md:pl-(--sidebar-width)" : "md:pl-(--sidebar-width-icon)"
         )}
         style={{ background: "var(--app-bg)" }}

@@ -73,6 +73,10 @@ function buildServiceGroupsFromCache(
   for (const st of cachedSubTasks) {
     const groupId = st.mainTaskId;
 
+    // Drop orphan subtasks whose parent main task is no longer cached
+    // (the user removed it earlier in the wizard).
+    if (!mainTaskNameMap.has(groupId)) continue;
+
     if (!groupedMap.has(groupId)) {
       groupedMap.set(groupId, {
         id: groupId,

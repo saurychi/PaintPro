@@ -1373,6 +1373,23 @@ export default function DashboardPage() {
 
         if (cancelled || runForId !== selectedProjectId) return;
 
+        // Project was deleted in the DB while the dashboard was open
+        // (or the list is stale after a delete elsewhere). Drop the
+        // stale selection and refetch the projects list so the
+        // auto-select effect picks the next valid project from the
+        // refreshed list instead of surfacing a console error.
+        if (response.status === 404) {
+          setOverviewProject(null);
+          setMainTasks([]);
+          setOpenProcessIds(new Set());
+          setOpenSubtaskIds(new Set());
+          setSelectedProjectId(null);
+          setSelectedProject(null);
+          explicitlyPickedIdRef.current = null;
+          setDetailsRefreshKey((k) => k + 1);
+          return;
+        }
+
         if (!response.ok) {
           throw new Error(
             [data?.error, data?.details].filter(Boolean).join(": ") ||

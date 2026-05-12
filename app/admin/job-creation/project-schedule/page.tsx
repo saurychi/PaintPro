@@ -5,7 +5,7 @@ import { CalendarDays, ChevronDown, ChevronRight, Clock3, List, Loader2, Refresh
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
-import { getCachedSubTasks, getCachedMainTasks, setCachedSubTasks, setCachedStep, ensureWizardCacheHydrated, markWizardDirty } from "@/lib/wizardCache";
+import { getCachedSubTasks, getCachedMainTasks, getCachedManualMode, setCachedSubTasks, setCachedStep, ensureWizardCacheHydrated, markWizardDirty } from "@/lib/wizardCache";
 import { useProjectNow } from "@/lib/time/useProjectNow";
 import type { CachedSubTask } from "@/lib/wizardCache";
 import FullCalendar from "@fullcalendar/react";
@@ -329,10 +329,32 @@ export default function ProjectSchedulePage() {
   const [jobNo, setJobNo] = useState("Project Schedule");
   const [siteName, setSiteName] = useState("Review the generated schedule");
 
-  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  // Manual-mode projects don't get an AI-laid-out calendar — every
+  // subtask starts unscheduled, so the calendar view is mostly empty
+  // and the list is what the admin actually needs to fill in.
+  // Default the page to list view in that case (calendar otherwise).
+  // Read from the cache up front; the auto-default effect below
+  // re-checks once the cache is hydrated for cold loads where the
+  // first read may have missed.
+  const [viewMode, setViewMode] = useState<"calendar" | "list">(() =>
+    getCachedManualMode(projectId) ? "list" : "calendar",
+  );
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(),
   );
+
+  // Apply the manual-mode list view + auto-expand once services have
+  // loaded for the first time. Single-shot so a later toggle by the
+  // user (calendar → list, collapse a group) isn't overridden.
+  const didApplyManualModeDefaultsRef = useRef(false);
+  useEffect(() => {
+    if (didApplyManualModeDefaultsRef.current) return;
+    if (!services || services.length === 0) return;
+    if (!getCachedManualMode(projectId)) return;
+    didApplyManualModeDefaultsRef.current = true;
+    setViewMode("list");
+    setExpandedGroups(new Set(services.map((g) => g.id)));
+  }, [projectId, services]);
 
   const [unavailableDates, setUnavailableDates] = useState<Set<string>>(
     () => new Set(),
@@ -396,6 +418,11 @@ export default function ProjectSchedulePage() {
 
     const groupedMap = new Map<string, ServiceGroup>();
     for (const st of cached) {
+      // Drop orphan subtasks whose parent main task is no longer in
+      // the cache — happens when the admin removes a main task
+      // earlier in the wizard.
+      if (!mainTaskNameMap.has(st.mainTaskId)) continue;
+
       if (!groupedMap.has(st.mainTaskId)) {
         groupedMap.set(st.mainTaskId, {
           id: st.mainTaskId,
@@ -696,13 +723,13 @@ export default function ProjectSchedulePage() {
   }
 
   useEffect(() => {
-    // Always pull fresh schedule data from the DB on mount, not the
-    // session cache. The cache can lag the DB when the schedule was
-    // regenerated elsewhere in the wizard (e.g. an earlier conflict-fix
-    // pass on basic-details), and the cache short-circuit would render
-    // those stale times — making the user click Refresh to see the
-    // gap-free version. Cost: one extra fetch on every visit.
-    loadSchedule(true);
+    // Cache-first on mount: deletions made in earlier wizard steps
+    // (main-task-assignment, sub-task-assignment) live only in the
+    // wizard cache until the overview-step batch save. A forced DB
+    // pull here would resurrect those rows on screen AND write them
+    // back to the cache via setCachedSubTasks below. Users can still
+    // click the Refresh button to opt into a DB pull on demand.
+    loadSchedule(false);
   }, [projectId]);
 
   useEffect(() => {

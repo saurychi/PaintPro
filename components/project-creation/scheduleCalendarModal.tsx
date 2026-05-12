@@ -1,9 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { CalendarDays, Circle, X } from "lucide-react";
+import { CalendarDays, Circle, RefreshCw, X } from "lucide-react";
 
 type CalendarBackgroundEvent = {
   title: string;
@@ -19,6 +20,10 @@ type ScheduleCalendarModalProps = {
   availableDateEvents: CalendarBackgroundEvent[];
   onClose: () => void;
   onSelectDate: (date: string) => void;
+  // Optional: re-fetches the availability data behind the calendar
+  // (unavailable days + holidays). The modal manages its own spinner
+  // around the awaited Promise.
+  onRefresh?: () => Promise<void>;
 };
 
 function formatSelectedDate(date: string) {
@@ -55,7 +60,23 @@ export default function ScheduleCalendarModal({
   availableDateEvents,
   onClose,
   onSelectDate,
+  onRefresh,
 }: ScheduleCalendarModalProps) {
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    if (refreshing || !onRefresh) return;
+    try {
+      setRefreshing(true);
+      await onRefresh();
+    } catch {
+      // Parent already logs and surfaces errors; the modal just stops
+      // the spinner so the user can retry.
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (!open) return null;
 
   const availableCount = availableDateEvents.filter(
@@ -281,13 +302,31 @@ export default function ScheduleCalendarModal({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={onClose}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {onRefresh ? (
+                  <button
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={refreshing}
+                    aria-label="Refresh availability"
+                    title="Refresh availability"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                    />
+                  </button>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
 

@@ -389,7 +389,7 @@ function formatDateTime(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not scheduled";
 
-  return date.toLocaleString("en-PH", {
+  return date.toLocaleString("en-AU", {
     month: "short",
     day: "2-digit",
     year: "numeric",
@@ -402,7 +402,7 @@ function formatHours(value: number | null | undefined) {
   const safe = Number(value ?? 0);
   if (!Number.isFinite(safe) || safe <= 0) return "0h";
 
-  const formatted = new Intl.NumberFormat("en-PH", {
+  const formatted = new Intl.NumberFormat("en-AU", {
     maximumFractionDigits: safe % 1 === 0 ? 0 : 2,
   }).format(safe);
 

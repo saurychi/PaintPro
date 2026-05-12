@@ -1256,8 +1256,8 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 lg:grid lg:h-screen lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden lg:px-[1.4%] lg:py-[1.2%]">
-      <div className="flex shrink-0 items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold leading-8 text-gray-900 sm:text-2xl">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h1 className="min-w-0 truncate text-lg font-semibold leading-8 text-gray-900 sm:text-xl lg:text-2xl">
           Dashboard
         </h1>
         <DashboardClock />

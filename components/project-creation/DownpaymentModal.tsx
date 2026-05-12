@@ -82,6 +82,13 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
       setEstimatedBudget(Number(data.estimatedBudget) || 0);
       setEstimatedCost(Number(data.estimatedCost) || 0);
       setSavedDownpayment(Number(data.downpayment) || 0);
+      // Use the rate the admin entered on the cost-estimation page rather
+      // than the 50% default. Falls back to 50% only when no rate was set
+      // (legacy projects pre-dating the downpayment_rate column).
+      const fetchedRate = Number(data.downpaymentRate);
+      if (Number.isFinite(fetchedRate) && fetchedRate > 0) {
+        setPercentage(String(fetchedRate));
+      }
     } catch {
       setEstimatedBudget(0);
       setSavedDownpayment(0);
@@ -317,15 +324,17 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                       })}
                     </span>
                   </div>
-                  <div className={`flex h-10 w-24 items-center overflow-hidden rounded-md border ${BORDER} bg-white`}>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={percentage}
-                      onChange={(e) => setPercentage(e.target.value)}
-                      className="w-full bg-transparent px-3 text-sm text-gray-900 outline-none"
-                    />
+                  {/* Percentage is read-only here. The downpayment ratio
+                      is locked once the quotation is decided on the
+                      cost-estimation page so the admin can't quietly
+                      change it after the client signs. */}
+                  <div
+                    className={`flex h-10 w-24 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}
+                    title="Set on the quotation; locked here."
+                  >
+                    <span className="flex-1 px-3 text-sm font-medium text-gray-700">
+                      {pct}
+                    </span>
                     <span className="pr-3 text-sm text-gray-500">%</span>
                   </div>
                 </div>

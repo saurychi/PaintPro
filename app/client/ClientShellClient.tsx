@@ -127,14 +127,33 @@ function ClientPendingDocumentBadge() {
   return null
 }
 
-// Background watcher that auto-signs out the client the moment the project
-// transitions to a terminal state — "completed" (normal end-of-work) or
-// "cancelled" with cancellation_phase "done" (cancel wrap-up finished).
-// Without this, a client sitting on any page wouldn't know the project
-// closed until they reloaded, at which point the layout server check
-// bounces them anyway. Polls the existing overview endpoint every 15s,
-// piggybacking on the same cadence the pending-docs badge uses.
-function ClientProjectTerminalWatcher() {
+// Background watcher for the project's terminal transition.
+//
+// Behaviour:
+//   1. The first time we see the project in a terminal state ("completed"
+//      or "cancelled" + cancellation_phase "done"), pop a one-time modal
+//      so the client knows they have a 24-hour grace window to download
+//      anything they still need. "One-time" = keyed by projectId in
+//      localStorage, so reloading doesn't reshow the modal.
+//   2. We keep polling. The grace deadline is `project.updated_at + 24h`
+//      (server-side gate uses the same reference). Once that passes,
+//      we sign the client out: DELETE the project cookie, then redirect
+//      to /auth/signin.
+//
+// Same poll cadence as the pending-docs badge (15s, plus visibility-
+// triggered refresh).
+const TERMINAL_MODAL_STORAGE_KEY = "paintpro_project_terminal_modal_seen"
+const GRACE_MS = 24 * 60 * 60 * 1000
+
+function getModalSeenKey(projectId: string) {
+  return `${TERMINAL_MODAL_STORAGE_KEY}:${projectId}`
+}
+
+function ClientProjectTerminalWatcher({
+  onTerminalDetected,
+}: {
+  onTerminalDetected: () => void
+}) {
   const { projectId } = useClientProject()
   const router = useRouter()
 
@@ -144,7 +163,7 @@ function ClientProjectTerminalWatcher() {
     let cancelled = false
     let signedOut = false
 
-    async function signOutIfTerminal() {
+    async function checkTerminalState() {
       if (cancelled || signedOut) return
       try {
         const response = await fetch(
@@ -165,20 +184,40 @@ function ClientProjectTerminalWatcher() {
           status === "completed" ||
           (status === "cancelled" && phase === "done")
         if (!isTerminal) return
+        if (cancelled) return
+
+        // Compute the grace deadline. `updated_at` bumps on the status
+        // flip, so it's a reliable reference. If we can't parse it,
+        // fall back to "now" (safer to extend the grace than cut it).
+        const updatedAtMs = data?.project?.updated_at
+          ? new Date(data.project.updated_at).getTime()
+          : Date.now()
+        const deadlineMs =
+          (Number.isFinite(updatedAtMs) ? updatedAtMs : Date.now()) + GRACE_MS
+
+        // Inform the shell so it can pop the one-time modal. The shell
+        // gates on localStorage so this fires only once per project.
+        onTerminalDetected()
+
+        if (Date.now() < deadlineMs) {
+          // Still within the 24-hour window — let the client keep
+          // working. Next poll will re-check.
+          return
+        }
+
         if (cancelled || signedOut) return
         signedOut = true
 
-        // Drop the project-cookie server-side so a hard refresh doesn't
-        // bounce them right back through the same layout check.
         try {
           await fetch("/api/auth/client-access", { method: "DELETE" })
         } catch {
-          // Best-effort. Even if the cookie clear fails, the layout's
-          // own terminal-status gate will redirect on next load.
+          // Best-effort. The layout's terminal-status gate (also
+          // honouring the 24h window) will catch any stale cookie.
         }
 
-        toast.info("Project has been closed out", {
-          description: "You've been signed out. Thanks for working with us.",
+        toast.info("Access window closed", {
+          description:
+            "Your 24-hour access window has ended. You've been signed out.",
         })
         router.replace("/auth/signin")
       } catch {
@@ -186,13 +225,13 @@ function ClientProjectTerminalWatcher() {
       }
     }
 
-    void signOutIfTerminal()
+    void checkTerminalState()
     const interval = window.setInterval(() => {
-      void signOutIfTerminal()
+      void checkTerminalState()
     }, 15_000)
 
     function handleVisibility() {
-      if (document.visibilityState === "visible") void signOutIfTerminal()
+      if (document.visibilityState === "visible") void checkTerminalState()
     }
     document.addEventListener("visibilitychange", handleVisibility)
 
@@ -201,9 +240,55 @@ function ClientProjectTerminalWatcher() {
       window.clearInterval(interval)
       document.removeEventListener("visibilitychange", handleVisibility)
     }
-  }, [projectId, router])
+  }, [projectId, router, onTerminalDetected])
 
   return null
+}
+
+// One-time deactivation notice. Rendered by the shell when the watcher
+// reports terminal state and the local "seen" flag hasn't been set yet.
+function ProjectConcludedModal({
+  open,
+  onClose,
+  onGoToDocuments,
+}: {
+  open: boolean
+  onClose: () => void
+  onGoToDocuments: () => void
+}) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 backdrop-blur-[2px]">
+      <div className="w-full max-w-md overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
+        <div className="h-1.5 w-full bg-[#00c065]" aria-hidden />
+        <div className="px-5 py-5">
+          <h2 className="text-base font-semibold text-gray-900">
+            Your project has been concluded
+          </h2>
+          <p className="mt-2 text-sm leading-5 text-gray-600">
+            This account will be deactivated in 24 hours. Make sure to
+            download any documents you need before access is revoked.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 bg-gray-50/50 px-5 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 items-center rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
+          >
+            Got it
+          </button>
+          <button
+            type="button"
+            onClick={onGoToDocuments}
+            className="inline-flex h-9 items-center rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#00a054]"
+          >
+            Go to documents
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ClientShell({
@@ -216,13 +301,43 @@ function ClientShell({
   user: SidebarUser
 }) {
   const { open } = useSidebar()
+  const router = useRouter()
+  const { projectId } = useClientProject()
+  const [showConcludedModal, setShowConcludedModal] = useState(false)
+
+  // Wired into the watcher: pop the modal the first time the project
+  // is seen terminal, then never again on this device. The watcher
+  // keeps polling and will handle the eventual signout when the
+  // 24-hour grace ends.
+  const handleTerminalDetected = React.useCallback(() => {
+    if (!projectId) return
+    try {
+      const key = getModalSeenKey(projectId)
+      if (window.localStorage.getItem(key) === "1") return
+      window.localStorage.setItem(key, "1")
+    } catch {
+      // Storage disabled — fall back to "always show" (still gated by
+      // the React state, so it can't reopen mid-session).
+    }
+    setShowConcludedModal((prev) => prev || true)
+  }, [projectId])
 
   return (
     <div className="[--sidebar-width:240px] [--sidebar-width-icon:80px] min-h-screen w-full">
       <AppSidebar role={role} user={user} />
       <ClientPendingDocumentBadge />
       <ClientMessagesBadge />
-      <ClientProjectTerminalWatcher />
+      <ClientProjectTerminalWatcher
+        onTerminalDetected={handleTerminalDetected}
+      />
+      <ProjectConcludedModal
+        open={showConcludedModal}
+        onClose={() => setShowConcludedModal(false)}
+        onGoToDocuments={() => {
+          setShowConcludedModal(false)
+          router.push("/client/documents")
+        }}
+      />
 
       {/* Mobile-only top bar with the hamburger trigger. The sidebar primitive
           renders the desktop sidebar `hidden md:block`, so on phones there's

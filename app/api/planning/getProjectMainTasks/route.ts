@@ -15,7 +15,9 @@ export async function GET(request: Request) {
 
     const { data: projectRow, error: projectError } = await supabaseAdmin
       .from("projects")
-      .select("project_id, project_code, title, status")
+      .select(
+        "project_id, project_code, title, status, scheduled_start_datetime",
+      )
       .eq("project_id", projectId)
       .single();
 
