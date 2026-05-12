@@ -43,3 +43,6 @@ next-env.d.ts
 # ai
 .claude
 .continue
+
+settings.local.json
+new-config.yaml

@@ -96,17 +96,25 @@ export async function POST(req: Request) {
 
   const errors: { materialId: string; details: string }[] = [];
   let updated = 0;
-  let statusAvailable = true;
+  // The rest of the app stores Pascal-case statuses (Active, Archived,
+  // Available) and the materials.status CHECK constraint enforces that
+  // set. Don't try to flip status to a sentinel like "reorder" here.
+  // needed_stock > 0 is the canonical reorder flag — every inventory
+  // surface already keys off it (admin/inventory page filters by
+  // needed_stock, the quick-add modal opens against needed_stock).
+  // Writing status caused the whole UPDATE to fail the CHECK and silently
+  // dropped the needed_stock write along with it.
 
   for (const [materialId, requested] of requestedByMaterial.entries()) {
+    if (!neededStockAvailable) break;
+
     const existingNeed = existingById.get(materialId) ?? 0;
     const next = Math.max(existingNeed, requested);
 
     const update: Record<string, unknown> = {
+      needed_stock: next,
       updated_at: new Date().toISOString(),
     };
-    if (statusAvailable) update.status = "reorder";
-    if (neededStockAvailable) update.needed_stock = next;
 
     const { error: updateError } = await supabaseAdmin
       .from("materials")
@@ -114,46 +122,29 @@ export async function POST(req: Request) {
       .eq("material_id", materialId);
 
     if (updateError) {
-      // Detect missing columns and retry once without them. This way running
-      // the page before the migration just silently no-ops the reorder bits
-      // instead of failing the whole request.
-      if (
-        statusAvailable &&
-        isMissingColumnError(updateError.message, "status")
-      ) {
-        statusAvailable = false;
-        delete update.status;
-      }
-      if (
-        neededStockAvailable &&
-        isMissingColumnError(updateError.message, "needed_stock")
-      ) {
+      // Migration not run yet: needed_stock column missing. Flip the
+      // capability flag so the response can warn the caller and skip
+      // the remaining materials (they'll all hit the same wall).
+      if (isMissingColumnError(updateError.message, "needed_stock")) {
         neededStockAvailable = false;
-        delete update.needed_stock;
+        break;
       }
 
-      const retry = await supabaseAdmin
-        .from("materials")
-        .update(update)
-        .eq("material_id", materialId);
-
-      if (retry.error) {
-        errors.push({
-          materialId,
-          details: retry.error.message,
-        });
-        continue;
-      }
+      errors.push({
+        materialId,
+        details: updateError.message,
+      });
+      continue;
     }
     updated += 1;
   }
 
-  if (!neededStockAvailable || !statusAvailable) {
+  if (!neededStockAvailable) {
     return NextResponse.json(
       {
         updated,
         warning:
-          "materials.status / materials.needed_stock columns are missing — the reorder flag wasn't fully persisted. Run the SQL migration in app/api/materials/markForReorder/route.ts.",
+          "materials.needed_stock column is missing — the reorder flag wasn't persisted. Run the SQL migration in app/api/materials/markForReorder/route.ts.",
       },
       { status: 200 },
     );

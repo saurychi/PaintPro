@@ -945,6 +945,27 @@ export default function MaterialsAssignment() {
         throw new Error(data?.error || "Failed to request restock.");
       }
 
+      // 207 = partial failure: some rows hit a DB error (most commonly a
+      // CHECK / FK violation on materials). Treat it as an error so the
+      // admin actually sees the problem instead of getting a success
+      // toast over silently-skipped rows.
+      if (response.status === 207 || (data?.errors?.length ?? 0) > 0) {
+        const detail =
+          Array.isArray(data?.errors) && data.errors.length > 0
+            ? data.errors[0].details
+            : data?.error;
+        throw new Error(detail || "Some materials could not be marked for reorder.");
+      }
+
+      // Schema-missing case: route succeeded but the needed_stock column
+      // isn't in the DB. Tell the admin so they don't refresh forever
+      // waiting for inventory to reflect a value that was never written.
+      if (typeof data?.warning === "string" && data.warning.length > 0) {
+        toast.warning(data.warning);
+        setRestockRequestedAt(Date.now());
+        return;
+      }
+
       setRestockRequestedAt(Date.now());
       toast.success(
         `Requested restock for ${shortages.length} material${
