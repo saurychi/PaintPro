@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   isWizardCacheDirty,
   getWizardCache,
@@ -155,20 +156,35 @@ export default function WizardExitGuard() {
           subTasks: cache.subTasks,
           materials: cache.materials,
           markupRate: cache.markupRate,
+          downpayment: cache.downpayment,
           status: cache.currentStep,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || "Failed to save project.");
+        // Surface both the high-level error and the server-side
+        // details so the admin doesn't have to dig into the network
+        // tab to learn why a save failed.
+        const message = data?.error || "Failed to save project.";
+        const error = new Error(message);
+        if (typeof data?.details === "string" && data.details.trim()) {
+          (error as Error & { details?: string }).details = data.details;
+        }
+        throw error;
       }
 
       clearWizardCache(projectId);
       navigateAway(pendingUrl);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSaving(false);
-      alert(err?.message || "Save failed. Please try again.");
+      const message =
+        err instanceof Error ? err.message : "Save failed. Please try again.";
+      const description =
+        err instanceof Error
+          ? (err as Error & { details?: string }).details
+          : undefined;
+      toast.error(message, description ? { description } : undefined);
     }
   }
 

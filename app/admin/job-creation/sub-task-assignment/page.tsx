@@ -43,6 +43,11 @@ export type ServiceGroup = {
   id: string;
   projectTaskId: string;
   title: string;
+  // project_task.sort_order — drives the listing order of main task
+  // groups so the page mirrors what was set on the main-task-assignment
+  // step. On cache hits (where the per-task sort_order isn't carried)
+  // we fall back to the cached main-task array index.
+  sortOrder: number;
   scheduledAt?: string;
   finishedAt?: string;
   status: StepStatus;
@@ -201,28 +206,40 @@ export default function SubTaskAssignment() {
         setProjectCode(meta?.projectCode ?? "");
         setProjectTitle(meta?.projectTitle ?? "");
 
-        // Build ServiceGroup[] from cached subtasks
+        // Build ServiceGroup[] from cached subtasks. Pre-seed the map
+        // from `cachedMainTasks` first so group order = the cached main
+        // task array order (which the main-task-assignment page wrote
+        // in the order it received from the API). The CachedMainTask
+        // type doesn't carry sort_order on its own, so we use the
+        // array index as a stable proxy.
         const groupedMap = new Map<string, ServiceGroup>();
 
+        (cachedMainTasks ?? []).forEach((mt, index) => {
+          const seedSubTask = cachedSubTasks.find(
+            (st) => st.mainTaskId === mt.id,
+          );
+          groupedMap.set(mt.id, {
+            id: mt.id,
+            projectTaskId:
+              mt.project_task_id ?? seedSubTask?.projectTaskId ?? "",
+            title: mt.name,
+            sortOrder: index,
+            scheduledAt: undefined,
+            finishedAt: undefined,
+            status: "pending",
+            children: [],
+          });
+        });
+
+        // Cache is authoritative — any subtask whose parent main task
+        // is no longer in `cachedMainTasks` is an orphan and shouldn't
+        // be rendered. The seed loop above already enforces this; we
+        // just skip subtasks whose mainTaskId isn't in the map.
         for (const cached of cachedSubTasks) {
-          const groupId = cached.mainTaskId;
+          const group = groupedMap.get(cached.mainTaskId);
+          if (!group) continue;
 
-          if (!groupedMap.has(groupId)) {
-            // Find the main task title from cachedMainTasks
-            const mainTaskName =
-              cachedMainTasks?.find((t) => t.id === groupId)?.name ?? "";
-            groupedMap.set(groupId, {
-              id: groupId,
-              projectTaskId: cached.projectTaskId,
-              title: mainTaskName,
-              scheduledAt: undefined,
-              finishedAt: undefined,
-              status: "pending",
-              children: [],
-            });
-          }
-
-          groupedMap.get(groupId)!.children.push({
+          group.children.push({
             id: cached.id,
             subTaskId: cached.subTaskId,
             title: cached.title,
@@ -238,13 +255,18 @@ export default function SubTaskAssignment() {
           });
         }
 
-        const groupedServices = Array.from(groupedMap.values()).map((group) => ({
-          ...group,
-          children: [...group.children].sort((a, b) => {
-            const sortDiff = a.sortOrder - b.sortOrder;
-            return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
-          }),
-        }));
+        const groupedServices = Array.from(groupedMap.values())
+          .map((group) => ({
+            ...group,
+            children: [...group.children].sort((a, b) => {
+              const sortDiff = a.sortOrder - b.sortOrder;
+              return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
+            }),
+          }))
+          .sort((a, b) => {
+            const diff = a.sortOrder - b.sortOrder;
+            return diff !== 0 ? diff : a.title.localeCompare(b.title);
+          });
 
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));
@@ -284,10 +306,21 @@ export default function SubTaskAssignment() {
           const groupId = mainTask.main_task_id;
 
           if (!groupedMap.has(groupId)) {
+            // project_task.sort_order is the per-project ordering set
+            // on the main-task-assignment step; falls back to the
+            // catalog default when not overridden, then to 0.
+            const projectTaskSortOrder = Number(
+              row?.project_task?.sort_order ??
+                mainTask.sort_order ??
+                0,
+            );
             groupedMap.set(groupId, {
               id: groupId,
               projectTaskId: row.project_task_id,
               title: mainTask.name,
+              sortOrder: Number.isFinite(projectTaskSortOrder)
+                ? projectTaskSortOrder
+                : 0,
               scheduledAt: undefined,
               finishedAt: undefined,
               status: "pending",
@@ -314,13 +347,18 @@ export default function SubTaskAssignment() {
           });
         }
 
-        const groupedServices = Array.from(groupedMap.values()).map((group) => ({
-          ...group,
-          children: [...group.children].sort((a, b) => {
-            const sortDiff = a.sortOrder - b.sortOrder;
-            return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
-          }),
-        }));
+        const groupedServices = Array.from(groupedMap.values())
+          .map((group) => ({
+            ...group,
+            children: [...group.children].sort((a, b) => {
+              const sortDiff = a.sortOrder - b.sortOrder;
+              return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
+            }),
+          }))
+          .sort((a, b) => {
+            const diff = a.sortOrder - b.sortOrder;
+            return diff !== 0 ? diff : a.title.localeCompare(b.title);
+          });
 
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));
@@ -462,12 +500,18 @@ export default function SubTaskAssignment() {
 
   function handleRemoveSelectedSubTask(mainTaskId: string, subTaskId: string) {
     pushServicesHistory();
-    setServices((prev) =>
-      prev.map((group) => {
-        if (group.id !== mainTaskId) return group;
-        return { ...group, children: group.children.filter((child) => child.id !== subTaskId) };
-      }),
-    );
+    const updated = services.map((group) => {
+      if (group.id !== mainTaskId) return group;
+      return {
+        ...group,
+        children: group.children.filter((child) => child.id !== subTaskId),
+      };
+    });
+    setServices(updated);
+    // Reflect the deletion in the wizard cache right away so downstream
+    // pages (materials, equipment, schedule, …) don't keep rendering
+    // the ghost subtask if the admin navigates without clicking Next.
+    setCachedSubTasks(projectId, buildSubTasksForCacheFrom(updated));
     setSelectedSubTaskKeysForDelete((prev) => {
       const next = new Set(prev);
       next.delete(`${mainTaskId}::${subTaskId}`);
@@ -479,14 +523,14 @@ export default function SubTaskAssignment() {
   function handleRemoveSelectedSubTasks(keys: Set<string>) {
     if (keys.size === 0) return;
     pushServicesHistory();
-    setServices((prev) =>
-      prev.map((group) => ({
-        ...group,
-        children: group.children.filter(
-          (child) => !keys.has(`${group.id}::${child.id}`),
-        ),
-      })),
-    );
+    const updated = services.map((group) => ({
+      ...group,
+      children: group.children.filter(
+        (child) => !keys.has(`${group.id}::${child.id}`),
+      ),
+    }));
+    setServices(updated);
+    setCachedSubTasks(projectId, buildSubTasksForCacheFrom(updated));
     setSelectedSubTaskKeysForDelete(new Set());
     setIsDirty(true); markWizardDirty(projectId);
   }
@@ -641,12 +685,14 @@ export default function SubTaskAssignment() {
     router.push(`/admin/job-creation/main-task-assignment?projectId=${projectId}`);
   }
 
-  /** Build CachedSubTask[] from current services state, preserving fields managed by other pages */
-  function buildSubTasksForCache(): CachedSubTask[] {
+  /** Build CachedSubTask[] from a given services list, preserving fields managed by other pages */
+  function buildSubTasksForCacheFrom(
+    servicesList: ServiceGroup[],
+  ): CachedSubTask[] {
     const existing = getCachedSubTasks(projectId);
     const existingMap = new Map(existing?.map((st) => [st.id, st]) ?? []);
 
-    return services.flatMap((group) =>
+    return servicesList.flatMap((group) =>
       group.children.map((child, index) => {
         const prev = existingMap.get(child.id);
         return {
@@ -664,6 +710,11 @@ export default function SubTaskAssignment() {
         };
       }),
     );
+  }
+
+  /** Build CachedSubTask[] from current services state (handleNext/handleGoBack). */
+  function buildSubTasksForCache(): CachedSubTask[] {
+    return buildSubTasksForCacheFrom(services);
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
