@@ -453,7 +453,15 @@ export default function OverviewPage() {
     }
 
     setOptimisticProjectStatus(projectId, "quotation_pending");
-    router.push(`/admin/job-creation/quotation-generation?projectId=${projectId}`);
+    // Mark the modal complete before the soft navigation so the spinner
+    // doesn't linger across the brief gap before the destination paints.
+    // ?fresh=1 tells the next page the bucket file is already current
+    // and to skip the (expensive) regeneration on mount.
+    setGenerationStep(null);
+    setIsNavigating(null);
+    router.push(
+      `/admin/job-creation/quotation-generation?projectId=${projectId}&fresh=1`,
+    );
   }
 
   return (

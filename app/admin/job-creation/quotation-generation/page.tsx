@@ -55,6 +55,12 @@ export default function JobQuotation() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "";
+  // The overview page appends ?fresh=1 right after it just generated the
+  // PDF. That render took 15-30s on a cold serverless start, so firing
+  // save-generated AGAIN from this page's mount effect is a wasted full
+  // chromium boot — and it's why "Finishing up" felt frozen. When the
+  // flag is set we trust the bucket file and skip the regenerate pass.
+  const skipInitialRegen = searchParams.get("fresh") === "1";
 
   useEffect(() => {
     router.prefetch("/admin/job-creation/overview");
@@ -179,10 +185,14 @@ export default function JobQuotation() {
         // downpayment, which gets saved upstream (cost estimation) and
         // surfaces in the document via the Subtotal / Downpayment / Balance
         // Due rows. Skipped post-sign so the client-signed PDF isn't
-        // overwritten.
+        // overwritten. Also skipped on the first load after the overview
+        // page just generated the file (?fresh=1) — re-running chromium
+        // there is a 15-30s cold-start the user is already waiting on.
+        const isInitialFromOverview = mode === "initial" && skipInitialRegen;
         if (
-          projectStatus === "quotation_pending" ||
-          projectStatus === "grant_access_quotation"
+          !isInitialFromOverview &&
+          (projectStatus === "quotation_pending" ||
+            projectStatus === "grant_access_quotation")
         ) {
           try {
             const regenResponse = await fetch("/api/quotation/save-generated", {
@@ -206,7 +216,7 @@ export default function JobQuotation() {
         setRefreshing(false);
       }
     },
-    [projectId],
+    [projectId, skipInitialRegen],
   );
 
   useEffect(() => {
