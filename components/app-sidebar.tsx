@@ -79,7 +79,20 @@ const adminItems: Item[] = [
       },
     ],
   },
-  { key: "staff", title: "Staff", url: "/admin/staff", icon: Users },
+  {
+    key: "staff",
+    title: "Staff",
+    url: "/admin/staff",
+    icon: Users,
+    subItems: [
+      {
+        key: "staff-invites",
+        title: "Invites",
+        url: "/admin/staff/staff-invite",
+        matchUrls: ["/admin/staff/staff-invite"],
+      },
+    ],
+  },
   {
     key: "schedule",
     title: "Schedule",

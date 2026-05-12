@@ -188,7 +188,7 @@ export default function Staff() {
   )
 
   const uniqueStatuses = useMemo(
-    () => [...new Set(employees.map((e) => e.status).filter((s) => s !== "archived"))].sort(),
+    () => [...new Set(employees.map((e) => e.status).filter((s) => s !== "inactive"))].sort(),
     [employees],
   )
 
@@ -198,7 +198,7 @@ export default function Staff() {
   const filteredEmployees = useMemo(() => {
     let list = showArchived
       ? employees
-      : employees.filter((e) => e.status !== "archived")
+      : employees.filter((e) => e.status !== "inactive")
 
     if (statusFilter)   list = list.filter((e) => e.status === statusFilter)
     if (specialtyFilter) list = list.filter((e) =>
@@ -260,11 +260,11 @@ export default function Staff() {
       const res = await fetch("/api/staff", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: emp.id, status: "archived" }),
+        body: JSON.stringify({ id: emp.id, status: "inactive" }),
       })
       if (res.ok) {
         setEmployees((prev) =>
-          prev.map((e) => (e.id === emp.id ? { ...e, status: "archived" } : e)),
+          prev.map((e) => (e.id === emp.id ? { ...e, status: "inactive" } : e)),
         )
       }
     } catch (e) {
@@ -396,7 +396,7 @@ export default function Staff() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredEmployees.map((emp) => {
-                  const isArchived = emp.status === "archived"
+                  const isArchived = emp.status === "inactive"
 
                   return (
                     <tr
@@ -471,7 +471,7 @@ export default function Staff() {
                             "inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold",
                             emp.status === "active"
                               ? "bg-emerald-50 text-emerald-700"
-                              : emp.status === "archived"
+                              : emp.status === "inactive"
                                 ? "bg-gray-100 text-gray-500"
                                 : "bg-amber-50 text-amber-700",
                           ].join(" ")}
