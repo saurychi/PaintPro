@@ -142,17 +142,33 @@ export async function POST(request: Request) {
     // with many remaining subtasks the cascade can take 1-3s to
     // chunk through; making it block the response was the main
     // source of the perceived "Finishing..." lag.
+    //
+    // The gate accepts either bound: a subtask whose scheduled_end was
+    // never populated (manual data tweaks, partially-migrated rows)
+    // should still trigger a cascade as long as we know where it sat.
+    // Same the other way around. Without this relaxation, finishing a
+    // subtask with a missing end silently skipped the cascade and the
+    // chain underneath stayed at its old slots.
+    const finishingAnchorStartMs =
+      originalScheduledStartDate?.getTime() ?? null;
+    const finishingAnchorEndMs =
+      originalScheduledEndDate?.getTime() ?? null;
+    const finishingAnchorMs =
+      finishingAnchorStartMs ?? finishingAnchorEndMs;
+
     if (
       isCompleting &&
-      originalScheduledEndDate &&
+      finishingAnchorMs !== null &&
       existingSubTask.project_task_id
     ) {
       const projectTaskId = existingSubTask.project_task_id;
-      const originalScheduledEndMs = originalScheduledEndDate.getTime();
-      // Fall back to the end timestamp if start is missing, so the
-      // cascade can still anchor itself on a sensible value.
+      // Bounds default to one another when only one side is known so
+      // cascadeShiftLaterSubtasks's MIN(start, end) anchor still
+      // resolves to the same moment we just decided to use.
       const originalScheduledStartMs =
-        originalScheduledStartDate?.getTime() ?? originalScheduledEndMs;
+        finishingAnchorStartMs ?? finishingAnchorEndMs ?? finishingAnchorMs;
+      const originalScheduledEndMs =
+        finishingAnchorEndMs ?? finishingAnchorStartMs ?? finishingAnchorMs;
 
       void cascadeShiftLaterSubtasks({
         anchorSubTaskId: projectSubTaskId,
