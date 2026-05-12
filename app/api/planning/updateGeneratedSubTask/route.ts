@@ -7,6 +7,7 @@ import {
   buildUnavailableDateSet,
   snapStartPastUnavailableSpan,
 } from "@/lib/schedule/snapPastUnavailable";
+import { cascadeShiftLaterSubtasks } from "@/lib/schedule/cascadeShift";
 
 type MaterialInput = {
   materialId?: string;
@@ -76,6 +77,33 @@ export async function POST(request: Request) {
         ? addHoursToIso(scheduledStartDatetime, estimatedHours)
         : body.scheduledEndDatetime;
 
+    // Snapshot the OLD scheduled bounds before the update so the
+    // cascade can anchor on where this subtask used to sit and shift
+    // every later sibling by the corresponding delta.
+    const { data: existingRows } = await supabaseAdmin
+      .from("project_sub_task")
+      .select(
+        "project_sub_task_id, project_task_id, scheduled_start_datetime, scheduled_end_datetime",
+      )
+      .eq("project_sub_task_id", projectSubTaskId)
+      .limit(1);
+
+    const existing = existingRows?.[0] ?? null;
+    const previousStartDate = existing?.scheduled_start_datetime
+      ? new Date(existing.scheduled_start_datetime)
+      : null;
+    const previousEndDate = existing?.scheduled_end_datetime
+      ? new Date(existing.scheduled_end_datetime)
+      : null;
+    const previousStartMs =
+      previousStartDate && !Number.isNaN(previousStartDate.getTime())
+        ? previousStartDate.getTime()
+        : null;
+    const previousEndMs =
+      previousEndDate && !Number.isNaN(previousEndDate.getTime())
+        ? previousEndDate.getTime()
+        : null;
+
     const { error: subTaskError } = await supabaseAdmin
       .from("project_sub_task")
       .update({
@@ -95,6 +123,45 @@ export async function POST(request: Request) {
         },
         { status: 500 },
       );
+    }
+
+    // Cascade-shift every later subtask so the chain stays consistent
+    // with the edited end. Fired as a background task: each shift
+    // emits a realtime UPDATE the dashboard patches in place, so the
+    // response can return as soon as the primary write lands.
+    if (previousStartMs !== null && previousEndMs !== null) {
+      const newEndDate = scheduledEndDatetime
+        ? new Date(scheduledEndDatetime)
+        : null;
+      const newEndMs =
+        newEndDate && !Number.isNaN(newEndDate.getTime())
+          ? newEndDate.getTime()
+          : null;
+
+      if (newEndMs !== null) {
+        void cascadeShiftLaterSubtasks({
+          anchorSubTaskId: projectSubTaskId,
+          projectTaskId,
+          originalScheduledStartMs: previousStartMs,
+          originalScheduledEndMs: previousEndMs,
+          referenceEndMs: newEndMs,
+          timestampIso: timestamp,
+        })
+          .then((result) => {
+            if (result.error) {
+              console.error(
+                "[updateGeneratedSubTask] background cascade shift failed:",
+                result.error,
+              );
+            }
+          })
+          .catch((err: unknown) => {
+            console.error(
+              "[updateGeneratedSubTask] background cascade shift threw:",
+              err instanceof Error ? err.message : String(err),
+            );
+          });
+      }
     }
 
     const { error: staffDeleteError } = await supabaseAdmin
