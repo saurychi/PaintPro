@@ -6,7 +6,10 @@ import {
   formatProjectTimeReferenceLabel,
   parseProjectTimeReferenceInput,
 } from "@/lib/time/projectTimeReference";
-import { useProjectTimeReference } from "@/lib/time/useProjectTimeReference";
+// Mutator hook. Reserved for the Settings panel — every other surface
+// imports `useProjectTimeReference` (the read-only variant) so the
+// simulated workday clock can only be changed from here.
+import { useProjectTimeReferenceSettingsControls } from "@/lib/time/useProjectTimeReference";
 
 const btnBase =
   "inline-flex items-center justify-center rounded-lg text-sm font-semibold shadow-sm transition-all duration-200 ease-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#00c065]/25";
@@ -15,7 +18,7 @@ const btnPrimary = `${btnBase} bg-[#00c065] px-3 h-9 text-white hover:bg-[#00a05
 
 export default function ProjectTimeReferenceSettings() {
   const { clearReferenceIso, isLoaded, referenceIso, saveReferenceIso } =
-    useProjectTimeReference();
+    useProjectTimeReferenceSettingsControls();
 
   const activeModeLabel = useMemo(() => {
     if (!isLoaded) return "Loading...";
