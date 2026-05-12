@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useClientProject } from "./ClientShellClient";
 import DashboardClock from "@/components/dashboard/dashboardClock";
@@ -350,7 +349,6 @@ export default function ClientDashboardPage() {
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [mainTasks, setMainTasks] = useState<Record<string, unknown>[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [openProcessIds, setOpenProcessIds] = useState<Set<string>>(new Set());
   const [openSubtaskIds, setOpenSubtaskIds] = useState<Set<string>>(new Set());
@@ -367,7 +365,6 @@ export default function ClientDashboardPage() {
     async function load() {
       try {
         setLoadingDetails(true);
-        setFetchError(null);
 
         const res = await fetch(
           `/api/planning/getProjectOverview?projectId=${encodeURIComponent(runForId)}`,
@@ -378,9 +375,8 @@ export default function ClientDashboardPage() {
 
         if (!res.ok) {
           const msg =
-            [data?.error, data?.details].filter(Boolean).join(" — ") ||
+            [data?.error, data?.details].filter(Boolean).join(" - ") ||
             "Failed to load project data.";
-          setFetchError(msg);
           toast.error("Could not load project", { description: msg });
           return;
         }
@@ -397,7 +393,6 @@ export default function ClientDashboardPage() {
         if (cancelled || runForId !== projectId) return;
         const msg =
           err instanceof Error ? err.message : "Failed to load project data.";
-        setFetchError(msg);
         toast.error("Could not load project", { description: msg });
       } finally {
         if (!cancelled && runForId === projectId) {
@@ -486,11 +481,6 @@ export default function ClientDashboardPage() {
     );
   }
 
-  const projectTitle = readString(project?.title) || "Your Project";
-  const projectCode =
-    readString(project?.project_code, project?.projectCode) || "—";
-  const siteAddress = readString(project?.site_address, project?.siteAddress);
-
   return (
     // Below md: natural document flow with scroll. md+: locked-screen layout
     // identical to before so desktop still feels app-like.
@@ -498,32 +488,11 @@ export default function ClientDashboardPage() {
       <div className="flex flex-col gap-4 p-3 sm:p-4 md:h-full md:p-6">
         {/* Header */}
         <div className="flex shrink-0 items-start justify-between gap-4">
-          <div>
-            <h1
-              className="text-xl sm:text-2xl font-semibold"
-              style={{ color: "var(--cp-text)" }}>
-              {projectTitle}
-            </h1>
-            <div
-              className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm"
-              style={{ color: "var(--cp-text-muted)" }}>
-              <span
-                className="font-mono font-medium"
-                style={{ color: "var(--cp-text-2)" }}>
-                {projectCode}
-              </span>
-              {siteAddress ? <span>{siteAddress}</span> : null}
-              {fetchError ? (
-                <span style={{ color: "var(--cp-danger)" }}>{fetchError}</span>
-              ) : null}
-              {loadingDetails ? (
-                <Loader2
-                  className="h-4 w-4 animate-spin"
-                  style={{ color: "var(--cp-text-faint)" }}
-                />
-              ) : null}
-            </div>
-          </div>
+          <h1
+            className="text-xl sm:text-2xl font-semibold"
+            style={{ color: "var(--cp-text)" }}>
+            Report
+          </h1>
           <DashboardClock />
         </div>
 
