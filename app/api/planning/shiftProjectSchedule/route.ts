@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { listScheduleUnavailableDays } from "@/lib/schedule/unavailableDays";
+import { buildUnavailableDateSet } from "@/lib/schedule/snapPastUnavailable";
+import {
+  placeWorkSpan,
+  snapToNextWorkingMoment,
+} from "@/lib/schedule/workHours";
 
 // POST /api/planning/shiftProjectSchedule
 // Body: { projectId: string, offsetMs: number }
@@ -12,6 +18,12 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 // early or late versus the original plan.
 //
 // Negative offsetMs pulls the schedule earlier; positive pushes it later.
+//
+// Both the project and the subtasks are run through the same work-hour
+// helpers as the rest of the scheduler (snapToNextWorkingMoment +
+// placeWorkSpan) so a kickoff at 17:00 / on a Sunday / inside lunch
+// can't persist a "starts at 5 PM" / similarly invalid value. This was
+// the root cause of "Start of Work shows 5:00 PM" after a late kickoff.
 
 export const runtime = "nodejs";
 
@@ -19,6 +31,7 @@ type SubTaskRow = {
   project_sub_task_id: string;
   scheduled_start_datetime: string | null;
   scheduled_end_datetime: string | null;
+  estimated_hours: number | null;
 };
 
 function shiftIso(value: string | null, offsetMs: number): string | null {
@@ -62,11 +75,25 @@ export async function POST(request: NextRequest) {
     const taskIds = (tasks ?? []).map((t) => t.project_task_id as string);
     let shifted = 0;
 
+    // Load the blocked-day set once. snapToNextWorkingMoment and
+    // placeWorkSpan both use it to push past holidays / manual blocks.
+    let unavailableSet = new Set<string>();
+    try {
+      const days = await listScheduleUnavailableDays(
+        request.headers.get("cookie"),
+      );
+      unavailableSet = buildUnavailableDateSet(
+        days.map((day) => day.blockedDate),
+      );
+    } catch {
+      // Soft failure: the snap still respects Sunday + work hours.
+    }
+
     if (taskIds.length > 0) {
       const { data: subTasks, error: subError } = await supabaseAdmin
         .from("project_sub_task")
         .select(
-          "project_sub_task_id, scheduled_start_datetime, scheduled_end_datetime",
+          "project_sub_task_id, scheduled_start_datetime, scheduled_end_datetime, estimated_hours",
         )
         .in("project_task_id", taskIds);
 
@@ -85,12 +112,49 @@ export async function POST(request: NextRequest) {
         const chunk = updatable.slice(i, i + CHUNK_SIZE);
         const results = await Promise.all(
           chunk.map((row) => {
-            const newStart = shiftIso(row.scheduled_start_datetime, offsetMs);
-            const newEnd = shiftIso(row.scheduled_end_datetime, offsetMs);
-            // Skip rows that have neither time set — nothing to shift.
-            if (newStart === null && newEnd === null) {
+            const naiveStart = shiftIso(row.scheduled_start_datetime, offsetMs);
+            const naiveEnd = shiftIso(row.scheduled_end_datetime, offsetMs);
+            if (naiveStart === null && naiveEnd === null) {
               return Promise.resolve({ error: null as unknown as Error });
             }
+
+            // Run the shifted start through snapToNextWorkingMoment so a
+            // naive value at 17:00 (the common "started late" case) rolls
+            // forward to the next valid working second. placeWorkSpan
+            // re-derives the end from the original work hours so the row
+            // stays inside the work calendar instead of bleeding past it.
+            let newStart = naiveStart;
+            let newEnd = naiveEnd;
+            if (naiveStart) {
+              const beforeSnap = new Date(naiveStart);
+              if (!Number.isNaN(beforeSnap.getTime())) {
+                const afterSnap = snapToNextWorkingMoment(
+                  beforeSnap,
+                  unavailableSet,
+                );
+
+                const estimatedWorkHours = Number(row.estimated_hours);
+                const durationHours =
+                  Number.isFinite(estimatedWorkHours) &&
+                  estimatedWorkHours > 0
+                    ? estimatedWorkHours
+                    : 0;
+
+                if (durationHours > 0) {
+                  const placed = placeWorkSpan(
+                    afterSnap,
+                    durationHours,
+                    unavailableSet,
+                  );
+                  newStart = placed.start.toISOString();
+                  newEnd = placed.end.toISOString();
+                } else {
+                  newStart = afterSnap.toISOString();
+                  newEnd = naiveEnd;
+                }
+              }
+            }
+
             return supabaseAdmin
               .from("project_sub_task")
               .update({
@@ -133,8 +197,34 @@ export async function POST(request: NextRequest) {
     }
 
     if (project) {
-      const newStart = shiftIso(project.scheduled_start_datetime, offsetMs);
-      const newEnd = shiftIso(project.scheduled_end_datetime, offsetMs);
+      const naiveStart = shiftIso(project.scheduled_start_datetime, offsetMs);
+      const naiveEnd = shiftIso(project.scheduled_end_datetime, offsetMs);
+
+      // Same snap as the subtasks so the project header on the dashboard
+      // (Start of Work) never reads a stray boundary value like 17:00.
+      let newStart = naiveStart;
+      let newEnd = naiveEnd;
+      if (naiveStart) {
+        const beforeSnap = new Date(naiveStart);
+        if (!Number.isNaN(beforeSnap.getTime())) {
+          const afterSnap = snapToNextWorkingMoment(
+            beforeSnap,
+            unavailableSet,
+          );
+          newStart = afterSnap.toISOString();
+        }
+      }
+      if (naiveEnd) {
+        const beforeSnap = new Date(naiveEnd);
+        if (!Number.isNaN(beforeSnap.getTime())) {
+          const afterSnap = snapToNextWorkingMoment(
+            beforeSnap,
+            unavailableSet,
+          );
+          newEnd = afterSnap.toISOString();
+        }
+      }
+
       const { error: updateError } = await supabaseAdmin
         .from("projects")
         .update({

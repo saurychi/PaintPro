@@ -13,7 +13,11 @@ import {
   type CostEstimationMainTask,
 } from "@/lib/planning/costEstimation";
 import { getPlanningCatalog } from "@/lib/planning/catalogCache";
-import { placeWorkSpan } from "@/lib/schedule/workHours";
+import {
+  placeWorkSpan,
+  snapToNextWorkingMoment,
+} from "@/lib/schedule/workHours";
+import { buildUnavailableDateSet } from "@/lib/schedule/snapPastUnavailable";
 
 type UserRole = "staff" | "manager" | "admin" | "client";
 type UserStatus = "active" | "inactive" | "pending";
@@ -641,10 +645,31 @@ export async function POST(req: Request) {
 
   // Same set the schedule pages render — manual blocks + public holidays —
   // so the fallback recompute on save also lands on a valid working day.
-  // Manual mode has no tasks to schedule, so skip both DB calls.
-  const unavailableDays = isManualMode
-    ? []
-    : await listScheduleUnavailableDays(req.headers.get("cookie"));
+  // We need this for ALL flows (manual + AI) now because we also snap
+  // the project's scheduled_start_datetime through it below.
+  const unavailableDays = await listScheduleUnavailableDays(
+    req.headers.get("cookie"),
+  );
+  const unavailableSet = buildUnavailableDateSet(
+    unavailableDays.map((day) => day.blockedDate),
+  );
+
+  // Defense-in-depth: clamp the project's scheduled_start_datetime to a
+  // valid working moment before we persist it. If a client somehow
+  // submits a 17:00, Sunday, lunch, or blocked-day value (legacy data,
+  // simulated clock at boundary, etc.), it gets rolled forward to the
+  // next valid working second. The Dashboard's "Start of Work" reads
+  // this column directly, so without the snap we end up showing a
+  // start time outside the work calendar.
+  let normalizedScheduledStartDatetime: string | null =
+    scheduledStartDatetime;
+  if (normalizedScheduledStartDatetime) {
+    const beforeSnap = new Date(normalizedScheduledStartDatetime);
+    if (!Number.isNaN(beforeSnap.getTime())) {
+      const afterSnap = snapToNextWorkingMoment(beforeSnap, unavailableSet);
+      normalizedScheduledStartDatetime = afterSnap.toISOString();
+    }
+  }
 
   const fallbackProjectSchedule = isManualMode
     ? { scheduledItems: [], projectScheduledEndDatetime: null as string | null }
@@ -685,7 +710,7 @@ export async function POST(req: Request) {
       title,
       description,
       site_address: siteAddress,
-      scheduled_start_datetime: scheduledStartDatetime,
+      scheduled_start_datetime: normalizedScheduledStartDatetime,
       scheduled_end_datetime: resolvedScheduledEndDatetime,
       status: projectStatus,
       priority: projectPriority,
@@ -711,12 +736,12 @@ export async function POST(req: Request) {
       );
     }
 
-    if (scheduledStartDatetime && resolvedScheduledEndDatetime) {
+    if (normalizedScheduledStartDatetime && resolvedScheduledEndDatetime) {
       const { error: projectScheduleInsertError } = await supabaseAdmin
         .from("project_schedule")
         .insert({
           project_id: insertedProject.project_id,
-          start_datetime: scheduledStartDatetime,
+          start_datetime: normalizedScheduledStartDatetime,
           end_datetime: resolvedScheduledEndDatetime,
           status: "scheduled",
           notes: null,
