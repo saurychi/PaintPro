@@ -87,6 +87,20 @@ export async function POST(request: NextRequest) {
     if (payload.supplier_id === "") payload.supplier_id = null;
     if (payload.location_id === "") payload.location_id = null;
 
+    // Strip materials-only columns when saving equipment. The shared
+    // InventoryModal renders some of these fields on the Equipment tab
+    // for UI parity (Date Purchased especially), but the `equipment`
+    // table doesn't have those columns and Postgres rejects the whole
+    // INSERT with a "column does not exist" error if any of them leak
+    // through. This is the root of "adding equipment doesn't work".
+    if (type === "equipment") {
+      delete payload.date_purchased;
+      delete payload.unit_cost;
+      delete payload.reorder_point;
+      delete payload.current_in_stock;
+      delete payload.needed_stock;
+    }
+
     if (mode === "add") {
       // Don't let the caller pre-set the primary key or timestamps —
       // the DB defaults handle them.

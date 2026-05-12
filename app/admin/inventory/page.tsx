@@ -134,6 +134,9 @@ export default function AdminInventory() {
     const idField = type === 'materials' ? 'material_id' : 'equipment_id'
 
     const payload = { ...data }
+    // Strip joined-row objects (they come back from the SELECT with
+    // joined tag/supplier/location so the modal can label them, but
+    // Supabase rejects them on insert because they aren't real columns).
     delete payload.tag
     delete payload.supplier
     delete payload.location
@@ -141,6 +144,21 @@ export default function AdminInventory() {
     if (payload.tag_id === "") payload.tag_id = null;
     if (payload.supplier_id === "") payload.supplier_id = null;
     if (payload.location_id === "") payload.location_id = null;
+
+    // The shared InventoryModal renders a "Date Purchased" input on the
+    // Equipment tab too, but the `equipment` table doesn't have that
+    // column (it lives on `materials` only). Without this strip the
+    // insert errors out with 'column equipment.date_purchased does not
+    // exist' and the user sees a generic "Failed to save item" toast
+    // with no way to tell what's wrong. Drop the field for equipment
+    // so the form keeps the UX while the insert remains valid.
+    if (type === 'equipment') {
+      delete payload.date_purchased
+      delete payload.unit_cost
+      delete payload.reorder_point
+      delete payload.current_in_stock
+      delete payload.needed_stock
+    }
 
     try {
       if (mode === 'add') {
@@ -154,9 +172,16 @@ export default function AdminInventory() {
       setModalConfig({ isOpen: false, mode: 'view', item: null })
       fetchInventory()
       window.dispatchEvent(new CustomEvent("materials:changed"))
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error saving to ${table}:`, error)
-      alert(`Failed to save item. Check console for details.`)
+      // Surface the Supabase error message directly so the user can tell
+      // schema / constraint / permission failures apart instead of always
+      // seeing the same opaque "check console" toast.
+      const detail =
+        error instanceof Error
+          ? error.message
+          : (error as { message?: string })?.message ?? "Unknown error"
+      alert(`Failed to save ${type === 'materials' ? 'material' : 'equipment'}: ${detail}`)
     }
   }
 
