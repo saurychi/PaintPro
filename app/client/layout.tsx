@@ -23,6 +23,7 @@ type ProjectAccessRow = {
   client_id: string | null
   status: string | null
   cancellation_phase: string | null
+  updated_at: string | null
 }
 
 type ClientProfileRow = {
@@ -51,7 +52,7 @@ async function getProjectAccessSidebarUser(
   const { data: project, error: projectError } = await supabaseAdmin
     .from("projects")
     .select(
-      "project_id, project_code, client_id, status, cancellation_phase",
+      "project_id, project_code, client_id, status, cancellation_phase, updated_at",
     )
     .eq("project_id", projectId)
     .maybeSingle<ProjectAccessRow>()
@@ -59,19 +60,23 @@ async function getProjectAccessSidebarUser(
   if (projectError) throw projectError
   if (!project) return null
 
-  // Terminal projects revoke code-based client access — same gate as
-  // /api/auth/client-access. "Terminal" = the work is fully closed out:
-  // either status flipped to "completed" or it was cancelled and the
-  // post-cancel wrap-up reached cancellation_phase "done". Either way
-  // there's no further client-facing action left, so we bounce them
-  // back to sign-in.
+  // Terminal projects keep a 24-hour grace window so the client can
+  // still pull their documents after the admin concludes. Same logic
+  // as /api/auth/client-access. After the window expires, the gate
+  // returns null and the layout redirects to sign-in.
   const status = String(project.status ?? "").trim().toLowerCase()
   const phase = String(project.cancellation_phase ?? "").trim().toLowerCase()
-  if (
-    status === "completed" ||
-    (status === "cancelled" && phase === "done")
-  ) {
-    return null
+  const isTerminal =
+    status === "completed" || (status === "cancelled" && phase === "done")
+  if (isTerminal) {
+    const updatedAtMs = project.updated_at
+      ? new Date(project.updated_at).getTime()
+      : 0
+    const ageMs = Date.now() - updatedAtMs
+    const GRACE_MS = 24 * 60 * 60 * 1000
+    if (!Number.isFinite(updatedAtMs) || ageMs > GRACE_MS) {
+      return null
+    }
   }
 
   if (!project.client_id) {
