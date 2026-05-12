@@ -25,6 +25,20 @@ async function resolveLaunchArgs() {
   if (cachedLaunchArgs) return cachedLaunchArgs;
 
   if (isServerless()) {
+    // @sparticuz/chromium detects Lambda by sniffing AWS_EXECUTION_ENV /
+    // AWS_LAMBDA_JS_RUNTIME (see node_modules/@sparticuz/chromium/build/
+    // helper.js). Vercel sets AWS_LAMBDA_FUNCTION_NAME but NOT either of
+    // those, so the package treats us as a non-Lambda host: it skips
+    // `setupLambdaEnvironment()` and never inflates `al2023.tar.br`. The
+    // chromium binary then crashes with `libnss3.so: cannot open shared
+    // object file` because its runtime libs never made it onto disk.
+    // Spoof the env var before the import so the module-load-time
+    // detection (and the later executablePath() lib extraction) both
+    // take the AL2023 path.
+    if (process.env.VERCEL && !process.env.AWS_EXECUTION_ENV) {
+      process.env.AWS_EXECUTION_ENV = "AWS_Lambda_nodejs20.x";
+    }
+
     const { default: chromium } = await import("@sparticuz/chromium");
     cachedLaunchArgs = {
       args: chromium.args,
