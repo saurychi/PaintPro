@@ -44,6 +44,7 @@ type ServiceStep = {
   id: string;
   subTaskId: string;
   title: string;
+  sortOrder: number;
   status: "pending" | "active" | "done";
   assignedTo?: string;
   equipments: AssignedEquipment[];
@@ -90,6 +91,7 @@ function buildServiceGroupsFromCache(
       id: st.id,
       subTaskId: st.subTaskId,
       title: st.title,
+      sortOrder: st.sortOrder ?? 0,
       status: "pending",
       assignedTo: "",
       equipments: st.equipments.map((eq) => ({
@@ -104,7 +106,7 @@ function buildServiceGroupsFromCache(
 
   return Array.from(groupedMap.values()).map((group) => ({
     ...group,
-    children: [...group.children].sort((a, b) => a.title.localeCompare(b.title)),
+    children: [...group.children].sort((a, b) => a.sortOrder - b.sortOrder),
   }));
 }
 
@@ -119,7 +121,12 @@ export default function EquipmentAssignmentPage() {
   }, [router]);
 
   const [services, setServices] = useState<ServiceGroup[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Skip the loading flash on Go Back / repeat visits.
+  const [loading, setLoading] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const cached = getCachedSubTasks(projectId);
+    return !cached || cached.length === 0;
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [isDirty, setIsDirty] = useState(false);
@@ -164,9 +171,13 @@ export default function EquipmentAssignmentPage() {
     }
 
     try {
+      // Spinner only when cache is empty. Repeat visits render from
+      // cache synchronously a few lines down, no need to flash.
+      const cachedAtStart = getCachedSubTasks(projectId);
+      const hasCacheAtStart = !!cachedAtStart && cachedAtStart.length > 0;
       if (forceRefresh) {
         setRefreshing(true);
-      } else {
+      } else if (!hasCacheAtStart) {
         setLoading(true);
       }
 
@@ -223,6 +234,7 @@ export default function EquipmentAssignmentPage() {
           id: row.project_sub_task_id,
           subTaskId: row.sub_task_id,
           title: subTask.description,
+          sortOrder: Number(row.sort_order ?? 0),
           status:
             row.status === "done" ||
             row.status === "active" ||
@@ -244,9 +256,7 @@ export default function EquipmentAssignmentPage() {
 
       const groupedServices = Array.from(groupedMap.values()).map((group) => ({
         ...group,
-        children: [...group.children].sort((a, b) =>
-          a.title.localeCompare(b.title),
-        ),
+        children: [...group.children].sort((a, b) => a.sortOrder - b.sortOrder),
       }));
 
       // Cache the fetched subtasks so subsequent visits are instant

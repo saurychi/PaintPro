@@ -231,7 +231,17 @@ export default function MaterialsAssignment() {
   }, [router]);
 
   const [services, setServices] = useState<ServiceGroup[]>([]);
-  const [loadingMaterials, setLoadingMaterials] = useState(true);
+  // Skip the loading spinner on repeat visits — when either materials
+  // or the main-task list is already cached, the effect below renders
+  // from cache without needing a fetch.
+  const [loadingMaterials, setLoadingMaterials] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const cachedMaterials = getCachedMaterials(projectId);
+    const cachedMainTasks = getCachedMainTasks(projectId);
+    const hasMaterials = !!cachedMaterials && cachedMaterials.length > 0;
+    const hasMainTasks = !!cachedMainTasks && cachedMainTasks.length > 0;
+    return !hasMaterials && !hasMainTasks;
+  });
   const [loadingMaterialStocks, setLoadingMaterialStocks] = useState(false);
   const [stockLoadError, setStockLoadError] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -400,16 +410,25 @@ export default function MaterialsAssignment() {
     });
   }, []);
 
-  const loadProjectTaskMaterials = useCallback(async () => {
+  const loadProjectTaskMaterials = useCallback(async (cacheOnly = false) => {
     if (!projectId) {
       setLoadingMaterials(false);
       return;
     }
 
     try {
-      setLoadingMaterials(true);
+      // Only show the loading spinner when there's actually nothing
+      // to render. Repeat visits (Go Back, switching between wizard
+      // steps) already have the cache populated, so the cache read a
+      // few lines down can fill the UI before paint without a flash.
+      const cachedMaterialsAtStart = getCachedMaterials(projectId);
+      const cachedMainTasksAtStart = getCachedMainTasks(projectId);
+      const hasAnyCache =
+        (cachedMaterialsAtStart?.length ?? 0) > 0 ||
+        (cachedMainTasksAtStart?.length ?? 0) > 0;
+      if (!hasAnyCache) setLoadingMaterials(true);
       setLoadingMaterialStocks(false);
-      setStockLoadError(false);
+      if (!cacheOnly) setStockLoadError(false);
 
       await ensureWizardCacheHydrated(projectId);
 
@@ -436,10 +455,35 @@ export default function MaterialsAssignment() {
       if (hasCachedMaterials || hasCachedTasks) {
         // Show cached materials immediately, then refresh only the live stock
         // fields so the user can see progress while inventory data loads.
-        const groupedServices = buildCachedServiceGroups(
+        let groupedServices = buildCachedServiceGroups(
           cachedMaterials ?? [],
           cachedMainTasks,
         );
+
+        // For a cache-only refresh, also pull stock from the cached
+        // material catalog (refData) instead of hitting the inventory
+        // API. Keeps the shortage badges populated with whatever stock
+        // value the cache has, even though no DB lookup is performed.
+        if (cacheOnly) {
+          const cachedRef = getCachedRefData(projectId);
+          const catalog = cachedRef?.materialCatalog ?? [];
+          if (catalog.length > 0) {
+            const cachedStockMap = new Map<string, MaterialStockInfo>();
+            for (const item of catalog) {
+              if (!item.material_id) continue;
+              cachedStockMap.set(item.material_id, {
+                stock: Number(
+                  item.current_in_stock ?? item.current_stock ?? 0,
+                ),
+                reorder: Number(item.reorder_point ?? 0),
+              });
+            }
+            groupedServices = applyMaterialStocks(
+              groupedServices,
+              cachedStockMap,
+            );
+          }
+        }
 
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));
@@ -449,6 +493,12 @@ export default function MaterialsAssignment() {
         redoStackRef.current = [];
 
         setLoadingMaterials(false);
+
+        // Refresh button is cache-only: skip the live-stock fetch so
+        // the page mirrors exactly what the wizard cache holds. The
+        // initial mount path (cacheOnly=false) still hits the API.
+        if (cacheOnly) return;
+
         setLoadingMaterialStocks(true);
 
         try {
@@ -490,6 +540,16 @@ export default function MaterialsAssignment() {
           setLoadingMaterialStocks(false);
         }
 
+        return;
+      }
+
+      // ── Cache miss ──
+      // For a cache-only refresh, render an empty state instead of
+      // falling through to the API — the whole point of the refresh
+      // button is to mirror the cache, not to bypass it.
+      if (cacheOnly) {
+        setServices([]);
+        setLoadingMaterials(false);
         return;
       }
 
@@ -631,8 +691,8 @@ export default function MaterialsAssignment() {
     }
     setRefreshing(true);
     try {
-      await loadProjectTaskMaterials();
-      toast.success("Materials refreshed.");
+      await loadProjectTaskMaterials(true);
+      toast.success("Materials refreshed from cache.");
     } catch {
       // toast already shown in loader
     } finally {
@@ -1117,14 +1177,11 @@ export default function MaterialsAssignment() {
                     title={
                       isDirty
                         ? "Refresh will discard unsaved changes."
-                        : undefined
+                        : "Refresh from cache"
                     }
-                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25"
                   >
-                    <RefreshCw
-                      className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
-                    />
-                    Refresh
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
                   </button>
 
                   <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">

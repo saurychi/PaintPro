@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Loader2,
   Plus,
+  RefreshCw,
   X,
   GripVertical,
 } from "lucide-react";
@@ -96,7 +97,15 @@ export default function SubTaskAssignment() {
   }, [router]);
 
   const [services, setServices] = useState<ServiceGroup[]>([]);
-  const [loadingSubTasks, setLoadingSubTasks] = useState(true);
+  // Skip the loading flash when navigating back to a page we've already
+  // hydrated. If the cache has subtasks for this project, the effect
+  // below will render from cache synchronously — no spinner needed.
+  const [loadingSubTasks, setLoadingSubTasks] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const cached = getCachedSubTasks(projectId);
+    return !cached || cached.length === 0;
+  });
+  const [refreshing, setRefreshing] = useState(false);
   const [projectCode, setProjectCode] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
 
@@ -187,17 +196,30 @@ export default function SubTaskAssignment() {
   }
 
   // ── load project subtasks ──────────────────────────────────────────────────
-  useEffect(() => {
-    async function loadProjectSubTasks() {
-      if (!projectId) {
-        toast.error("Missing project ID.");
-        setLoadingSubTasks(false);
-        return;
-      }
+  // Defined in component scope (not inside the effect) so the refresh
+  // button can call it with `forceRefresh: true`. forceRefresh only
+  // changes the spinner UX — it still reads from the wizard cache, not
+  // the database, so in-progress drag-reorders and pending deletions are
+  // preserved across refresh clicks.
+  async function loadProjectSubTasks(forceRefresh = false) {
+    if (!projectId) {
+      toast.error("Missing project ID.");
+      setLoadingSubTasks(false);
+      return;
+    }
 
+    // Skip the loading spinner entirely when we already have a cached
+    // subtask list — the cache read below is synchronous and will fill
+    // the UI before paint, so flashing "loading" is just noise.
+    const cachedAtStart = getCachedSubTasks(projectId);
+    const hasCachedAtStart = !!cachedAtStart && cachedAtStart.length > 0;
+    if (forceRefresh) setRefreshing(true);
+    else if (!hasCachedAtStart) setLoadingSubTasks(true);
+
+    try {
       await ensureWizardCacheHydrated(projectId);
 
-      // ── Cache-first: check wizard cache for subtasks ──
+      // ── Cache-first (always): rebuild services from the wizard cache ──
       const cachedSubTasks = getCachedSubTasks(projectId);
       const meta = getCachedProjectMeta(projectId);
       const cachedMainTasks = getCachedMainTasks(projectId);
@@ -260,7 +282,9 @@ export default function SubTaskAssignment() {
             ...group,
             children: [...group.children].sort((a, b) => {
               const sortDiff = a.sortOrder - b.sortOrder;
-              return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
+              return sortDiff !== 0
+                ? sortDiff
+                : a.title.localeCompare(b.title);
             }),
           }))
           .sort((a, b) => {
@@ -270,133 +294,136 @@ export default function SubTaskAssignment() {
 
         setServices(groupedServices);
         setExpanded(new Set(groupedServices.map((group) => group.id)));
-        setLoadingSubTasks(false);
         return;
       }
 
-      // ── Cache miss — fetch from API ──
-      try {
-        setLoadingSubTasks(true);
+      // ── Cache empty (first-time load only) — fall back to API ──
+      const response = await fetch(
+        `/api/planning/getProjectSubTasks?projectId=${projectId}`,
+      );
+      const data = await response.json();
 
-        const response = await fetch(
-          `/api/planning/getProjectSubTasks?projectId=${projectId}`,
+      if (!response.ok) {
+        throw new Error(
+          [data?.error || "Failed to load project subtasks.", data?.details || ""]
+            .filter(Boolean)
+            .join("\n\n"),
         );
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            [data?.error || "Failed to load project subtasks.", data?.details || ""]
-              .filter(Boolean)
-              .join("\n\n"),
-          );
-        }
-
-        const rows = Array.isArray(data?.projectSubTasks) ? data.projectSubTasks : [];
-
-        setProjectCode(data?.project?.project_code ?? "");
-        setProjectTitle(data?.project?.title ?? "");
-
-        const groupedMap = new Map<string, ServiceGroup>();
-
-        for (const row of rows) {
-          const mainTask = row?.project_task?.main_task;
-          const subTask = row?.sub_task;
-          if (!mainTask || !subTask) continue;
-
-          const groupId = mainTask.main_task_id;
-
-          if (!groupedMap.has(groupId)) {
-            // project_task.sort_order is the per-project ordering set
-            // on the main-task-assignment step; falls back to the
-            // catalog default when not overridden, then to 0.
-            const projectTaskSortOrder = Number(
-              row?.project_task?.sort_order ??
-                mainTask.sort_order ??
-                0,
-            );
-            groupedMap.set(groupId, {
-              id: groupId,
-              projectTaskId: row.project_task_id,
-              title: mainTask.name,
-              sortOrder: Number.isFinite(projectTaskSortOrder)
-                ? projectTaskSortOrder
-                : 0,
-              scheduledAt: undefined,
-              finishedAt: undefined,
-              status: "pending",
-              children: [],
-            });
-          }
-
-          groupedMap.get(groupId)!.children.push({
-            id: row.project_sub_task_id,
-            subTaskId: row.sub_task_id,
-            title: subTask.description,
-            sortOrder: Number(subTask.sort_order ?? 0),
-            scheduledAt: row.scheduled_start_datetime
-              ? isoToPretty(String(row.scheduled_start_datetime).slice(0, 16))
-              : undefined,
-            finishedAt: row.actual_end_datetime
-              ? isoToPretty(String(row.actual_end_datetime).slice(0, 16))
-              : undefined,
-            status:
-              row.status === "done" || row.status === "active" || row.status === "pending"
-                ? row.status
-                : "pending",
-            assignedTo: row.assigned_user?.username ?? "",
-          });
-        }
-
-        const groupedServices = Array.from(groupedMap.values())
-          .map((group) => ({
-            ...group,
-            children: [...group.children].sort((a, b) => {
-              const sortDiff = a.sortOrder - b.sortOrder;
-              return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
-            }),
-          }))
-          .sort((a, b) => {
-            const diff = a.sortOrder - b.sortOrder;
-            return diff !== 0 ? diff : a.title.localeCompare(b.title);
-          });
-
-        setServices(groupedServices);
-        setExpanded(new Set(groupedServices.map((group) => group.id)));
-
-        // Populate cache for future visits. Critical: preserve any
-        // equipment that's already in the cache from a prior hydrate —
-        // overwriting with `[]` here is what wiped equipment in the
-        // wizard flow before. Same pattern as buildSubTasksForCache.
-        const existingCacheById = new Map(
-          (getCachedSubTasks(projectId) ?? []).map((st) => [st.id, st]),
-        );
-        const subTasksForCache: CachedSubTask[] = groupedServices.flatMap((group) =>
-          group.children.map((child) => {
-            const prev = existingCacheById.get(child.id);
-            return {
-              id: child.id,
-              subTaskId: child.subTaskId,
-              mainTaskId: group.id,
-              projectTaskId: group.projectTaskId,
-              title: child.title,
-              sortOrder: child.sortOrder,
-              estimatedHours: prev?.estimatedHours ?? null,
-              scheduledStartDatetime: prev?.scheduledStartDatetime ?? null,
-              scheduledEndDatetime: prev?.scheduledEndDatetime ?? null,
-              assignedEmployeeIds: prev?.assignedEmployeeIds ?? [],
-              equipments: prev?.equipments ?? [],
-            };
-          }),
-        );
-        setCachedSubTasks(projectId, subTasksForCache);
-      } catch (error: any) {
-        toast.error(error?.message || "Failed to load project subtasks.");
-      } finally {
-        setLoadingSubTasks(false);
       }
-    }
 
+      const rows = Array.isArray(data?.projectSubTasks) ? data.projectSubTasks : [];
+
+      setProjectCode(data?.project?.project_code ?? "");
+      setProjectTitle(data?.project?.title ?? "");
+
+      const groupedMap = new Map<string, ServiceGroup>();
+
+      for (const row of rows) {
+        const mainTask = row?.project_task?.main_task;
+        const subTask = row?.sub_task;
+        if (!mainTask || !subTask) continue;
+
+        const groupId = mainTask.main_task_id;
+
+        if (!groupedMap.has(groupId)) {
+          // project_task.sort_order is the per-project ordering set
+          // on the main-task-assignment step; falls back to the
+          // catalog default when not overridden, then to 0.
+          const projectTaskSortOrder = Number(
+            row?.project_task?.sort_order ??
+              mainTask.sort_order ??
+              0,
+          );
+          groupedMap.set(groupId, {
+            id: groupId,
+            projectTaskId: row.project_task_id,
+            title: mainTask.name,
+            sortOrder: Number.isFinite(projectTaskSortOrder)
+              ? projectTaskSortOrder
+              : 0,
+            scheduledAt: undefined,
+            finishedAt: undefined,
+            status: "pending",
+            children: [],
+          });
+        }
+
+        groupedMap.get(groupId)!.children.push({
+          id: row.project_sub_task_id,
+          subTaskId: row.sub_task_id,
+          title: subTask.description,
+          // project_sub_task.sort_order is the per-project ordering set
+          // by drag-and-drop on this page; fall back to the catalog
+          // default (sub_task.default_sort_order, aliased to sort_order)
+          // for rows that have never been reordered.
+          sortOrder: Number(row.sort_order ?? subTask.sort_order ?? 0),
+          scheduledAt: row.scheduled_start_datetime
+            ? isoToPretty(String(row.scheduled_start_datetime).slice(0, 16))
+            : undefined,
+          finishedAt: row.actual_end_datetime
+            ? isoToPretty(String(row.actual_end_datetime).slice(0, 16))
+            : undefined,
+          status:
+            row.status === "done" || row.status === "active" || row.status === "pending"
+              ? row.status
+              : "pending",
+          assignedTo: row.assigned_user?.username ?? "",
+        });
+      }
+
+      const groupedServices = Array.from(groupedMap.values())
+        .map((group) => ({
+          ...group,
+          children: [...group.children].sort((a, b) => {
+            const sortDiff = a.sortOrder - b.sortOrder;
+            return sortDiff !== 0 ? sortDiff : a.title.localeCompare(b.title);
+          }),
+        }))
+        .sort((a, b) => {
+          const diff = a.sortOrder - b.sortOrder;
+          return diff !== 0 ? diff : a.title.localeCompare(b.title);
+        });
+
+      setServices(groupedServices);
+      setExpanded(new Set(groupedServices.map((group) => group.id)));
+
+      // Populate cache for future visits. Critical: preserve any
+      // equipment that's already in the cache from a prior hydrate —
+      // overwriting with `[]` here is what wiped equipment in the
+      // wizard flow before. Same pattern as buildSubTasksForCache.
+      const existingCacheById = new Map(
+        (getCachedSubTasks(projectId) ?? []).map((st) => [st.id, st]),
+      );
+      const subTasksForCache: CachedSubTask[] = groupedServices.flatMap((group) =>
+        group.children.map((child) => {
+          const prev = existingCacheById.get(child.id);
+          return {
+            id: child.id,
+            subTaskId: child.subTaskId,
+            mainTaskId: group.id,
+            projectTaskId: group.projectTaskId,
+            title: child.title,
+            sortOrder: child.sortOrder,
+            estimatedHours: prev?.estimatedHours ?? null,
+            scheduledStartDatetime: prev?.scheduledStartDatetime ?? null,
+            scheduledEndDatetime: prev?.scheduledEndDatetime ?? null,
+            assignedEmployeeIds: prev?.assignedEmployeeIds ?? [],
+            equipments: prev?.equipments ?? [],
+          };
+        }),
+      );
+      setCachedSubTasks(projectId, subTasksForCache);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load project subtasks.");
+    } finally {
+      setLoadingSubTasks(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
     loadProjectSubTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // ── load sub-task catalog ──────────────────────────────────────────────────
@@ -749,9 +776,20 @@ export default function SubTaskAssignment() {
                   </p>
                 </div>
 
-                <div
-                  className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
-                  Task Setup
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => loadProjectSubTasks(true)}
+                    disabled={refreshing}
+                    title="Refresh from database"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  </button>
+                  <div
+                    className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    Task Setup
+                  </div>
                 </div>
               </div>
             </div>

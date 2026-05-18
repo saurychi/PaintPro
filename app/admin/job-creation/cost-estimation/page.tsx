@@ -205,14 +205,24 @@ export default function CostEstimationPage() {
     router.prefetch("/admin/job-creation/overview");
   }, [router]);
 
-  const [loading, setLoading] = useState(true);
+  // Skip the loading flash on Go Back / repeat visits. Cost estimation
+  // is derived from cached subtasks + materials + main tasks; if all
+  // three are present we can render synchronously without spinning.
+  const [loading, setLoading] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const mainTasks = getCachedMainTasks(projectId);
+    const subTasks = getCachedSubTasks(projectId);
+    const materials = getCachedMaterials(projectId);
+    const meta = getCachedProjectMeta(projectId);
+    return !mainTasks || !subTasks || !materials || !meta;
+  });
   const [isNavigating, setIsNavigating] = useState<"back" | "next" | null>(null);
   const [markupInput, setMarkupInput] = useState("30");
   // Editable as a percentage (0-100). The dollar amount is derived
   // from `(percent / 100) * quotationTotal` and pushed to cache as
   // `downpayment` so existing consumers (overview / batchSaveProject /
   // quotation document) keep reading the same field they always have.
-  const [downpaymentPercentInput, setDownpaymentPercentInput] = useState("0");
+  const [downpaymentPercentInput, setDownpaymentPercentInput] = useState("50");
   const [data, setData] = useState<CostEstimationResponse | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -236,7 +246,7 @@ export default function CostEstimationPage() {
     // Seed the downpayment percent. Prefer the cached percent (set on
     // this page); fall back to deriving from the legacy dollar amount
     // so older drafts that pre-date the percent input still hydrate
-    // correctly. If neither is set, default to 0%.
+    // correctly. If neither is set, default to 50%.
     const cachedPercent = getCachedDownpaymentPercent(projectId);
     if (cachedPercent !== null) {
       setDownpaymentPercentInput(String(cachedPercent));
@@ -261,7 +271,8 @@ export default function CostEstimationPage() {
         setDownpaymentPercentInput(String(clamped));
         setCachedDownpaymentPercent(projectId, clamped);
       } else {
-        setDownpaymentPercentInput("0");
+        setDownpaymentPercentInput("50");
+        setCachedDownpaymentPercent(projectId, 50);
       }
     }
 
@@ -278,7 +289,11 @@ export default function CostEstimationPage() {
     }
 
     try {
-      setLoading(true);
+      // Spinner only when the cache can't satisfy the build. If
+      // buildCostFromCache returns a result, the synchronous read
+      // below will fill the UI before paint — no need to flash.
+      const cachedAtStart = buildCostFromCache(projectId);
+      if (!cachedAtStart) setLoading(true);
 
       await ensureWizardCacheHydrated(projectId);
 

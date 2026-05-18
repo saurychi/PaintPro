@@ -293,7 +293,12 @@ export default function EmployeeAssignmentPage() {
   }, [router]);
 
   const [services, setServices] = useState<ServiceGroup[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Skip the loading flash on Go Back / repeat visits.
+  const [loading, setLoading] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const cached = getCachedSubTasks(projectId);
+    return !cached || cached.length === 0;
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [isNavigating, setIsNavigating] = useState<"next" | "back" | null>(
@@ -321,8 +326,12 @@ export default function EmployeeAssignmentPage() {
     }
 
     try {
+      // Spinner only when cache is empty. Repeat visits render
+      // synchronously from cache below — no need to flash.
+      const cachedAtStart = getCachedSubTasks(projectId);
+      const hasCacheAtStart = !!cachedAtStart && cachedAtStart.length > 0;
       if (forceRefresh) setRefreshing(true);
-      else setLoading(true);
+      else if (!hasCacheAtStart) setLoading(true);
 
       await ensureWizardCacheHydrated(projectId);
 

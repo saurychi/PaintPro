@@ -231,7 +231,14 @@ export default function MainTaskAssignment() {
   // employees endpoint when seeding default staff for a newly-added
   // main task so unavailability blocks for that date are honored.
   const [scheduledDate, setScheduledDate] = useState<string>("");
-  const [loadingProject, setLoadingProject] = useState(true);
+  // Skip the loading flash on Go Back / repeat visits — when the wizard
+  // cache already has main tasks for this project, the effect below can
+  // render from cache synchronously without spinning.
+  const [loadingProject, setLoadingProject] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const cached = getCachedMainTasks(projectId);
+    return !cached || cached.length === 0 || !cached[0]?.id;
+  });
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [refreshingTasks, setRefreshingTasks] = useState(false);
@@ -240,7 +247,20 @@ export default function MainTaskAssignment() {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
-  const [selectedHistory, setSelectedHistory] = useState<Task[][]>([]);
+  // Undo stack. Each entry snapshots the full cache slice the next
+  // setCachedMainTasks may cascade-drop (subtasks + materials), not just
+  // the main-task list, so Ctrl+Z can put everything back exactly as it
+  // was. Without snapshotting the cascade victims, restoring `selected`
+  // alone leaves downstream pages pointing at a main task whose nested
+  // sub-task / material rows were already pruned.
+  type SelectedHistoryEntry = {
+    selected: Task[];
+    subTasks: CachedSubTask[];
+    materials: CachedMaterial[];
+  };
+  const [selectedHistory, setSelectedHistory] = useState<SelectedHistoryEntry[]>(
+    [],
+  );
 
   const [isDirty, setIsDirty] = useState(false);
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false);
@@ -288,7 +308,18 @@ export default function MainTaskAssignment() {
   // ── helpers ────────────────────────────────────────────────────────────────
 
   function pushSelectedHistory() {
-    setSelectedHistory((prev) => [...prev, selected]);
+    const subTasksSnapshot = projectId ? getCachedSubTasks(projectId) ?? [] : [];
+    const materialsSnapshot = projectId
+      ? getCachedMaterials(projectId) ?? []
+      : [];
+    setSelectedHistory((prev) => [
+      ...prev,
+      {
+        selected,
+        subTasks: subTasksSnapshot,
+        materials: materialsSnapshot,
+      },
+    ]);
   }
 
   // Push the user's current main-task selection into the wizard cache.
@@ -829,11 +860,20 @@ export default function MainTaskAssignment() {
     setSelectedHistory((prev) => {
       if (prev.length === 0) return prev;
       const nextHistory = [...prev];
-      const previousSelected = nextHistory.pop();
-      if (previousSelected) {
+      const previous = nextHistory.pop();
+      if (previous) {
         pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
-        setSelected(previousSelected);
-        commitSelectedToCache(previousSelected);
+        setSelected(previous.selected);
+        // Order matters: setCachedMainTasks filters subTasks/materials
+        // against the currently-cached lists, which are still in the
+        // post-delete pruned state. Restore the main-task list first,
+        // then overwrite the cascade victims with the snapshot so the
+        // dropped sub-tasks + materials come back intact.
+        commitSelectedToCache(previous.selected);
+        if (projectId) {
+          setCachedSubTasks(projectId, previous.subTasks);
+          setCachedMaterials(projectId, previous.materials);
+        }
       }
       return nextHistory;
     });
