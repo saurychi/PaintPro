@@ -9,11 +9,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Download,
+  FileText,
   Loader2,
   Mail,
   MapPin,
   Package,
   Phone,
+  Printer,
   StickyNote,
   User,
   Users,
@@ -483,6 +486,37 @@ export default function ProjectReportDetailPage() {
       return next
     })
   }
+  function openPrintPdfWindow() {
+    if (!project?.projectId) return
+
+    const pdfUrl = `/api/reports/project-detail/pdf?projectId=${encodeURIComponent(
+      project.projectId,
+    )}`
+
+    const printWindow = window.open(
+      pdfUrl,
+      `project-report-${project.projectId}`,
+      [
+        "popup=yes",
+        "width=1100",
+        "height=800",
+        "left=120",
+        "top=80",
+        "resizable=yes",
+        "scrollbars=yes",
+        "toolbar=no",
+        "menubar=no",
+        "location=no",
+        "status=no",
+      ].join(","),
+    )
+
+    if (printWindow) {
+      printWindow.focus()
+    } else {
+      window.location.href = pdfUrl
+    }
+  }
 
   return (
     <div className="flex h-[calc(100dvh-0.75rem)] min-h-[520px] flex-col overflow-hidden bg-[#f7f8fa] px-4 py-3 text-gray-900 dark:bg-slate-900 dark:text-slate-100 sm:px-6">
@@ -556,12 +590,37 @@ export default function ProjectReportDetailPage() {
               </div>
             </div>
 
-            <Link
-              href="/admin/report/report-list"
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-800 shadow-sm transition hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300">
-              <ChevronLeft className="h-4 w-4" />
-              Back to list
-            </Link>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={openPrintPdfWindow}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#00c065]/30 bg-[#00c065] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] dark:border-[#00c065]/40 dark:bg-[#00c065] dark:hover:bg-[#00a054]">
+                <Printer className="h-4 w-4" />
+                Print PDF
+              </button>
+              <a
+                href={`/api/reports/project-detail/pdf?projectId=${encodeURIComponent(
+                  project.projectId,
+                )}&download=1`}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-800 shadow-sm transition hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300">
+                <FileText className="h-4 w-4" />
+                Save PDF
+              </a>
+              <a
+                href={`/api/reports/project-detail/csv?projectId=${encodeURIComponent(
+                  project.projectId,
+                )}`}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-800 shadow-sm transition hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300">
+                <Download className="h-4 w-4" />
+                CSV
+              </a>
+              <Link
+                href="/admin/report/report-list"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-800 shadow-sm transition hover:border-[#00c065]/40 hover:bg-[#00c065]/5 hover:text-[#047857] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-[#00c065]/40 dark:hover:bg-[#00c065]/10 dark:hover:text-emerald-300">
+                <ChevronLeft className="h-4 w-4" />
+                Back to list
+              </Link>
+            </div>
           </div>
 
           <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 gap-3 lg:auto-rows-fr lg:grid-cols-12">
