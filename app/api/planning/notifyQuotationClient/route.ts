@@ -27,7 +27,6 @@ async function getAuthUserId(): Promise<string | null> {
 function buildQuotationReminderMessage(
   projectCode: string | null,
   title: string | null,
-  status: string,
 ) {
   const label =
     typeof projectCode === "string" && projectCode.trim()
@@ -36,14 +35,7 @@ function buildQuotationReminderMessage(
         ? `quotation for ${title.trim()}`
         : "quotation";
 
-  // grant_access_quotation means the admin has explicitly released the
-  // quotation for client signature; the message should call that out so the
-  // client knows they can take action now (not just preview).
-  if (status === "grant_access_quotation") {
-    return `Your ${label} is ready to be signed. Please open the pending quotation in your documents and submit your signature when you're ready.`;
-  }
-
-  return `Your ${label} is ready for review. Please check the pending quotation in your documents and let us know if you have any questions.`;
+  return `Your ${label} is ready to be signed. Please open the pending quotation in your documents and submit your signature when you're ready.`;
 }
 
 export async function POST(request: NextRequest) {
@@ -76,10 +68,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (
-    project.status !== "quotation_pending" &&
-    project.status !== "grant_access_quotation"
-  ) {
+  if (project.status !== "quotation_pending") {
     return NextResponse.json(
       { error: "This quotation is no longer pending client review." },
       { status: 400 },
@@ -212,7 +201,6 @@ export async function POST(request: NextRequest) {
       content: buildQuotationReminderMessage(
         project.project_code,
         project.title,
-        project.status,
       ),
     },
   ]);

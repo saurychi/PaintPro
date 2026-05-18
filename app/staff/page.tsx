@@ -260,6 +260,7 @@ function getStatusLabel(projectStatus: string) {
     employee_assignment_pending: "Employee Assignment Pending",
     cost_estimation_pending: "Cost Estimation Pending",
     overview_pending: "Overview Pending",
+    client_quotation_pending: "Quotation Ready",
     quotation_pending: "Quotation Pending",
     client_quotation_done: "Client Signed Quotation",
     ready_to_start: "Ready to Start",

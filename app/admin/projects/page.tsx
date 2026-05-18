@@ -61,8 +61,8 @@ const STATUS_ORDER: StatusKey[] = [
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+  "client_quotation_pending",
   "quotation_pending",
-  "grant_access_quotation",
   "client_quotation_done",
   "downpayment_pending",
   "ready_to_start",
@@ -134,17 +134,17 @@ const STATUS_META: Record<StatusKey, StatusMeta> = {
     badgeBorder: "#a5f3fc",
     badgeColor: "#0f766e",
   },
+  client_quotation_pending: {
+    label: "Quotation Ready",
+    badgeBg: "#ecfdf5",
+    badgeBorder: "#a7f3d0",
+    badgeColor: "#047857",
+  },
   quotation_pending: {
     label: "Quotation Pending",
     badgeBg: "#f0fdf4",
     badgeBorder: "#bbf7d0",
     badgeColor: "#15803d",
-  },
-  grant_access_quotation: {
-    label: "Awaiting Client Signature",
-    badgeBg: "#fffbeb",
-    badgeBorder: "#fde68a",
-    badgeColor: "#92400e",
   },
   client_quotation_done: {
     label: "Client Signed Quotation",
@@ -264,6 +264,12 @@ export default function AdminProjectsPage() {
   );
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const statusFilterRef = useRef<HTMLDivElement | null>(null);
+  // Project id whose Open button is currently navigating. Used to swap
+  // the button label for a spinner so the admin sees an immediate
+  // response while the destination route is being resolved/prefetched.
+  const [navigatingProjectId, setNavigatingProjectId] = useState<string | null>(
+    null,
+  );
 
   // Close the status popover when the user clicks outside of it. Without
   // this the popover sticks open after picking statuses and tapping the
@@ -601,19 +607,29 @@ export default function AdminProjectsPage() {
                   <div className="flex shrink-0 items-center gap-2">
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        if (navigatingProjectId) return;
+                        setNavigatingProjectId(project.id);
                         router.push(
                           getProjectRoute(
                             project.id,
                             key,
                             project.cancellationPhase ?? null,
                           ),
-                        )
-                      }
-                      className="inline-flex items-center justify-center rounded-md px-4 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                        );
+                      }}
+                      disabled={navigatingProjectId !== null}
+                      className="inline-flex min-w-[72px] items-center justify-center gap-1.5 rounded-md px-4 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                       style={{ backgroundColor: ACCENT }}
                     >
-                      Open
+                      {navigatingProjectId === project.id ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Opening...
+                        </>
+                      ) : (
+                        "Open"
+                      )}
                     </button>
                   </div>
                 </li>

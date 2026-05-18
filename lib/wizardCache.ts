@@ -18,6 +18,7 @@ export type WizardStep =
   | "employee_assignment_pending"
   | "cost_estimation_pending"
   | "overview_pending"
+  | "client_quotation_pending"
   | "quotation_pending";
 
 export type CachedMainTask = {
@@ -366,6 +367,7 @@ const STATUS_TO_STEP: Record<string, WizardStep> = {
   employee_assignment_pending: "employee_assignment_pending",
   cost_estimation_pending: "cost_estimation_pending",
   overview_pending: "overview_pending",
+  client_quotation_pending: "client_quotation_pending",
   quotation_pending: "quotation_pending",
 };
 

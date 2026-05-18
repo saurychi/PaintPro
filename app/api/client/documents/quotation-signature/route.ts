@@ -82,14 +82,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (project.status !== "grant_access_quotation") {
+    if (project.status !== "quotation_pending") {
       return NextResponse.json(
-        {
-          error:
-            project.status === "quotation_pending"
-              ? "The project manager has not yet granted access to sign this quotation."
-              : "This quotation is not pending client signature.",
-        },
+        { error: "This quotation is not pending client signature." },
         { status: 409 },
       );
     }

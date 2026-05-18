@@ -3,14 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SignatureCanvas from "react-signature-canvas";
 import {
-  Check,
   Download,
   ExternalLink,
   FileText,
   Loader2,
   PenLine,
   RefreshCw,
-  Send,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -70,7 +68,6 @@ function readError(data: ProjectOverviewResponse | null, fallback: string) {
 function getDocumentType(status: string): DocumentType {
   if (
     status === "quotation_pending" ||
-    status === "grant_access_quotation" ||
     status === "client_quotation_done" ||
     status === "ready_to_start"
   ) {
@@ -128,8 +125,6 @@ export default function ClientPendingDocumentsPage() {
   const [justSignedQuotation, setJustSignedQuotation] = useState(false);
   const [justSignedCancellationAgreement, setJustSignedCancellationAgreement] =
     useState(false);
-  const [notifyingPM, setNotifyingPM] = useState(false);
-  const [pmNotified, setPmNotified] = useState(false);
   const [signingCancellationAgreement, setSigningCancellationAgreement] =
     useState(false);
   const [cancellationSignatureErr, setCancellationSignatureErr] =
@@ -151,11 +146,9 @@ export default function ClientPendingDocumentsPage() {
     (justSignedCancellationAgreement ||
       (cancellationPhase !== "" && cancellationPhase !== "review" && cancellationPhase !== "document"));
 
-  // Client can only sign once the manager has explicitly granted access
-  // (grant_access_quotation). Before that (quotation_pending) the client
-  // can preview the document but the signature controls are disabled.
-  const isPendingQuotation = projectStatus === "grant_access_quotation";
-  const isAwaitingAccess = projectStatus === "quotation_pending";
+  // Client can sign as soon as the quotation is in quotation_pending —
+  // there's no separate "grant access" gate anymore.
+  const isPendingQuotation = projectStatus === "quotation_pending";
   const isPendingInvoiceAgreement = projectStatus === "invoice_agreement_pending";
   const isClientQuotationDone = projectStatus === "client_quotation_done";
   const isQuotationApproved = projectStatus === "ready_to_start";
@@ -175,7 +168,7 @@ export default function ClientPendingDocumentsPage() {
         : "Document";
 
   const pageTitle =
-    isPendingQuotation || isPendingInvoiceAgreement || isAwaitingAccess
+    isPendingQuotation || isPendingInvoiceAgreement
       ? `Pending ${documentLabel}`
       : documentType === "none"
         ? "Project Document"
@@ -185,9 +178,7 @@ export default function ClientPendingDocumentsPage() {
     ? "Review and sign your project invoice agreement."
     : isPendingQuotation
       ? "Review and sign your project quotation."
-      : isAwaitingAccess
-        ? "The project manager hasn't released this quotation for signing yet. You can preview it below."
-        : isInvoiceAccepted
+      : isInvoiceAccepted
         ? "Your signed invoice agreement has been recorded."
         : isQuotationApproved
           ? "Your signed quotation has been recorded."
@@ -442,7 +433,6 @@ export default function ClientPendingDocumentsPage() {
         prev ? { ...prev, status: "client_quotation_done" } : prev,
       );
       setJustSignedQuotation(true);
-      setPmNotified(false);
       signatureRef.current.clear();
       // Force the iframe to remount AND bust the PDF viewer's URL cache so
       // it pulls the freshly-uploaded signed PDF from the bucket instead
@@ -450,9 +440,23 @@ export default function ClientPendingDocumentsPage() {
       setPreviewLoaded(false);
       setPreviewRefreshKey((k) => k + 1);
 
+      // Ping the project manager right after the signature lands. Fire-
+      // and-forget so a transient messages-API failure doesn't surface
+      // as a "signature failed" toast — the signature itself is already
+      // safely persisted server-side.
+      fetch("/api/client/messages/notify-pm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          projectCode: project?.project_code ?? "",
+          documentType: "quotation",
+        }),
+      }).catch(() => {});
+
       toast.success("Quotation signed.", {
         description:
-          "Notify the project manager to let them know the quotation is agreed.",
+          "Your signature is recorded and the project manager has been notified.",
       });
     } catch (error) {
       const message =
@@ -464,54 +468,6 @@ export default function ClientPendingDocumentsPage() {
       });
     } finally {
       setApproving(false);
-    }
-  }
-
-  async function notifyProjectManager() {
-    if (!projectId || notifyingPM) return;
-
-    try {
-      setNotifyingPM(true);
-
-      const response = await fetch("/api/client/messages/notify-pm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          projectCode: project?.project_code ?? "",
-          // Lets the endpoint pick the right "next step" wording —
-          // "downpayment step" for quotations, "payment step" for
-          // invoices. Defaults to quotation when unspecified.
-          documentType: documentType === "invoice" ? "invoice" : "quotation",
-        }),
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to notify project manager.",
-        );
-      }
-
-      setPmNotified(true);
-      toast.success("Project manager notified.", {
-        description:
-          "A message has been sent in the project conversation. They will review and update the project from their side.",
-      });
-      // Auto-clear the "notified" confirmation after a short cooldown so the
-      // client can re-notify if the manager hasn't acted on it yet.
-      window.setTimeout(() => setPmNotified(false), 10_000);
-    } catch (error) {
-      toast.error("Couldn't notify project manager", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to notify project manager.",
-      });
-    } finally {
-      setNotifyingPM(false);
     }
   }
 
@@ -564,8 +520,21 @@ export default function ClientPendingDocumentsPage() {
 
       signatureRef.current.clear();
 
+      // Ping the project manager right after the signature lands. Same
+      // fire-and-forget pattern as the quotation sign path.
+      fetch("/api/client/messages/notify-pm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          projectCode: project?.project_code ?? "",
+          documentType: "invoice",
+        }),
+      }).catch(() => {});
+
       toast.success("Invoice signed.", {
-        description: "Your project manager will proceed to payment shortly.",
+        description:
+          "Project manager notified. They'll proceed to payment shortly.",
       });
     } catch (error) {
       const message =
@@ -1425,31 +1394,13 @@ export default function ClientPendingDocumentsPage() {
                           Quotation signed
                         </p>
                         <p className="mt-1 text-xs leading-5 text-emerald-700">
-                          Awaiting project manager review. Let them know your
-                          signature is in so they can advance the project.
+                          Your project manager has been notified and will
+                          advance the project from their side.
                         </p>
-
-                        <button
-                          type="button"
-                          onClick={notifyProjectManager}
-                          disabled={!projectId || notifyingPM || pmNotified}
-                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {notifyingPM ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : pmNotified ? (
-                            <Check className="h-3.5 w-3.5" />
-                          ) : (
-                            <Send className="h-3.5 w-3.5" />
-                          )}
-                          {pmNotified
-                            ? "Project Manager Notified"
-                            : "Notify Project Manager"}
-                        </button>
 
                         <Link
                           href="/client/documents?openType=QTE"
-                          className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-white px-4 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98]">
                           <ExternalLink className="h-3.5 w-3.5" />
                           Go to file
                         </Link>
@@ -1478,31 +1429,13 @@ export default function ClientPendingDocumentsPage() {
                         </p>
                         <p className="mt-1 text-xs leading-5 text-emerald-700">
                           Your signed invoice agreement has been recorded and
-                          is now pending payment. Let the project manager know
-                          so they can move on to receiving payment.
+                          the project manager has been notified. Payment will
+                          be collected from their side.
                         </p>
-
-                        <button
-                          type="button"
-                          onClick={notifyProjectManager}
-                          disabled={!projectId || notifyingPM || pmNotified}
-                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {notifyingPM ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : pmNotified ? (
-                            <Check className="h-3.5 w-3.5" />
-                          ) : (
-                            <Send className="h-3.5 w-3.5" />
-                          )}
-                          {pmNotified
-                            ? "Project Manager Notified"
-                            : "Notify Project Manager"}
-                        </button>
 
                         <Link
                           href="/client/documents?openType=INV"
-                          className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-white px-4 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">
+                          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#00c065] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#00a054] active:scale-[0.98]">
                           <ExternalLink className="h-3.5 w-3.5" />
                           Go to file
                         </Link>

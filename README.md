@@ -105,8 +105,7 @@ Admin invites a staff user, the invited auth account gets a public.users row thr
 - employee_assignment_pending - Admin is assigning employees to scheduled sub tasks.
 - cost_estimation_pending - Admin is reviewing labor, materials, markup, and total estimates.
 - overview_pending - Admin is reviewing the full generated project plan before quotation.
-- quotation_pending - Quotation has been generated and the admin is reviewing it before releasing to the client.
-- grant_access_quotation - Admin has granted the client permission to sign the quotation (client can now sign).
+- quotation_pending - Quotation has been generated and is awaiting client signature.
 - client_quotation_done - Client has signed the quotation; admin still needs to acknowledge and continue.
 - downpayment_pending - Project is waiting for the required downpayment.
 - ready_to_start - Downpayment is done and the project is ready to begin.

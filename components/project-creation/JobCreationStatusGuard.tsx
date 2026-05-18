@@ -14,12 +14,26 @@ const STATUS_ROUTES: Record<string, string> = {
   employee_assignment_pending: "/admin/job-creation/employee-assignment",
   cost_estimation_pending: "/admin/job-creation/cost-estimation",
   overview_pending: "/admin/job-creation/overview",
+  // Quotation-generation page hosts both the pre-grant state
+  // (client_quotation_pending) and the post-grant signable state
+  // (quotation_pending). The page itself switches its UI by status; the
+  // router treats them as the same surface.
+  client_quotation_pending: "/admin/job-creation/quotation-generation",
   quotation_pending: "/admin/job-creation/quotation-generation",
 };
 
-const PATH_TO_STATUS: Record<string, string> = Object.fromEntries(
-  Object.entries(STATUS_ROUTES).map(([status, path]) => [path, status]),
-);
+// Reverse map. Multiple statuses can share one path, so the value is a
+// Set — the guard checks `pathStatuses.has(currentStatus)` instead of a
+// strict equality with a single status, otherwise the second status that
+// shares a path would always look "wrong" to the guard.
+const PATH_TO_STATUSES: Record<string, Set<string>> = (() => {
+  const map: Record<string, Set<string>> = {};
+  for (const [status, path] of Object.entries(STATUS_ROUTES)) {
+    if (!map[path]) map[path] = new Set();
+    map[path].add(status);
+  }
+  return map;
+})();
 
 const POST_CREATION_STATUSES = new Set([
   "ready_to_start",
@@ -55,17 +69,17 @@ export default function JobCreationStatusGuard({
     }
 
     async function checkAndRedirect() {
-      const pathStatus = PATH_TO_STATUS[pathname];
-      if (!pathStatus) return; // not a guarded page
+      const pathStatuses = PATH_TO_STATUSES[pathname];
+      if (!pathStatuses) return; // not a guarded page
 
       // 1. Fast path: check optimistic in-memory cache (set by Previous/Next buttons)
       const optimistic = getOptimisticProjectStatus(projectId!);
-      if (optimistic && pathStatus === optimistic) return;
+      if (optimistic && pathStatuses.has(optimistic)) return;
 
       // 2. Check sessionStorage wizard cache (survives refreshes)
       const cachedStep = getCachedStep(projectId!);
       if (cachedStep) {
-        if (pathStatus === cachedStep) return; // user is on the correct page
+        if (pathStatuses.has(cachedStep)) return; // user is on the correct page
         // Cached step doesn't match — redirect to correct page
         const correctPath = STATUS_ROUTES[cachedStep];
         if (correctPath && pathname !== correctPath) {
@@ -83,17 +97,17 @@ export default function JobCreationStatusGuard({
         return;
       }
 
-      if (pathStatus === apiStatus) return;
+      if (pathStatuses.has(apiStatus)) return;
 
       // Path mismatch — wait briefly for potential race, then recheck
       await new Promise((resolve) => window.setTimeout(resolve, 400));
       if (cancelled) return;
 
       const freshOptimistic = getOptimisticProjectStatus(projectId!);
-      if (freshOptimistic && pathStatus === freshOptimistic) return;
+      if (freshOptimistic && pathStatuses.has(freshOptimistic)) return;
 
       const freshCachedStep = getCachedStep(projectId!);
-      if (freshCachedStep && pathStatus === freshCachedStep) return;
+      if (freshCachedStep && pathStatuses.has(freshCachedStep)) return;
 
       const confirmedApiStatus = await loadProjectStatus();
       if (!confirmedApiStatus || cancelled) return;
@@ -103,7 +117,7 @@ export default function JobCreationStatusGuard({
         return;
       }
 
-      if (pathStatus === confirmedApiStatus) return;
+      if (pathStatuses.has(confirmedApiStatus)) return;
 
       const correctPath = STATUS_ROUTES[confirmedApiStatus];
       if (correctPath && pathname !== correctPath) {

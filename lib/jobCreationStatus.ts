@@ -14,6 +14,7 @@ const STATUS_ORDER: readonly string[] = [
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+  "client_quotation_pending",
   "quotation_pending",
 ];
 

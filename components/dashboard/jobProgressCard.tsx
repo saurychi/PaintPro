@@ -12,7 +12,7 @@ import { useProjectNow } from "@/lib/time/useProjectNow";
 import { useAutoStartProjects } from "@/lib/settings/autoStartProjects";
 import { toast } from "sonner";
 import { Transition } from "@headlessui/react";
-import { BarChart3, Check, ChevronDown, ChevronRight, Loader2, Pencil, RefreshCw, Send, X } from "lucide-react";
+import { BarChart3, ChevronDown, ChevronRight, Loader2, Pencil, RefreshCw, X } from "lucide-react";
 import DownpaymentModal from "@/components/project-creation/DownpaymentModal";
 import ProjectReviewModal from "@/components/dashboard/ProjectReviewModal";
 import GeneratedTaskEditModal, {
@@ -507,8 +507,8 @@ const PRE_EXECUTION_STATUSES = new Set<string>([
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+  "client_quotation_pending",
   "quotation_pending",
-  "grant_access_quotation",
   "client_quotation_done",
   "downpayment_pending",
   "ready_to_start",
@@ -884,18 +884,6 @@ function JobProgressCard({
   const [advancingCancellationStep, setAdvancingCancellationStep] = useState<
     CancellationStepId | null
   >(null);
-
-  // Tracks the "notify client about settlement" button on the
-  // Payment Management modal. Mirrors the downpayment notify pattern —
-  // brief loading state, then a "Client notified" pill that auto-clears
-  // after a few seconds so the admin can re-notify if needed.
-  const [cancellationPaymentNotifying, setCancellationPaymentNotifying] =
-    useState(false);
-  const [cancellationPaymentNotified, setCancellationPaymentNotified] =
-    useState(false);
-  useEffect(() => {
-    setCancellationPaymentNotified(false);
-  }, [projectId, cancellationPaymentModalOpen]);
 
   // Cancellation settlement collection — mirrors the downpayment modal
   // pattern. `savedSettlement` is the cumulative amount already persisted
@@ -3657,73 +3645,6 @@ function JobProgressCard({
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-slate-700">
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (!effectiveProjectId || cancellationPaymentNotifying)
-                          return;
-                        try {
-                          setCancellationPaymentNotifying(true);
-                          const res = await fetch(
-                            "/api/planning/notifyCancellationPayment",
-                            {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                projectId: effectiveProjectId,
-                                balance: cancellationBalance,
-                                earnedRevenue: cancellationEarnedRevenue,
-                                earnedCost: cancellationEarnedCost,
-                              }),
-                            },
-                          );
-                          const data = await res.json().catch(() => null);
-                          if (!res.ok) {
-                            throw new Error(
-                              [data?.error, data?.details]
-                                .filter(Boolean)
-                                .join(": ") || "Failed to notify client.",
-                            );
-                          }
-                          setCancellationPaymentNotified(true);
-                          toast.success("Client notified", {
-                            description:
-                              "A settlement reminder was posted in the project conversation.",
-                          });
-                          window.setTimeout(
-                            () => setCancellationPaymentNotified(false),
-                            10_000,
-                          );
-                        } catch (error) {
-                          toast.error(
-                            error instanceof Error
-                              ? error.message
-                              : "Failed to notify client.",
-                          );
-                        } finally {
-                          setCancellationPaymentNotifying(false);
-                        }
-                      }}
-                      disabled={
-                        cancellationPaymentNotifying ||
-                        cancellationPaymentNotified ||
-                        isBusy ||
-                        Boolean(advancingCancellationStep) ||
-                        !effectiveProjectId
-                      }
-                      className="mr-auto inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {cancellationPaymentNotifying ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : cancellationPaymentNotified ? (
-                        <Check className="h-4 w-4" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                      {cancellationPaymentNotified
-                        ? "Client notified"
-                        : "Notify Client"}
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setCancellationPaymentModalOpen(false)}
                       disabled={isBusy || Boolean(advancingCancellationStep)}
                       className="rounded-md border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
@@ -3851,6 +3772,31 @@ function JobProgressCard({
                                 },
                               )} now collected.`,
                             });
+
+                            // Ping the client about the freshly-updated
+                            // balance. Fire-and-forget: the partial
+                            // settlement is already recorded server-side,
+                            // and a failed messages-API call shouldn't
+                            // undo that.
+                            fetch(
+                              "/api/planning/notifyCancellationPayment",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  projectId: effectiveProjectId,
+                                  balance: Math.max(
+                                    0,
+                                    totalToSettle - newTotal,
+                                  ),
+                                  earnedRevenue: cancellationEarnedRevenue,
+                                  earnedCost: cancellationEarnedCost,
+                                }),
+                              },
+                            ).catch(() => {});
+
                             onRefresh?.();
                           } catch (error) {
                             toast.error(

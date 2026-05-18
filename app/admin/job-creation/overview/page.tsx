@@ -136,7 +136,18 @@ export default function OverviewPage() {
     router.prefetch("/admin/job-creation/quotation-generation");
   }, [router]);
 
-  const [loading, setLoading] = useState(true);
+  // Skip the loading flash on Go Back / repeat visits. The overview
+  // page builds from the wizard cache; if it has main tasks and
+  // subtasks already, we can render synchronously.
+  const [loading, setLoading] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const cache = getWizardCache(projectId);
+    return (
+      !cache ||
+      cache.mainTasks.length === 0 ||
+      cache.subTasks.length === 0
+    );
+  });
   // Stepper for the "Generating quotation" overlay. The save-generated API
   // call is the slowest part, so we segment the user-visible progress into
   // three stages (save → render → finish) and update it as the handler
@@ -426,8 +437,11 @@ export default function OverviewPage() {
       return;
     }
 
-    // PDF is in the bucket — now (and only now) flip the status so a
-    // refresh from anywhere routes the user to /quotation-generation.
+    // PDF is in the bucket — now flip the status to
+    // client_quotation_pending. The document is generated but the client
+    // can't see it yet; the admin has to click Grant Access on the
+    // quotation-generation page to expose it (which moves the status to
+    // quotation_pending and pings the client at that point).
     setGenerationStep("finish");
     try {
       const statusResponse = await fetch("/api/planning/updateProjectStatus", {
@@ -435,7 +449,7 @@ export default function OverviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          status: "quotation_pending",
+          status: "client_quotation_pending",
         }),
       });
       if (!statusResponse.ok) {
@@ -452,7 +466,9 @@ export default function OverviewPage() {
       return;
     }
 
-    setOptimisticProjectStatus(projectId, "quotation_pending");
+    setOptimisticProjectStatus(projectId, "client_quotation_pending");
+    setCachedStep(projectId, "client_quotation_pending");
+
     // Mark the modal complete before the soft navigation so the spinner
     // doesn't linger across the brief gap before the destination paints.
     // ?fresh=1 tells the next page the bucket file is already current

@@ -159,6 +159,7 @@ const ORDERED_LIFECYCLE_STATUSES = [
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+  "client_quotation_pending",
   "quotation_pending",
   "client_quotation_done",
   "downpayment_pending",

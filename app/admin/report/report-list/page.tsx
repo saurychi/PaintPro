@@ -158,6 +158,7 @@ function statusLabel(status: string) {
     employee_assignment_pending: "Employee Assignment Pending",
     cost_estimation_pending: "Cost Estimation Pending",
     overview_pending: "Overview Pending",
+    client_quotation_pending: "Quotation Ready",
     quotation_pending: "Quotation Pending",
     client_quotation_done: "Client Signed Quotation",
     invoice_agreement_pending: "Invoice Agreement Pending",
@@ -495,6 +496,7 @@ export default function ReportListPage() {
                             className="h-9 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-9 pr-9 text-xs font-semibold text-gray-900 shadow-sm outline-none transition hover:bg-gray-50 focus:ring-2 focus:ring-[#00c065]/25 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-100 dark:hover:bg-slate-700"
                           >
                             <option value="all">All statuses</option>
+                            <option value="client_quotation_pending">Quotation Ready</option>
                             <option value="quotation_pending">Quotation Pending</option>
                             <option value="client_quotation_done">
                               Client Signed Quotation

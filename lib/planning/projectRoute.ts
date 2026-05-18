@@ -5,6 +5,8 @@
 //
 // Routing rules by status:
 //   • Wizard stages → that stage's editor page
+//   • client_quotation_pending → quotation-generation (admin must click
+//     Grant Access to expose the document to the client)
 //   • client_quotation_done → quotation-generation (admin needs to advance)
 //   • downpayment_pending → /admin?openDownpayment=<id> (auto-pops the modal)
 //   • ready_to_start → /admin?openKickoff=<id> (auto-pops the kickoff modal)
@@ -33,8 +35,8 @@ export type ProjectStatusKey =
   | "employee_assignment_pending"
   | "cost_estimation_pending"
   | "overview_pending"
+  | "client_quotation_pending"
   | "quotation_pending"
-  | "grant_access_quotation"
   | "client_quotation_done"
   | "downpayment_pending"
   | "ready_to_start"
@@ -58,8 +60,8 @@ export const PROJECT_STATUS_KEYS: readonly ProjectStatusKey[] = [
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+  "client_quotation_pending",
   "quotation_pending",
-  "grant_access_quotation",
   "client_quotation_done",
   "downpayment_pending",
   "ready_to_start",
@@ -141,12 +143,15 @@ export function getProjectRoute(
       return `/admin/job-creation/cost-estimation?projectId=${projectId}`;
     case "overview_pending":
       return `/admin/job-creation/overview?projectId=${projectId}`;
+    case "client_quotation_pending":
     case "quotation_pending":
-    case "grant_access_quotation":
     case "client_quotation_done":
-      // The client may already have signed (client_quotation_done), but the
-      // admin still needs to review and ack on the quotation page before
-      // advancing to downpayment.
+      // client_quotation_pending: PDF was generated but admin hasn't
+      // clicked Grant Access yet, so the client can't see it.
+      // quotation_pending: client has been granted access and we're
+      // waiting for their signature.
+      // client_quotation_done: already signed; admin still needs to
+      // advance to downpayment from this page.
       return `/admin/job-creation/quotation-generation?projectId=${projectId}`;
     case "downpayment_pending":
       return `/admin?openDownpayment=${projectId}`;

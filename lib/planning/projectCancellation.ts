@@ -180,6 +180,7 @@ export const PRE_CLIENT_STATUSES = new Set([
   "employee_assignment_pending",
   "cost_estimation_pending",
   "overview_pending",
+  "client_quotation_pending",
   "quotation_pending",
 ]);
 

@@ -7,7 +7,6 @@ import {
   Copy,
   Download,
   FilePlus2,
-  Key,
   LayoutDashboard,
   Loader2,
   PlayCircle,
@@ -70,7 +69,6 @@ export default function JobQuotation() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [notifyingClient, setNotifyingClient] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [startingProgress, setStartingProgress] = useState(false);
   const [project, setProject] = useState<ProjectOverviewResponse["project"] | null>(null);
@@ -177,16 +175,18 @@ export default function JobQuotation() {
         // the document reflects the latest project state — chiefly the
         // downpayment, which gets saved upstream (cost estimation) and
         // surfaces in the document via the Subtotal / Downpayment / Balance
-        // Due rows. Skipped post-sign so the client-signed PDF isn't
-        // overwritten. Also skipped on the first load after the overview
-        // page just generated the file (?fresh=1) — re-running chromium
-        // there is a 15-30s cold-start the user is already waiting on.
+        // Due rows. Runs for both client_quotation_pending (pre-grant) and
+        // quotation_pending (post-grant, awaiting signature). Skipped
+        // post-sign so the client-signed PDF isn't overwritten. Also
+        // skipped on the first load after the overview page just
+        // generated the file (?fresh=1) — re-running chromium there is a
+        // 15-30s cold-start the user is already waiting on.
         const isInitialFromOverview = mode === "initial" && skipInitialRegen;
-        if (
-          !isInitialFromOverview &&
-          (projectStatus === "quotation_pending" ||
-            projectStatus === "grant_access_quotation")
-        ) {
+        const PRE_SIGN_STATUSES = new Set([
+          "client_quotation_pending",
+          "quotation_pending",
+        ]);
+        if (!isInitialFromOverview && PRE_SIGN_STATUSES.has(projectStatus)) {
           try {
             const regenResponse = await fetch("/api/quotation/save-generated", {
               method: "POST",
@@ -215,6 +215,79 @@ export default function JobQuotation() {
   useEffect(() => {
     void loadProject("initial");
   }, [loadProject]);
+
+  // Background poll for client-side status changes. The relevant
+  // transitions while this page is open are:
+  //   client_quotation_pending → quotation_pending (admin elsewhere
+  //     could have granted access via another surface)
+  //   quotation_pending → client_quotation_done (client signed in
+  //     their own session)
+  // Without polling, the admin's open quotation page would stay stuck
+  // on the old badge until they hit refresh. Polls every 5s, pauses
+  // while the tab is hidden, and unmounts itself once the status moves
+  // past quotation_pending.
+  useEffect(() => {
+    if (!projectId) return;
+    if (!project) return;
+    const currentStatus = String(project.status ?? "").trim();
+    const POLL_STATUSES = new Set([
+      "client_quotation_pending",
+      "quotation_pending",
+    ]);
+    if (!POLL_STATUSES.has(currentStatus)) return;
+
+    let cancelled = false;
+    const interval = window.setInterval(async () => {
+      if (cancelled) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      try {
+        const response = await fetch(
+          `/api/planning/getProjectOverview?projectId=${encodeURIComponent(projectId)}`,
+          { cache: "no-store" },
+        );
+        if (cancelled) return;
+        if (!response.ok) return;
+        const data = (await response.json()) as ProjectOverviewResponse;
+        if (cancelled) return;
+        const nextStatus = String(data.project?.status ?? "").trim();
+        if (!nextStatus || nextStatus === currentStatus) return;
+        setProject(data.project);
+        const APPROVED_STATUSES = new Set([
+          "client_quotation_done",
+          "downpayment_pending",
+          "ready_to_start",
+          "in_progress",
+          "review_pending",
+          "invoice_pending",
+          "invoice_agreement_pending",
+          "payment_pending",
+          "employee_management_pending",
+          "conclude_job_pending",
+          "completed",
+        ]);
+        setStatus(
+          APPROVED_STATUSES.has(nextStatus) ? "Approved" : "Not yet Approved",
+        );
+        // The signed PDF replaces the unsigned one in the bucket as
+        // part of the same sign route, so refresh the iframe too.
+        if (nextStatus === "client_quotation_done") {
+          setPreviewVersion((v) => v + 1);
+        }
+      } catch {
+        // Silent — next tick will retry.
+      }
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [projectId, project?.status]);
 
   async function handleRefreshDetails() {
     if (refreshing || loading) return;
@@ -249,6 +322,38 @@ export default function JobQuotation() {
       cancelled = true;
     };
   }, [projectId, previewVersion]);
+
+  async function handleGrantAccess() {
+    if (!projectId || grantingAccess) return;
+    if (project?.status !== "client_quotation_pending") return;
+    try {
+      setGrantingAccess(true);
+      // 1. Flip the status so getPendingQuotations + the client document
+      //    list start surfacing this quotation, and the signing route is
+      //    no longer gated by the pre-grant state.
+      await updateProjectStatus("quotation_pending");
+      // 2. Ping the client via the project conversation. Fire-and-forget —
+      //    the status flip is what actually matters; a failed message is
+      //    a soft error the admin can resend from messages elsewhere.
+      fetch("/api/planning/notifyQuotationClient", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      }).catch(() => {});
+      // 3. Optimistic local update so the UI swaps to "Awaiting client
+      //    signature" immediately instead of waiting on the next poll.
+      setOptimisticProjectStatus(projectId, "quotation_pending");
+      setCachedStep(projectId, "quotation_pending" as any);
+      setProject((prev) =>
+        prev ? { ...prev, status: "quotation_pending" } : prev,
+      );
+      toast.success("Quotation access granted. Client has been notified.");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to grant access.");
+    } finally {
+      setGrantingAccess(false);
+    }
+  }
 
   async function handleGenerateQuotationFromPage() {
     if (!projectId || generatingQuotation) return;
@@ -345,74 +450,6 @@ export default function JobQuotation() {
     });
   }
 
-  async function handleGrantAccess() {
-    if (
-      !projectId ||
-      grantingAccess ||
-      project?.status !== "quotation_pending"
-    ) {
-      return;
-    }
-
-    try {
-      setGrantingAccess(true);
-      await updateProjectStatus("grant_access_quotation");
-      // Reflect immediately so the gating logic flips without a refetch.
-      setProject((prev) =>
-        prev ? { ...prev, status: "grant_access_quotation" } : prev,
-      );
-      toast.success("Access granted.", {
-        description: "The client can now sign this quotation.",
-      });
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to grant client access.");
-    } finally {
-      setGrantingAccess(false);
-    }
-  }
-
-  async function handleNotifyClient() {
-    if (
-      !projectId ||
-      notifyingClient ||
-      (project?.status !== "quotation_pending" &&
-        project?.status !== "grant_access_quotation")
-    ) {
-      return;
-    }
-
-    try {
-      setNotifyingClient(true);
-
-      const response = await fetch("/api/planning/notifyQuotationClient", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ projectId }),
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to notify client about the quotation.",
-        );
-      }
-
-      toast.success("Client notified.", {
-        description: "A quotation reminder was sent in the project messages.",
-      });
-    } catch (error: any) {
-      toast.error(
-        error?.message || "Failed to notify client about the quotation.",
-      );
-    } finally {
-      setNotifyingClient(false);
-    }
-  }
-
   // The quotation PDF was rendered + uploaded to the bucket back when the
   // user clicked "Generate Quotation" on the overview page. The page now
   // streams the file straight from storage instead of regenerating the HTML
@@ -438,15 +475,22 @@ export default function JobQuotation() {
             <span>Quotation</span>
           </div>
 
-          <div
-            className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold ${
-              status === "Approved"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300"
-                : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-300"
-            }`}
-          >
-            {status}
-          </div>
+          {loading ? (
+            <div className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+              Loading...
+            </div>
+          ) : (
+            <div
+              className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold ${
+                status === "Approved"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300"
+                  : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-300"
+              }`}
+            >
+              {status}
+            </div>
+          )}
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
@@ -600,11 +644,13 @@ export default function JobQuotation() {
                   </div>
 
               {/* Download PDF only after the client has signed (status
-                  client_quotation_done or any later state). Before that the
-                  PDF is unsigned and not meant to be downloaded. */}
+                  client_quotation_done or any later state). Before that
+                  the PDF is unsigned and not meant to be downloaded —
+                  applies to both pre-grant (client_quotation_pending)
+                  and signature-awaiting (quotation_pending). */}
               {project &&
-              project.status !== "quotation_pending" &&
-              project.status !== "grant_access_quotation" ? (
+              project.status !== "client_quotation_pending" &&
+              project.status !== "quotation_pending" ? (
                 <button
                   type="button"
                   onClick={handleDownloadPdf}
@@ -680,8 +726,8 @@ export default function JobQuotation() {
                   otherwise the admin lands on the dashboard but has to
                   click Manage themselves. */}
               {project &&
+              project.status !== "client_quotation_pending" &&
               project.status !== "quotation_pending" &&
-              project.status !== "grant_access_quotation" &&
               project.status !== "client_quotation_done" ? (
                 <button
                   type="button"
@@ -737,42 +783,20 @@ export default function JobQuotation() {
                 </button>
               ) : null}
 
-              {/* Notify Client is available while we're still waiting on the
-                  client to sign — that includes both quotation_pending (admin
-                  is reviewing) and grant_access_quotation (client can now
-                  sign). Hidden once the client has signed. */}
-              {project?.status === "quotation_pending" ||
-              project?.status === "grant_access_quotation" ? (
-                <button
-                  type="button"
-                  onClick={handleNotifyClient}
-                  disabled={notifyingClient || !projectId}
-                  className={`${quotationMissing ? "mt-2" : "mt-5"} inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25`}
-                >
-                  {notifyingClient ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Notifying...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4" />
-                      Notify Client
-                    </>
-                  )}
-                </button>
-              ) : null}
-
-              {/* Grant Access — sits below Notify Client. Only shown while
-                  the project is still in quotation_pending; clicking it
-                  advances status to grant_access_quotation and unlocks the
-                  client's sign-quotation flow. */}
-              {project?.status === "quotation_pending" ? (
+              {/* Grant Access — surfaces the document to the client and
+                  pings them via the project conversation. Only available
+                  while the project is in the pre-grant state
+                  (client_quotation_pending). Clicking flips the status to
+                  quotation_pending so the signing endpoint and the
+                  client's pending-documents list start recognising it. */}
+              {project?.status === "client_quotation_pending" &&
+              !quotationMissing ? (
                 <button
                   type="button"
                   onClick={handleGrantAccess}
                   disabled={grantingAccess || !projectId}
-                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 text-[13px] font-semibold text-amber-800 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-500/35 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:border-amber-400/50 dark:hover:bg-amber-500/25"
+                  className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                  style={{ backgroundColor: ACCENT }}
                 >
                   {grantingAccess ? (
                     <>
@@ -781,31 +805,33 @@ export default function JobQuotation() {
                     </>
                   ) : (
                     <>
-                      <Key className="h-4 w-4" />
-                      Grant Access to Sign
+                      <Send className="h-4 w-4" />
+                      Grant Access
                     </>
                   )}
                 </button>
               ) : null}
 
-              {/* Once access has been granted, surface a small acknowledgment
-                  so the manager knows the client can sign. */}
-              {project?.status === "grant_access_quotation" ? (
-                <div className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[12px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+              {/* Awaiting-signature acknowledgment. Shown once the admin
+                  has clicked Grant Access and we're waiting on the
+                  client's signature. */}
+              {project?.status === "quotation_pending" ? (
+                <div
+                  className={`${quotationMissing ? "mt-2" : "mt-5"} inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[12px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300`}
+                >
                   <Check className="h-4 w-4" />
-                  Client can now sign this quotation
+                  Awaiting client signature
                 </div>
               ) : null}
 
               {/* Cancel Project — destructive. Sits at the bottom of the
-                  action stack, below Grant Access / acknowledgment. Only
-                  available while the client hasn't signed yet
-                  (quotation_pending / grant_access_quotation); once they
-                  sign there's a downpayment / contract trail and this
-                  shouldn't be a one-click action anymore. */}
+                  action stack. Available in both pre-sign states
+                  (client_quotation_pending, quotation_pending); once the
+                  client signs there's a downpayment / contract trail and
+                  this shouldn't be a one-click action anymore. */}
               {project &&
-              (project.status === "quotation_pending" ||
-                project.status === "grant_access_quotation") ? (
+              (project.status === "client_quotation_pending" ||
+                project.status === "quotation_pending") ? (
                 <button
                   type="button"
                   onClick={() => setCancelOpen(true)}
