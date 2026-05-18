@@ -5,38 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabaseClient";
 
-// Refcount-based suppression so any view that already renders incoming
-// messages inline (e.g. the basic-details StaffMessageModal) can silence
-// the global "New message" toast for the duration that view is active.
-// Refcount (not boolean) handles overlapping suppressors safely.
-let toastSuppressionCount = 0;
-export function suppressNewMessageToast(): () => void {
-  toastSuppressionCount += 1;
-  let active = true;
-  return () => {
-    if (!active) return;
-    active = false;
-    toastSuppressionCount = Math.max(0, toastSuppressionCount - 1);
-  };
-}
-
-// Optional override for the toast's "Open" action. Pages that already
-// own a messages UI (e.g. the basic-details StaffMessageModal) can
-// register a handler so clicking "Open" pops that modal instead of
-// navigating to the messages page. Latest registration wins; the
-// returned disposer clears the handler if it's still the active one.
-let customOpenHandler: (() => void) | null = null;
-export function registerNewMessageOpenHandler(
-  handler: () => void,
-): () => void {
-  customOpenHandler = handler;
-  return () => {
-    if (customOpenHandler === handler) {
-      customOpenHandler = null;
-    }
-  };
-}
-
 // Drives both the sidebar Messages badge AND the toast notifications fired
 // when a new message arrives somewhere outside the current view.
 //
@@ -141,8 +109,8 @@ export function useMessagesUnread(messagesPathPrefix: string) {
 
   // Polling fallback so the badge keeps updating even if Supabase Realtime
   // isn't enabled on `public.messages` or RLS is filtering the broadcast.
-  // 15s is light (one cheap COUNT query per interval per shell) and means
-  // the user never has to interact with the sidebar to see a new badge.
+  // 5s matches the chat panel's polling cadence so the badge doesn't lag
+  // noticeably behind an open conversation when realtime is filtered.
   // Pauses while the tab is hidden to save bandwidth.
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -150,7 +118,7 @@ export function useMessagesUnread(messagesPathPrefix: string) {
         return;
       }
       void refetch();
-    }, 15_000);
+    }, 5_000);
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -250,30 +218,19 @@ export function useMessagesUnread(messagesPathPrefix: string) {
             return;
           }
 
-          if (toastSuppressionCount === 0) {
-            const preview =
-              typeof newMessage.content === "string"
-                ? newMessage.content.slice(0, 120)
-                : "You have a new message.";
-            toast("New message", {
-              description: preview,
-              action: {
-                label: "Open",
-                onClick: () => {
-                  // Prefer a page-registered handler (e.g. the
-                  // basic-details StaffMessageModal opener) so the
-                  // admin doesn't get yanked away from their in-flight
-                  // wizard step. Fall back to the messages page when
-                  // no page owns this toast.
-                  if (customOpenHandler) {
-                    customOpenHandler();
-                  } else {
-                    routerRef.current.push(prefix);
-                  }
-                },
+          const preview =
+            typeof newMessage.content === "string"
+              ? newMessage.content.slice(0, 120)
+              : "You have a new message.";
+          toast("New message", {
+            description: preview,
+            action: {
+              label: "Open",
+              onClick: () => {
+                routerRef.current.push(prefix);
               },
-            });
-          }
+            },
+          });
 
           void refetch();
         },

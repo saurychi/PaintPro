@@ -19,6 +19,7 @@ type DirectParticipantRow = {
 type ConversationRow = {
   id: string
   project_id: string | null
+  draft_id: string | null
 }
 
 type ProjectRow = {
@@ -26,6 +27,13 @@ type ProjectRow = {
   project_code: string | null
   title: string | null
   client_id: string | null
+  created_by: string | null
+}
+
+type DraftRow = {
+  draft_id: string
+  draft_code: string | null
+  project_name: string | null
   created_by: string | null
 }
 
@@ -201,6 +209,11 @@ async function buildClientProjectConversations(projectId: string) {
             profile_image_url: participant.profile_image_url ?? null,
           }
         : null,
+      project: {
+        project_id: projectData.project_id,
+        project_code: projectData.project_code,
+        title: projectData.title,
+      },
       last_read_at: null,
       latest_message: latestMessage ?? null,
     }
@@ -241,7 +254,7 @@ export async function GET() {
 
     const { data: conversations, error: conversationsError } = await supabaseAdmin
       .from("conversations")
-      .select("id, project_id")
+      .select("id, project_id, draft_id")
       .in("id", convoIds)
 
     if (conversationsError) {
@@ -252,8 +265,11 @@ export async function GET() {
     const projectConversationIds = conversationRows
       .filter((conversation) => Boolean(conversation.project_id))
       .map((conversation) => conversation.id)
+    const draftConversationIds = conversationRows
+      .filter((conversation) => Boolean(conversation.draft_id) && !conversation.project_id)
+      .map((conversation) => conversation.id)
     const directConversationIds = conversationRows
-      .filter((conversation) => !conversation.project_id)
+      .filter((conversation) => !conversation.project_id && !conversation.draft_id)
       .map((conversation) => conversation.id)
 
     const { data: latestMessages, error: latestMessagesError } = await supabaseAdmin
@@ -294,6 +310,7 @@ export async function GET() {
 
     const projectsById = new Map<string, ProjectRow>()
     const clientsById = new Map<string, ClientRow>()
+    const creatorsById = new Map<string, ProjectParticipantUser>()
 
     if (projectConversationIds.length > 0) {
       const projectIds = conversationRows
@@ -302,7 +319,7 @@ export async function GET() {
 
       const { data: projects, error: projectsError } = await supabaseAdmin
         .from("projects")
-        .select("project_id, project_code, title, client_id")
+        .select("project_id, project_code, title, client_id, created_by")
         .in("project_id", projectIds)
 
       if (projectsError) {
@@ -335,6 +352,82 @@ export async function GET() {
           clientsById.set(client.client_id, client)
         }
       }
+
+      // The project's creator (admin / manager) is the human counterpart
+      // staff should see at the top of a project conversation. They're
+      // who actually sent the message, not the client the project is for.
+      const creatorIds = Array.from(
+        new Set(
+          ((projects ?? []) as ProjectRow[])
+            .map((project) => project.created_by)
+            .filter((creatorId): creatorId is string => Boolean(creatorId))
+        )
+      )
+
+      if (creatorIds.length > 0) {
+        const { data: creators, error: creatorsError } = await supabaseAdmin
+          .from("users")
+          .select("id, username, role, profile_image_url")
+          .in("id", creatorIds)
+
+        if (creatorsError) {
+          return NextResponse.json(
+            { error: creatorsError.message },
+            { status: 500 },
+          )
+        }
+
+        for (const creator of (creators ?? []) as ProjectParticipantUser[]) {
+          creatorsById.set(creator.id, creator)
+        }
+      }
+    }
+
+    // Load drafts attached to the user's conversations, plus their creator
+    // users so the conversation header (admin name + avatar) renders the
+    // same way as project conversations.
+    const draftsById = new Map<string, DraftRow>()
+    if (draftConversationIds.length > 0) {
+      const draftIds = conversationRows
+        .filter((c) => draftConversationIds.includes(c.id))
+        .map((c) => c.draft_id)
+        .filter((id): id is string => Boolean(id))
+
+      if (draftIds.length > 0) {
+        const { data: drafts, error: draftsError } = await supabaseAdmin
+          .from("drafts")
+          .select("draft_id, draft_code, project_name, created_by")
+          .in("draft_id", draftIds)
+
+        if (draftsError) {
+          return NextResponse.json({ error: draftsError.message }, { status: 500 })
+        }
+
+        for (const draft of (drafts ?? []) as DraftRow[]) {
+          draftsById.set(draft.draft_id, draft)
+        }
+
+        const draftCreatorIds = Array.from(
+          new Set(
+            ((drafts ?? []) as DraftRow[])
+              .map((draft) => draft.created_by)
+              .filter(
+                (id): id is string =>
+                  typeof id === "string" && !!id && !creatorsById.has(id),
+              ),
+          ),
+        )
+        if (draftCreatorIds.length > 0) {
+          const { data: draftCreators } = await supabaseAdmin
+            .from("users")
+            .select("id, username, role, profile_image_url")
+            .in("id", draftCreatorIds)
+
+          for (const creator of (draftCreators ?? []) as ProjectParticipantUser[]) {
+            creatorsById.set(creator.id, creator)
+          }
+        }
+      }
     }
 
     const payload = conversationRows
@@ -343,22 +436,106 @@ export async function GET() {
 
         if (conversation.project_id) {
           const project = projectsById.get(conversation.project_id)
-          const client = project?.client_id ? clientsById.get(project.client_id) : null
+          if (!project) return null
 
-          if (!project || !client) return null
+          const creator = project.created_by
+            ? creatorsById.get(project.created_by) ?? null
+            : null
+          const client = project.client_id
+            ? clientsById.get(project.client_id) ?? null
+            : null
+
+          // For non-creator viewers (staff): show the project's creator
+          // (admin / manager) at the top — they're the human counterpart.
+          // For the creator themselves (admin opens their own messages):
+          // show the client instead, otherwise every project conversation
+          // would surface the admin's own name and look like a self-DM,
+          // which is what notify-to-client threads were doing.
+          const viewerIsCreator =
+            !!creator && !!userId && creator.id === userId
+
+          const creatorHeader = creator
+            ? {
+                id: creator.id,
+                username:
+                  creator.username ||
+                  project.project_code ||
+                  project.title ||
+                  "Project Team",
+                role: creator.role || "admin",
+                profile_image_url: creator.profile_image_url ?? null,
+              }
+            : null
+
+          const clientHeader = client
+            ? {
+                id: client.client_id,
+                username:
+                  client.full_name ||
+                  client.email ||
+                  project.project_code ||
+                  project.title ||
+                  "Client",
+                role: "client",
+                profile_image_url: null,
+              }
+            : null
+
+          const headerUser = viewerIsCreator
+            ? clientHeader ?? creatorHeader
+            : creatorHeader ?? clientHeader
+
+          if (!headerUser) return null
 
           return {
             conversation_id: conversation.id,
-            users: {
-              id: client.client_id,
-              username:
-                client.full_name ||
-                client.email ||
-                project.project_code ||
-                project.title ||
-                "Client",
-              role: "client",
-              profile_image_url: null,
+            users: headerUser,
+            project: {
+              project_id: project.project_id,
+              project_code: project.project_code,
+              title: project.title,
+            },
+            last_read_at: lastReadMap[conversation.id] ?? null,
+            latest_message: latestMessage ?? null,
+          }
+        }
+
+        if (conversation.draft_id) {
+          const draft = draftsById.get(conversation.draft_id)
+          if (!draft) return null
+
+          const creator = draft.created_by
+            ? creatorsById.get(draft.created_by) ?? null
+            : null
+
+          const headerUser = creator
+            ? {
+                id: creator.id,
+                username:
+                  creator.username ||
+                  draft.project_name ||
+                  draft.draft_code ||
+                  "Project Team",
+                role: creator.role || "admin",
+                profile_image_url: creator.profile_image_url ?? null,
+              }
+            : null
+
+          if (!headerUser) return null
+
+          // Front-end maps `project` straight into the project chip,
+          // so we report the draft under the same field. The
+          // measure-generator save path then uses the code (which lives
+          // on either drafts.draft_code or projects.project_code) to
+          // resolve back to the right row server-side.
+          return {
+            conversation_id: conversation.id,
+            users: headerUser,
+            project: {
+              project_id: draft.draft_id,
+              project_code: draft.draft_code,
+              title: draft.project_name,
+              is_draft: true,
             },
             last_read_at: lastReadMap[conversation.id] ?? null,
             latest_message: latestMessage ?? null,
@@ -371,6 +548,7 @@ export async function GET() {
         return {
           conversation_id: conversation.id,
           users: participant.users,
+          project: null,
           last_read_at: lastReadMap[conversation.id] ?? null,
           latest_message: latestMessage ?? null,
         }

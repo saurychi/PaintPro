@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
     const targetUserId = String(body?.targetUserId ?? "").trim();
     const targetClientId = String(body?.targetClientId ?? "").trim();
     const projectId = String(body?.projectId ?? "").trim();
+    const draftId = String(body?.draftId ?? "").trim();
 
     // Cookie-mode guest client: target is always a project user (manager /
     // assigned staff). Resolve the project conversation and add them, return
@@ -325,6 +326,114 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({ conversationId: projectConversationId });
+    }
+
+    // Admin messaging a staff member in the context of a draft (the
+    // basic-details wizard before Save and Continue). Mirrors the project
+    // branch but uses conversations.draft_id instead of project_id.
+    if (draftId) {
+      const { data: draft, error: draftError } = await supabaseAdmin
+        .from("drafts")
+        .select("draft_id")
+        .eq("draft_id", draftId)
+        .maybeSingle();
+
+      if (draftError || !draft) {
+        return NextResponse.json(
+          {
+            error: "Draft not found.",
+            details: draftError?.message ?? "Draft not found.",
+          },
+          { status: 404 },
+        );
+      }
+
+      const { data: existingConversations, error: existingError } =
+        await supabaseAdmin
+          .from("conversations")
+          .select("id")
+          .eq("draft_id", draftId);
+
+      if (existingError) {
+        return NextResponse.json(
+          { error: existingError.message },
+          { status: 500 },
+        );
+      }
+
+      let draftConversationId: string | null = null;
+      const candidateIds = (existingConversations ?? []).map(
+        (row) => row.id as string,
+      );
+
+      if (candidateIds.length > 0) {
+        const { data: shared } = await supabaseAdmin
+          .from("conversation_participants")
+          .select("conversation_id")
+          .eq("user_id", targetUserId)
+          .in("conversation_id", candidateIds)
+          .limit(1);
+
+        if (shared && shared.length > 0) {
+          draftConversationId = shared[0].conversation_id as string;
+        }
+      }
+
+      if (!draftConversationId) {
+        const { data: createdConversation, error: createConversationError } =
+          await supabaseAdmin
+            .from("conversations")
+            .insert([
+              { draft_id: draftId, updated_at: new Date().toISOString() },
+            ])
+            .select("id")
+            .single<{ id: string }>();
+
+        if (createConversationError || !createdConversation?.id) {
+          return NextResponse.json(
+            {
+              error: "Failed to create draft conversation.",
+              details: createConversationError?.message,
+            },
+            { status: 500 },
+          );
+        }
+
+        draftConversationId = createdConversation.id;
+
+        const { error: participantInsertError } = await supabaseAdmin
+          .from("conversation_participants")
+          .insert([
+            { conversation_id: draftConversationId, user_id: targetUserId },
+          ]);
+
+        if (participantInsertError) {
+          return NextResponse.json(
+            {
+              error: "Failed to add participant.",
+              details: participantInsertError.message,
+            },
+            { status: 500 },
+          );
+        }
+      }
+
+      const { data: existingAdminParticipant } = await supabaseAdmin
+        .from("conversation_participants")
+        .select("conversation_id")
+        .eq("conversation_id", draftConversationId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!existingAdminParticipant) {
+        await supabaseAdmin
+          .from("conversation_participants")
+          .insert([
+            { conversation_id: draftConversationId, user_id: user.id },
+          ]);
+      }
+
+      return NextResponse.json({ conversationId: draftConversationId });
     }
 
     // Atomic find-or-create. The RPC enforces one direct conversation per
