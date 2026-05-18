@@ -142,9 +142,19 @@ export default function FinalPaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+      <div className="w-full max-w-md overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl">
+        {/* Green accent strip — matches DownpaymentModal so the two
+            payment modals read as part of the same workflow lane. */}
+        <div className="h-1 w-full" style={{ backgroundColor: ACCENT }} />
+        {/* Header — faint green wash that fades into the body so the
+            accent strip doesn't sit on a stark white background. */}
+        <div
+          className="flex items-center justify-between border-b border-gray-200 px-5 py-4"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(0,192,101,0.08) 0%, rgba(0,192,101,0) 100%)",
+          }}
+        >
           <h3 className="text-base font-semibold text-gray-900">
             Final Payment
           </h3>
@@ -153,7 +163,7 @@ export default function FinalPaymentModal({
             type="button"
             onClick={onClose}
             disabled={confirming}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 disabled:opacity-50"
           >
             <X className="h-4 w-4" />
           </button>
@@ -174,7 +184,7 @@ export default function FinalPaymentModal({
                 </label>
 
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}
                 >
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
@@ -196,7 +206,7 @@ export default function FinalPaymentModal({
                 </label>
 
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}
                 >
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
@@ -218,7 +228,7 @@ export default function FinalPaymentModal({
                 </label>
 
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}
                 >
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
@@ -240,7 +250,7 @@ export default function FinalPaymentModal({
                 </label>
 
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}
                 >
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
@@ -265,7 +275,7 @@ export default function FinalPaymentModal({
                 </label>
 
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-gray-50`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-gray-50`}
                 >
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
                     $AUD
@@ -280,17 +290,14 @@ export default function FinalPaymentModal({
                 </div>
               </div>
 
-              {/* Paid Final Payment — the editable input the admin
-                  enters the actual amount into. Sits at the bottom
-                  so the running breakdown above (remaining → needed)
-                  always reads top-to-bottom into the action field. */}
+              {/* here */}
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium text-gray-600">
                   Paid Final Payment
                 </label>
 
                 <div
-                  className={`flex h-10 items-center overflow-hidden rounded-lg border ${BORDER} bg-white focus-within:ring-2`}
+                  className={`flex h-10 items-center overflow-hidden rounded-md border ${BORDER} bg-white focus-within:ring-2`}
                   style={{ ["--tw-ring-color" as any]: ACCENT }}
                 >
                   <span className="border-r border-gray-200 px-3 text-sm font-medium text-gray-500">
@@ -301,9 +308,20 @@ export default function FinalPaymentModal({
                     type="text"
                     inputMode="decimal"
                     value={paidAmount}
-                    onChange={(e) =>
-                      setPaidAmount(formatCurrencyInput(e.target.value))
-                    }
+                    onChange={(e) => {
+                      const formatted = formatCurrencyInput(e.target.value);
+                      // Cap the entered payment at the remaining balance
+                      // so the admin can't record more than what's owed.
+                      // Clamping the formatted string keeps the visible
+                      // value in sync with the underlying amount.
+                      if (parseCurrencyInput(formatted) > remainingBalance) {
+                        setPaidAmount(
+                          formatCurrencyInput(remainingBalance.toFixed(2)),
+                        );
+                        return;
+                      }
+                      setPaidAmount(formatted);
+                    }}
                     placeholder="Enter Payment"
                     className="flex-1 bg-transparent px-3 text-sm text-gray-900 outline-none placeholder:text-gray-400"
                   />
@@ -335,7 +353,7 @@ export default function FinalPaymentModal({
             type="button"
             onClick={onClose}
             disabled={confirming}
-            className="rounded-lg border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
           >
             Go Back
           </button>
@@ -344,7 +362,7 @@ export default function FinalPaymentModal({
             type="button"
             onClick={handleConfirm}
             disabled={!canConfirm || confirming || loadingBudget}
-            className="inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ backgroundColor: ACCENT }}
             onMouseEnter={(e) => {
               if (canConfirm && !confirming) {
