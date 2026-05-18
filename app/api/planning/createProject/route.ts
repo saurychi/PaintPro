@@ -440,6 +440,20 @@ export async function POST(req: Request) {
   const dimensions = body.project.dimensions;
   const creatorId = asTrimmedString(body.createdBy.userId);
   const requestedProjectCode = asNullableTrimmedString(body.project.project_code);
+  // Optional: when basic-details has inserted a draft (drafts table) for the
+  // wizard's "Message Employee" flow, we read it so conversations attached
+  // to drafts.draft_id can be migrated onto the freshly-inserted projects
+  // row. Existing dimensions on the draft also win over whatever the body
+  // sent (the draft is the live source of truth while the wizard is open).
+  const draftId = asNullableTrimmedString(
+    (body.project as Record<string, unknown> | undefined)?.draft_id,
+  );
+  // Back-compat: callers may still pass existing_project_id from the older
+  // "draft project row in projects table" approach. Treat it as a request
+  // to update the projects row in place instead of inserting.
+  const existingProjectId = asNullableTrimmedString(
+    (body.project as Record<string, unknown> | undefined)?.existing_project_id,
+  );
   const generatedTasks = parseGeneratedTasks(body.generatedTasks);
 
   console.log(
@@ -703,26 +717,37 @@ export async function POST(req: Request) {
   const resolvedScheduledEndDatetime =
     scheduledEndDatetime || fallbackProjectSchedule.projectScheduledEndDatetime || null;
 
-  const { data: insertedProject, error: projectInsertError } = await supabaseAdmin
-    .from("projects")
-    .insert({
-      project_code: projectCode,
-      title,
-      description,
-      site_address: siteAddress,
-      scheduled_start_datetime: normalizedScheduledStartDatetime,
-      scheduled_end_datetime: resolvedScheduledEndDatetime,
-      status: projectStatus,
-      priority: projectPriority,
-      estimated_budget: estimatedBudget ?? 0,
-      estimated_cost: estimatedCost ?? 0,
-      notes,
-      dimensions,
-      client_id: savedClientId,
-      created_by: creatorId,
-    })
-    .select("project_id, project_code, title")
-    .single<InsertedProjectRow>();
+  const projectRowPayload = {
+    project_code: projectCode,
+    title,
+    description,
+    site_address: siteAddress,
+    scheduled_start_datetime: normalizedScheduledStartDatetime,
+    scheduled_end_datetime: resolvedScheduledEndDatetime,
+    status: projectStatus,
+    priority: projectPriority,
+    estimated_budget: estimatedBudget ?? 0,
+    estimated_cost: estimatedCost ?? 0,
+    notes,
+    dimensions,
+    client_id: savedClientId,
+    created_by: creatorId,
+  };
+
+  // Upgrade-in-place when basic-details passed `existing_project_id` from
+  // the surface-generation draft. Insert otherwise.
+  const { data: insertedProject, error: projectInsertError } = existingProjectId
+    ? await supabaseAdmin
+        .from("projects")
+        .update({ ...projectRowPayload, updated_at: new Date().toISOString() })
+        .eq("project_id", existingProjectId)
+        .select("project_id, project_code, title")
+        .single<InsertedProjectRow>()
+    : await supabaseAdmin
+        .from("projects")
+        .insert(projectRowPayload)
+        .select("project_id, project_code, title")
+        .single<InsertedProjectRow>();
 
     if (projectInsertError || !insertedProject?.project_id) {
       return NextResponse.json(
@@ -733,6 +758,53 @@ export async function POST(req: Request) {
           details: projectInsertError?.message || "Project insert failed.",
         },
         { status: 500 }
+      );
+    }
+
+    // Draft handoff. If basic-details created a draft to hold the wizard
+    // state, every conversation attached to that draft is reattached to
+    // the freshly-inserted project before the draft row goes away. The
+    // sweep below catches the abandoned-session pile-up: the auto-create
+    // path inserts a fresh draft each time the admin clicks Generate
+    // Tasks without an active draft, so navigating away and coming back
+    // leaves orphans behind. Committing a real project is a strong
+    // signal that the rest of this user's drafts are no longer useful.
+    if (draftId) {
+      const { error: convoMigrateError } = await supabaseAdmin
+        .from("conversations")
+        .update({
+          project_id: insertedProject.project_id,
+          draft_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("draft_id", draftId);
+      if (convoMigrateError) {
+        console.error(
+          "Failed to migrate draft conversations to project.",
+          convoMigrateError.message,
+        );
+      }
+    }
+
+    // Wide cleanup: every draft this user owns goes, including the
+    // explicit `draftId` above (so we don't need a separate query for
+    // it) and any orphans from earlier sessions. `.select("draft_id")`
+    // returns the deleted rows so we can confirm the sweep actually
+    // matched something instead of silently no-op'ing.
+    const { data: deletedDrafts, error: draftDeleteError } =
+      await supabaseAdmin
+        .from("drafts")
+        .delete()
+        .eq("created_by", creatorId)
+        .select("draft_id");
+    if (draftDeleteError) {
+      console.error(
+        "Failed to clean up user drafts after promotion.",
+        draftDeleteError.message,
+      );
+    } else {
+      console.log(
+        `Cleaned up ${deletedDrafts?.length ?? 0} draft row(s) for user ${creatorId} after promoting project ${insertedProject.project_id}.`,
       );
     }
 

@@ -8,17 +8,17 @@ import {
   RefreshCw,
   Settings2,
   Loader2,
-  MessageSquare,
+  FolderOpen,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setOptimisticProjectStatus } from "@/lib/jobCreationStatus";
 import { initWizardCache, setCachedStep } from "@/lib/wizardCache";
 import { supabase } from "@/lib/supabaseClient";
 import CreateClientModal from "@/components/project-creation/CreateClientModal";
+import DraftsModal from "@/components/project-creation/DraftsModal";
 import MeasurementModal, {
   type MeasurementRow,
 } from "@/components/project-creation/MeasurementModal";
-import StaffMessageModal from "@/components/project-creation/StaffMessageModal";
 import type {
   ScaleBandKey,
   ScalePresetKey,
@@ -33,10 +33,6 @@ import countryCallingCodes from "@/lib/data/country-by-calling-code.json";
 import ScheduleCalendarModal from "@/components/project-creation/scheduleCalendarModal";
 import { useHolidaySettings } from "@/lib/settings/useHolidaySettings";
 import { useProjectNow } from "@/lib/time/useProjectNow";
-import {
-  registerNewMessageOpenHandler,
-  suppressNewMessageToast,
-} from "@/lib/hooks/useMessagesUnread";
 
 const ACCENT = "#00c065";
 const ACCENT_HOVER = "#00a054";
@@ -109,17 +105,6 @@ type StaffUsersResponse = {
     email?: string | null;
     specialties?: unknown;
   }>;
-};
-
-type ExtractedSurfaceMeasurement = {
-  presetKey: string;
-  estimatedValue: number;
-};
-
-type ExtractSurfaceMeasurementsApiResponse = {
-  measurements?: ExtractedSurfaceMeasurement[];
-  error?: string;
-  details?: string;
 };
 
 type GeneratedMainTask = {
@@ -368,10 +353,7 @@ function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
 
     scaled[row.presetKey] = {
       presetKey: row.presetKey as ProjectScaledField["presetKey"],
-      sizeBand: row.sizeBand as ProjectScaledField["sizeBand"],
       estimatedValue: existingValue + currentValue,
-      isManualOverride:
-        Boolean(existing?.isManualOverride) || row.isManualOverride,
     };
   }
 
@@ -477,6 +459,13 @@ export default function BasicDetails() {
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(
     projectIdFromUrl || null,
   );
+  // Draft handle for the in-progress wizard. Set when "Recommend Surfaces"
+  // creates a drafts row so subsequent "Message Employee" / measure-
+  // generator flows have something to attach to. Cleared once createProject
+  // promotes the draft to a real project.
+  const [createdDraftId, setCreatedDraftId] = useState<string | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftsModalOpen, setDraftsModalOpen] = useState(false);
 
   const [assignmentDay, setAssignmentDay] = useState<WeekdayKey>("monday");
   const [loading, setLoading] = useState(false);
@@ -525,25 +514,7 @@ export default function BasicDetails() {
     email: string;
     specialties: string[];
   };
-  type StaffConvMessage = {
-    id: string;
-    senderId: string;
-    senderType: "admin" | "employee";
-    text: string;
-    createdAt: string;
-  };
-  type StaffConvData = {
-    id: string;
-    employeeId: string;
-    employeeName: string;
-    employeeEmail?: string;
-    employeeRole?: string;
-    employeeAvatarUrl?: string | null;
-    lastMessage?: string;
-    messages: StaffConvMessage[];
-  };
 
-  const [surfaceMsgOpen, setSurfaceMsgOpen] = useState(false);
   const [surfaceMsgEmployees, setSurfaceMsgEmployees] = useState<
     SurfaceEmployee[]
   >([]);
@@ -552,24 +523,8 @@ export default function BasicDetails() {
   const [surfaceMsgLoadError, setSurfaceMsgLoadError] = useState<string | null>(
     null,
   );
-  const [surfaceMsgEmployeeId, setSurfaceMsgEmployeeId] = useState("");
-  const [surfaceMsgText, setSurfaceMsgText] = useState("");
   const [surfaceMsgSending, setSurfaceMsgSending] = useState(false);
-  const [surfaceMsgApplyingMeasurementId, setSurfaceMsgApplyingMeasurementId] =
-    useState<string | null>(null);
-  const [recipientPickerOpen, setRecipientPickerOpen] = useState(false);
-  const [surfaceMsgConversations, setSurfaceMsgConversations] = useState<
-    StaffConvData[]
-  >([]);
-  const [surfaceMsgConversationsLoading, setSurfaceMsgConversationsLoading] =
-    useState(false);
-  const [surfaceMsgConversationError, setSurfaceMsgConversationError] =
-    useState<string | null>(null);
-  const [surfaceMsgSpecsEmployeeIds, setSurfaceMsgSpecsEmployeeIds] = useState<
-    string[]
-  >([]);
   const surfaceMsgEmployeesLoadedRef = useRef(false);
-  const surfaceMsgConversationsLoadedRef = useRef(false);
 
   const [surfacePresets, setSurfacePresets] = useState<SurfaceScalePresets>({});
   const [surfacePresetsLoading, setSurfacePresetsLoading] = useState(false);
@@ -800,86 +755,6 @@ export default function BasicDetails() {
     }));
   }, []);
 
-  const surfaceMsgDisplayConversations = useMemo(() => {
-    const convs = [...surfaceMsgConversations];
-
-    // Synth placeholders for every picked recipient that has no real conv yet,
-    // so successive picks all stay visible instead of replacing each other.
-    const syntheticEmployeeIds = new Set<string>(surfaceMsgSpecsEmployeeIds);
-    if (surfaceMsgEmployeeId) syntheticEmployeeIds.add(surfaceMsgEmployeeId);
-
-    for (const empId of syntheticEmployeeIds) {
-      if (convs.some((c) => c.employeeId === empId)) continue;
-      const emp = surfaceMsgEmployees.find((e) => e.id === empId);
-      if (!emp) continue;
-      convs.unshift({
-        id: empId,
-        employeeId: empId,
-        employeeName: emp.name,
-        employeeEmail: emp.email,
-        messages: [] as StaffConvMessage[],
-      });
-    }
-
-    // Pin specs-sent conversations to the top, preserving their send order
-    if (surfaceMsgSpecsEmployeeIds.length > 0) {
-      convs.sort((a, b) => {
-        const ai = surfaceMsgSpecsEmployeeIds.indexOf(a.employeeId);
-        const bi = surfaceMsgSpecsEmployeeIds.indexOf(b.employeeId);
-        const aIsSpecs = ai !== -1;
-        const bIsSpecs = bi !== -1;
-        if (aIsSpecs && !bIsSpecs) return -1;
-        if (!aIsSpecs && bIsSpecs) return 1;
-        if (aIsSpecs && bIsSpecs) return ai - bi;
-        return 0;
-      });
-    }
-
-    return convs;
-  }, [
-    surfaceMsgEmployeeId,
-    surfaceMsgConversations,
-    surfaceMsgEmployees,
-    surfaceMsgSpecsEmployeeIds,
-  ]);
-
-  const surfaceMsgSpecsConvIds = useMemo(
-    () =>
-      surfaceMsgSpecsEmployeeIds.map((empId) => {
-        const real = surfaceMsgConversations.find(
-          (c) => c.employeeId === empId,
-        );
-        return real?.id ?? empId;
-      }),
-    [surfaceMsgSpecsEmployeeIds, surfaceMsgConversations],
-  );
-
-  const surfaceMsgSelectedConvId = useMemo(() => {
-    if (!surfaceMsgEmployeeId) return "";
-    const real = surfaceMsgConversations.find(
-      (c) => c.employeeId === surfaceMsgEmployeeId,
-    );
-    return real?.id ?? surfaceMsgEmployeeId;
-  }, [surfaceMsgEmployeeId, surfaceMsgConversations]);
-
-  // Has any specs-target employee replied since the admin's last message?
-  // We compare against surfaceMsgSpecsEmployeeIds (employees the admin
-  // already sent specs to) and check whether the conversation's latest
-  // message is from the employee — meaning the staff has replied and the
-  // admin hasn't sent anything since. Drives the "new reply" badge on
-  // the "Message Employee" button. Clears naturally once the admin sends
-  // a follow-up message (latest flips back to senderType: "admin").
-  const hasUnreadSpecsReply = useMemo(() => {
-    if (surfaceMsgSpecsEmployeeIds.length === 0) return false;
-    const specsSet = new Set(surfaceMsgSpecsEmployeeIds);
-    return surfaceMsgConversations.some((conv) => {
-      if (!specsSet.has(conv.employeeId)) return false;
-      const messages = conv.messages;
-      if (!messages || messages.length === 0) return false;
-      return messages[messages.length - 1].senderType === "employee";
-    });
-  }, [surfaceMsgConversations, surfaceMsgSpecsEmployeeIds]);
-
   const [availableDateEvents, setAvailableDateEvents] = useState<
     Array<{
       title: string;
@@ -1028,41 +903,257 @@ export default function BasicDetails() {
     setMeasurementRows((prev) => prev.filter((row) => row.id !== id));
   }
 
-  function applyExtractedMeasurements(
-    measurements: ExtractedSurfaceMeasurement[],
-  ) {
-    setMeasurementRows((prev) => {
-      const nextRows = [...prev];
+  const [refreshingMeasurements, setRefreshingMeasurements] = useState(false);
 
-      for (const measurement of measurements) {
-        const preset = surfacePresets[measurement.presetKey];
-        if (!preset) continue;
+  // Pull the latest dimensions from the DB and rebuild measurementRows
+  // from them. Used by the refresh button in MeasurementModal so the
+  // admin can see updates that staff just pushed via the measure
+  // generator's Save Surfaces button without leaving the wizard.
+  async function refreshMeasurementsFromDb() {
+    const code = projectCode.trim();
+    if (!code && !createdDraftId && !createdProjectId) {
+      toast.message(
+        "Generate surfaces first. There's nothing to refresh from yet.",
+      );
+      return;
+    }
+    if (refreshingMeasurements) return;
+    setRefreshingMeasurements(true);
+    try {
+      const queryParam = createdDraftId
+        ? `draftId=${encodeURIComponent(createdDraftId)}`
+        : createdProjectId
+          ? `projectId=${encodeURIComponent(createdProjectId)}`
+          : `projectCode=${encodeURIComponent(code)}`;
+      const response = await fetch(
+        `/api/planning/getProjectDimensions?${queryParam}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json().catch(() => null)) as {
+        dimensions?: {
+          scaled?: Record<
+            string,
+            {
+              presetKey?: string;
+              estimatedValue?: number;
+            }
+          > | null;
+        } | null;
+        error?: string;
+      } | null;
 
-        const existingIndex = nextRows.findIndex(
-          (row) => row.presetKey === measurement.presetKey,
-        );
-
-        if (existingIndex >= 0) {
-          nextRows[existingIndex] = {
-            ...nextRows[existingIndex],
-            estimatedValue: measurement.estimatedValue,
-            isManualOverride: true,
-            isMeasurementPending: false,
-          };
-          continue;
-        }
-
-        nextRows.push(
-          makeRowFromPreset(surfacePresets, measurement.presetKey, "medium", {
-            estimatedValue: measurement.estimatedValue,
-            isManualOverride: true,
-            isMeasurementPending: false,
-          }),
-        );
+      if (!response.ok) {
+        toast.error(data?.error || "Failed to load latest measurements.");
+        return;
       }
 
-      return nextRows;
-    });
+      const scaled = data?.dimensions?.scaled ?? {};
+      const nextRows: MeasurementRow[] = Object.entries(scaled)
+        .filter(([key]) => Boolean(surfacePresets[key as ScalePresetKey]))
+        .map(([key, value]) => {
+          const presetKey = key as ScalePresetKey;
+          const numericValue = Number(value?.estimatedValue);
+          const hasValue =
+            Number.isFinite(numericValue) && numericValue > 0;
+          return makeRowFromPreset(
+            surfacePresets,
+            presetKey,
+            "medium",
+            {
+              estimatedValue: hasValue ? numericValue : 0,
+              isMeasurementPending: !hasValue,
+            },
+          );
+        });
+
+      setMeasurementRows(nextRows);
+      toast.success("Measurements refreshed.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to refresh measurements.",
+      );
+    } finally {
+      setRefreshingMeasurements(false);
+    }
+  }
+
+  // Persist the current wizard state into the drafts table. If a draft is
+  // already open in this session it's updated in place; otherwise a new
+  // draft row is inserted and its id is cached for the rest of the
+  // session. Pure save: no surface generation, no validation gate.
+  async function handleSaveDraft() {
+    if (draftSaving) return;
+    setDraftSaving(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const creatorId = authData?.user?.id ?? null;
+      if (!creatorId) {
+        toast.error("Sign in to save a draft.");
+        return;
+      }
+
+      const draftDimensions = (() => {
+        const base = rowsToProjectDimensions(measurementRows);
+        const scaled = {
+          ...(base.scaled ?? {}),
+        } as Record<string, unknown>;
+        for (const row of measurementRows) {
+          if (scaled[row.presetKey]) continue;
+          scaled[row.presetKey] = {
+            presetKey: row.presetKey,
+            estimatedValue: 0,
+          };
+        }
+        return { ...base, scaled };
+      })();
+
+      const response = await fetch("/api/planning/createProjectDraft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draftId: createdDraftId || null,
+          client: {
+            client_id: selectedClientId || null,
+            full_name: clientName.trim() || null,
+            email: clientEmail.trim() || null,
+            phone: clientPhone.trim() || null,
+            address: address.trim() || null,
+          },
+          project: {
+            title: projectName.trim() || null,
+            description: description.trim() || null,
+            site_address: address.trim() || null,
+            scheduled_start_datetime: scheduledStart || null,
+            scheduled_end_datetime: scheduledEnd || null,
+            dimensions: draftDimensions as unknown as Record<string, unknown>,
+            // Only honored on the insert path. The endpoint ignores
+            // project_code on updates so existing conversations attached
+            // to drafts.draft_code keep matching.
+            project_code: projectCode.trim() || null,
+          },
+          createdBy: { userId: creatorId },
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        error?: string;
+        draft?: { draft_id?: string; draft_code?: string };
+      } | null;
+
+      if (!response.ok || !data?.draft?.draft_id) {
+        toast.error(data?.error || "Failed to save draft.");
+        return;
+      }
+
+      setCreatedDraftId(data.draft.draft_id);
+      if (data.draft.draft_code) setProjectCode(data.draft.draft_code);
+      toast.success("Draft saved.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save draft.",
+      );
+    } finally {
+      setDraftSaving(false);
+    }
+  }
+
+  // Repopulate the basic-details form fields from a stored draft. Used
+  // by the See Drafts modal so the admin can resume an older draft. The
+  // measurementRows are rebuilt from drafts.dimensions.scaled.
+  async function handlePickDraft(draftId: string) {
+    try {
+      const response = await fetch(
+        `/api/planning/getDraft?draftId=${encodeURIComponent(draftId)}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json().catch(() => null)) as {
+        draft?: {
+          draft_id: string;
+          draft_code: string;
+          project_name: string | null;
+          description: string | null;
+          site_address: string | null;
+          scheduled_start_datetime: string | null;
+          scheduled_end_datetime: string | null;
+          dimensions: {
+            scaled?: Record<
+              string,
+              {
+                presetKey?: string;
+                estimatedValue?: number;
+              }
+            > | null;
+          } | null;
+          client_id: string | null;
+          client_full_name: string | null;
+          client_email: string | null;
+          client_phone: string | null;
+          client_address: string | null;
+        };
+        error?: string;
+      } | null;
+
+      if (!response.ok || !data?.draft) {
+        toast.error(data?.error || "Failed to load draft.");
+        return;
+      }
+
+      const draft = data.draft;
+
+      setCreatedDraftId(draft.draft_id);
+      setProjectCode(draft.draft_code || generateProjectCode());
+      setProjectName(draft.project_name ?? "");
+      setDescription(draft.description ?? "");
+      setAddress(draft.site_address ?? draft.client_address ?? "");
+
+      // Stored as a full ISO timestamptz. The form input is a yyyy-mm-dd
+      // value so strip the time portion when restoring.
+      if (draft.scheduled_start_datetime) {
+        setScheduledStart(draft.scheduled_start_datetime.slice(0, 10));
+      } else {
+        setScheduledStart("");
+      }
+      if (draft.scheduled_end_datetime) {
+        setScheduledEnd(draft.scheduled_end_datetime.slice(0, 10));
+      } else {
+        setScheduledEnd("");
+      }
+
+      setSelectedClientId(draft.client_id ?? "");
+      setClientName(draft.client_full_name ?? "");
+      setClientEmail(draft.client_email ?? "");
+      setClientPhone(draft.client_phone ?? "+63");
+
+      const scaled = draft.dimensions?.scaled ?? {};
+      const nextRows: MeasurementRow[] = Object.entries(scaled)
+        .filter(([key]) => Boolean(surfacePresets[key as ScalePresetKey]))
+        .map(([key, value]) => {
+          const presetKey = key as ScalePresetKey;
+          const numericValue = Number(value?.estimatedValue);
+          const hasValue =
+            Number.isFinite(numericValue) && numericValue > 0;
+          return makeRowFromPreset(
+            surfacePresets,
+            presetKey,
+            "medium",
+            {
+              estimatedValue: hasValue ? numericValue : 0,
+              isMeasurementPending: !hasValue,
+            },
+          );
+        });
+      setMeasurementRows(nextRows);
+
+      setDraftsModalOpen(false);
+      toast.success(`Loaded draft ${draft.draft_code}.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to load draft.",
+      );
+    }
   }
 
   function handleNewClientPhoneCountryChange(callingCode: string) {
@@ -1276,17 +1367,132 @@ export default function BasicDetails() {
         }
       }
 
+      let nextRows = measurementRows;
+      const hadExistingSurfaces = measurementRows.length > 0;
       if (surfaceKeys.length > 0) {
-        setMeasurementRows(
-          surfaceKeys.map((key) =>
-            makeRecommendedSurfaceRow(surfacePresets, key),
-          ),
+        nextRows = surfaceKeys.map((key) =>
+          makeRecommendedSurfaceRow(surfacePresets, key),
+        );
+        setMeasurementRows(nextRows);
+        toast.success(
+          hadExistingSurfaces ? "Surfaces updated" : "Surfaces added",
         );
       }
 
-      toast.success(
-        `Generated ${tasks.length} main task${tasks.length !== 1 ? "s" : ""}`,
-      );
+      // Pre-seed every recommended surface key so the staff measure
+      // generator's Save Surfaces has a target slot for each key.
+      const recommendedDimensions = (() => {
+        const base = rowsToProjectDimensions(nextRows);
+        const scaled = {
+          ...(base.scaled ?? {}),
+        } as Record<string, unknown>;
+        for (const row of nextRows) {
+          if (scaled[row.presetKey]) continue;
+          scaled[row.presetKey] = {
+            presetKey: row.presetKey,
+            estimatedValue: 0,
+          };
+        }
+        return { ...base, scaled };
+      })();
+
+      // If the project row already exists (re-entry via ?projectId=…),
+      // write the freshly recommended dimensions onto it. If a draft row
+      // already exists from a prior click, update that. Otherwise insert
+      // a new draft.
+      if (createdProjectId && surfaceKeys.length > 0) {
+        postJson<{ success?: boolean; error?: string }>(
+          "/api/planning/updateProjectDimensions",
+          {
+            projectId: createdProjectId,
+            dimensions: recommendedDimensions as unknown as Record<
+              string,
+              unknown
+            >,
+          },
+        ).catch((error) => {
+          console.error("Failed to persist recommended dimensions", error);
+        });
+      } else if (createdDraftId && surfaceKeys.length > 0) {
+        postJson<{ success?: boolean; error?: string }>(
+          "/api/planning/updateProjectDimensions",
+          {
+            draftId: createdDraftId,
+            dimensions: recommendedDimensions as unknown as Record<
+              string,
+              unknown
+            >,
+          },
+        ).catch((error) => {
+          console.error("Failed to persist draft dimensions", error);
+        });
+      } else if (!createdProjectId && surfaceKeys.length > 0) {
+        // No project row yet. Create a stub one tied to the freshly
+        // recommended dimensions so the "Message Employee" flow has
+        // somewhere to attach the conversation. Without this, the staff
+        // measure-generator shows "No project linked" because the
+        // conversation has no project_id. Best-effort: a missing client /
+        // sign-in surfaces as a toast warning but doesn't block the rest
+        // of the generation flow.
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          const creatorId = authData?.user?.id ?? null;
+          if (!creatorId) {
+            toast.message(
+              "Sign in to enable messaging staff with project context.",
+            );
+          } else {
+            const draftResponse = await fetch(
+              "/api/planning/createProjectDraft",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  client: {
+                    client_id: selectedClientId || null,
+                    full_name: clientName.trim() || null,
+                    email: clientEmail.trim() || null,
+                    phone: clientPhone.trim() || null,
+                    address: address.trim() || null,
+                  },
+                  project: {
+                    title: projectName.trim() || null,
+                    description: description.trim() || null,
+                    site_address: address.trim() || null,
+                    scheduled_start_datetime: scheduledStart || null,
+                    scheduled_end_datetime: scheduledEnd || null,
+                    dimensions: recommendedDimensions as unknown as Record<
+                      string,
+                      unknown
+                    >,
+                  },
+                  createdBy: { userId: creatorId },
+                }),
+              },
+            );
+            const draftData = (await draftResponse
+              .json()
+              .catch(() => null)) as {
+              success?: boolean;
+              error?: string;
+              draft?: { draft_id?: string; draft_code?: string };
+            } | null;
+            if (draftResponse.ok && draftData?.draft?.draft_id) {
+              setCreatedDraftId(draftData.draft.draft_id);
+              if (draftData.draft.draft_code) {
+                setProjectCode(draftData.draft.draft_code);
+              }
+            } else {
+              toast.message(
+                draftData?.error ||
+                  "Fill in client info to enable messaging staff with project context.",
+              );
+            }
+          }
+        } catch (draftError) {
+          console.error("Failed to create draft", draftError);
+        }
+      }
     } catch (error: any) {
       toast.error(error?.message || "Failed to generate tasks.");
     } finally {
@@ -1796,6 +2002,16 @@ export default function BasicDetails() {
             estimated_cost: 0,
             notes: null,
             dimensions: normalizedDimensions,
+            // If we inserted a project row earlier (re-entry via
+            // ?projectId=...), upgrade it in place instead of inserting a
+            // duplicate. createProject's UPDATE branch preserves any
+            // already-attached conversations.
+            existing_project_id: createdProjectId || null,
+            // If basic-details created a draft for the wizard, hand its id
+            // off so createProject can migrate any conversations attached
+            // to it onto the freshly-inserted project, then delete the
+            // draft row.
+            draft_id: createdDraftId || null,
           },
           createdBy: {
             userId: creatorId,
@@ -1834,37 +2050,25 @@ export default function BasicDetails() {
       }
 
       setCreatedProjectId(projectRow.project_id);
+      // Draft was just promoted to a project (or never existed). Clear
+      // the draft handle so subsequent surface re-runs route through the
+      // project branch.
+      setCreatedDraftId(null);
 
       router.replace(
         `/admin/job-creation/basic-details?projectId=${projectRow.project_id}`,
       );
 
-      sessionStorage.setItem(
-        SESSION_DRAFT_KEY,
-        JSON.stringify({
-          projectId: projectRow.project_id,
-          projectCode: projectRow.project_code,
-          clientId: savedClientId,
-          assignmentDay,
-          basicDetails: {
-            projectName: title,
-            projectCode: projectRow.project_code,
-            scheduled_start_datetime: effectiveStartDatetime,
-            scheduled_end_datetime: scheduledEnd || null,
-            address: siteAddress,
-            clientName: cName,
-            clientEmail: cEmail,
-            clientPhone: cPhone,
-            description: description.trim(),
-            measurementRows,
-            normalizedDimensions,
-          },
-          generatedTasks: nextTasks,
-          savedAt: new Date().toISOString(),
-        }),
-      );
-
+      // Wipe every trace of the in-progress draft. The DB row was already
+      // deleted by createProject (via the draft_id handoff). Local storage
+      // held the resume-the-wizard payload; sessionStorage previously held
+      // a downstream-handoff blob under the same key that nothing reads
+      // anymore (the wizard handoff is now `initWizardCache`). Removing
+      // both keeps dev-tools clean and prevents a stale draft from being
+      // restored if the admin navigates back to basic-details before the
+      // router push completes.
       localStorage.removeItem(SESSION_DRAFT_KEY);
+      sessionStorage.removeItem(SESSION_DRAFT_KEY);
 
       // Seed the wizard cache so subsequent pages can read from it instantly.
       initWizardCache(projectRow.project_id, {
@@ -2112,17 +2316,14 @@ export default function BasicDetails() {
     );
 
     const lines = surfaces.map((surface) => `- ${surface}`);
-    /*
-        return `  • ${preset.label}: ${row.estimatedValue} ${unitLabel(preset.unit)}`;
-      })
-      .filter(Boolean) as string[];
-
-    */
+    const code = projectCode.trim();
 
     return [
       "Hi,",
       "",
-      "Please measure the following surfaces for the upcoming project:",
+      code
+        ? `Please measure the following surfaces for project ${code}:`
+        : "Please measure the following surfaces for the upcoming project:",
       "",
       ...lines,
       "",
@@ -2132,29 +2333,7 @@ export default function BasicDetails() {
     ].join("\n");
   }
 
-  function handleOpenSurfaceMsg() {
-    setSurfaceMsgOpen(true);
-    void handleSurfaceMsgProceed(false);
-    // Force a fresh fetch on every open — the cached version may be
-    // stale if the admin sent messages from /admin/messages between
-    // opens of this modal. Show the spinner only if we don't already
-    // have anything to show.
-    const showSpinner = surfaceMsgConversations.length === 0;
-    void loadStaffConversations(showSpinner, true);
-  }
-
-  function handleOpenSurfaceMsgRecipientPicker() {
-    setRecipientPickerOpen(true);
-
-    if (surfaceMsgLoadError) {
-      void handleSurfaceMsgProceed(true);
-      return;
-    }
-
-    void handleSurfaceMsgProceed(false);
-  }
-
-  async function handleSurfaceMsgProceed(force = true) {
+  async function loadSurfaceMsgRecipients(force = true) {
     if (
       !force &&
       (surfaceMsgEmployeesLoadedRef.current || surfaceMsgLoadingEmployees)
@@ -2193,115 +2372,15 @@ export default function BasicDetails() {
     }
   }
 
-  async function loadStaffConversations(showLoading = true, force = true) {
-    if (
-      !force &&
-      (surfaceMsgConversationsLoadedRef.current ||
-        surfaceMsgConversationsLoading)
-    ) {
+  async function handleSendSurfaceMessage(recipientId: string) {
+    if (!recipientId || surfaceMsgSending) return;
+
+    const messageText = formatSurfaceMessage().trim();
+    if (!messageText) {
+      toast.error("Add at least one surface before messaging staff.");
       return;
     }
 
-    if (showLoading) setSurfaceMsgConversationsLoading(true);
-    setSurfaceMsgConversationError(null);
-    try {
-      const res = await fetch(
-        createdProjectId
-          ? `/api/messages/staff-conversations?projectId=${encodeURIComponent(createdProjectId)}`
-          : "/api/messages/staff-conversations",
-      );
-      if (!res.ok) throw new Error("Failed to load conversations.");
-      const json = await res.json();
-      setSurfaceMsgConversations(json.conversations ?? []);
-      surfaceMsgConversationsLoadedRef.current = true;
-    } catch (error) {
-      setSurfaceMsgConversationError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load conversations.",
-      );
-      surfaceMsgConversationsLoadedRef.current = false;
-    } finally {
-      if (showLoading) setSurfaceMsgConversationsLoading(false);
-    }
-  }
-
-  // Realtime: when a new message arrives while the staff message modal
-  // is open, refetch conversations so the reply lands instantly instead
-  // of only after the admin closes and reopens the modal. Mirrors the
-  // global-chat-listener pattern used by /admin/messages.
-  //
-  // `loadStaffConversations` is a plain function that closes over state
-  // setters and `createdProjectId` — putting it in the deps would force
-  // a resubscribe every render. The ref pattern keeps the subscription
-  // stable across renders while always invoking the latest closure.
-  const loadStaffConversationsRef = useRef(loadStaffConversations);
-  useEffect(() => {
-    loadStaffConversationsRef.current = loadStaffConversations;
-  });
-
-  useEffect(() => {
-    if (!surfaceMsgOpen) return;
-    const channel = supabase
-      .channel("basic-details-staff-msg-listener")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        () => {
-          void loadStaffConversationsRef.current(false);
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [surfaceMsgOpen]);
-
-  // Belt-and-braces refresh while the modal is open: same pattern as
-  // /admin/messages. Realtime is the primary signal, but the
-  // messages table may not be in the supabase_realtime publication or
-  // a channel can quietly drop — so we also refetch every 5s and on
-  // tab focus so the conversation list never lags behind the DB.
-  useEffect(() => {
-    if (!surfaceMsgOpen) return;
-
-    const interval = window.setInterval(() => {
-      void loadStaffConversationsRef.current(false);
-    }, 5_000);
-
-    function handleVisibility() {
-      if (document.visibilityState === "visible") {
-        void loadStaffConversationsRef.current(false);
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
-  }, [surfaceMsgOpen]);
-
-  // While the StaffMessageModal is open the modal itself renders incoming
-  // messages inline via the realtime listener above, so the global "New
-  // message" toast from useMessagesUnread would just be noise. Suppress it
-  // for as long as the modal stays open.
-  useEffect(() => {
-    if (!surfaceMsgOpen) return;
-    return suppressNewMessageToast();
-  }, [surfaceMsgOpen]);
-
-  // Hijack the toast's "Open" action while we're on this page so it pops
-  // the in-page StaffMessageModal instead of routing to /admin/messages.
-  // Keeps the admin in the wizard step they were working on.
-  useEffect(() => {
-    return registerNewMessageOpenHandler(() => {
-      setSurfaceMsgOpen(true);
-    });
-  }, []);
-
-  async function handleSendSurfaceMsg() {
-    if (!surfaceMsgEmployeeId || !surfaceMsgText.trim()) return;
     setSurfaceMsgSending(true);
     try {
       const { data: authData } = await supabase.auth.getUser();
@@ -2312,8 +2391,12 @@ export default function BasicDetails() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetUserId: surfaceMsgEmployeeId,
-          ...(createdProjectId ? { projectId: createdProjectId } : {}),
+          targetUserId: recipientId,
+          ...(createdProjectId
+            ? { projectId: createdProjectId }
+            : createdDraftId
+              ? { draftId: createdDraftId }
+              : {}),
         }),
       });
       if (!convRes.ok) throw new Error("Failed to create conversation.");
@@ -2325,129 +2408,17 @@ export default function BasicDetails() {
       const { error: msgError } = await supabase.from("messages").insert({
         conversation_id: conversationId,
         sender_id: senderId,
-        content: surfaceMsgText.trim(),
+        content: messageText,
       });
       if (msgError) throw msgError;
 
-      toast.success("Message sent.");
-      setSurfaceMsgText("");
-      void loadStaffConversations(false);
+      toast.success("Message sent to staff.");
     } catch (error: unknown) {
       toast.error(
         error instanceof Error ? error.message : "Failed to send message.",
       );
     } finally {
       setSurfaceMsgSending(false);
-    }
-  }
-
-  async function handleApplyMeasurementsFromMessage(message: StaffConvMessage) {
-    if (!/\d/.test(message.text)) {
-      toast.info("No measurements found", {
-        description: "That message does not contain any numbers to extract.",
-      });
-      return;
-    }
-
-    const configuredSurfaces = Array.from(
-      new Map(
-        measurementRows
-          .map((row) => {
-            const preset = surfacePresets[row.presetKey];
-            if (!preset) return null;
-
-            return [
-              row.presetKey,
-              {
-                presetKey: row.presetKey,
-                label: preset.label,
-                unit: preset.unit,
-              },
-            ] as const;
-          })
-          .filter(Boolean) as Array<
-          readonly [
-            string,
-            {
-              presetKey: string;
-              label: string;
-              unit: string;
-            },
-          ]
-        >,
-      ).values(),
-    );
-
-    if (configuredSurfaces.length === 0) {
-      toast.error("No configured surfaces found", {
-        description:
-          "Add or recommend surfaces in Basic Details before applying measurements.",
-      });
-      return;
-    }
-
-    setSurfaceMsgApplyingMeasurementId(message.id);
-
-    try {
-      const response = await fetch("/api/planning/extractSurfaceMeasurements", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messageText: message.text,
-          surfaces: configuredSurfaces,
-        }),
-      });
-
-      const data = (await response
-        .json()
-        .catch(() => null)) as ExtractSurfaceMeasurementsApiResponse | null;
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to extract measurements.",
-        );
-      }
-
-      const measurements = Array.isArray(data?.measurements)
-        ? data.measurements.filter(
-            (measurement) =>
-              Boolean(measurement?.presetKey) &&
-              Number.isFinite(Number(measurement?.estimatedValue)),
-          )
-        : [];
-
-      if (measurements.length === 0) {
-        toast.info("No usable measurements found", {
-          description:
-            "AI could not match any numbers in that message to your configured surfaces.",
-        });
-        return;
-      }
-
-      applyExtractedMeasurements(measurements);
-
-      const appliedSurfaceLabels = measurements
-        .map((measurement) => surfacePresets[measurement.presetKey]?.label)
-        .filter(Boolean)
-        .join(", ");
-
-      toast.success("Basic details updated", {
-        description: appliedSurfaceLabels
-          ? `Applied measurements for ${appliedSurfaceLabels}.`
-          : "Applied extracted surface measurements.",
-      });
-    } catch (error) {
-      toast.error("Could not apply measurements", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to extract surface measurements from that message.",
-      });
-    } finally {
-      setSurfaceMsgApplyingMeasurementId(null);
     }
   }
 
@@ -2533,10 +2504,6 @@ export default function BasicDetails() {
                     </span>
                     Manual mode
                   </button>
-
-                  <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    Draft Setup
-                  </div>
                 </div>
               </div>
             </div>
@@ -2867,38 +2834,24 @@ export default function BasicDetails() {
                           {measurementRows.length > 0 ? (
                             <button
                               type="button"
-                              onClick={handleOpenSurfaceMsg}
-                              className="relative inline-flex h-6 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
+                              onClick={() => {
+                                setMeasurementModalOpen(true);
+                                clearFormError("measurements");
+                              }}
+                              className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-semibold text-white shadow-sm transition-all duration-200"
+                              style={{ backgroundColor: ACCENT }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor =
+                                  ACCENT_HOVER;
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = ACCENT;
+                              }}
                             >
-                              <MessageSquare className="h-3 w-3" />
-                              Message Employee
-                              {hasUnreadSpecsReply ? (
-                                <span
-                                  aria-label="New employee reply"
-                                  className="absolute -right-1 -top-1 inline-flex h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-900"
-                                />
-                              ) : null}
+                              <Settings2 className="h-3 w-3" />
+                              Edit
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMeasurementModalOpen(true);
-                              clearFormError("measurements");
-                            }}
-                            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-semibold text-white shadow-sm transition-all duration-200"
-                            style={{ backgroundColor: ACCENT }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor =
-                                ACCENT_HOVER;
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = ACCENT;
-                            }}
-                          >
-                            <Settings2 className="h-3 w-3" />
-                            Edit
-                          </button>
                         </div>
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -2933,7 +2886,15 @@ export default function BasicDetails() {
 
             <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center justify-between gap-3">
-                <div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDraftsModalOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                    See Drafts
+                  </button>
                   <button
                     type="button"
                     className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/15"
@@ -2951,6 +2912,17 @@ export default function BasicDetails() {
                     disabled={isBusy}
                   >
                     Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    disabled={draftSaving || isBusy}
+                    className="inline-flex w-[140px] items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                  >
+                    {draftSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : null}
+                    {draftSaving ? "Saving..." : "Save Draft"}
                   </button>
                   <button
                     type="button"
@@ -3017,81 +2989,24 @@ export default function BasicDetails() {
           onPresetChange={handlePresetChange}
           onBandChange={handleBandChange}
           onManualValueChange={handleManualValueChange}
+          messageRecipients={surfaceMsgEmployees}
+          loadingMessageRecipients={surfaceMsgLoadingEmployees}
+          messageRecipientsError={surfaceMsgLoadError}
+          onLoadMessageRecipients={() => {
+            void loadSurfaceMsgRecipients(true);
+          }}
+          onSendSurfaceMessage={handleSendSurfaceMessage}
+          sendingSurfaceMessage={surfaceMsgSending}
+          onRefreshMeasurements={refreshMeasurementsFromDb}
+          refreshingMeasurements={refreshingMeasurements}
+        />
+
+        <DraftsModal
+          open={draftsModalOpen}
+          onClose={() => setDraftsModalOpen(false)}
+          onPickDraft={handlePickDraft}
         />
       </div>
-
-      <StaffMessageModal
-        open={surfaceMsgOpen}
-        onOpenChange={(open) => {
-          setSurfaceMsgOpen(open);
-          if (!open) {
-            setSurfaceMsgSending(false);
-            setSurfaceMsgApplyingMeasurementId(null);
-            setRecipientPickerOpen(false);
-          }
-        }}
-        conversations={surfaceMsgDisplayConversations}
-        loadingConversations={surfaceMsgConversationsLoading}
-        conversationLoadError={surfaceMsgConversationError}
-        onRetryLoadConversations={loadStaffConversations}
-        selectedConversationId={surfaceMsgSelectedConvId}
-        specsSentConversationIds={surfaceMsgSpecsConvIds}
-        onSelectedConversationIdChange={(convId) => {
-          const conv = surfaceMsgDisplayConversations.find(
-            (c) => c.id === convId,
-          );
-          if (conv) setSurfaceMsgEmployeeId(conv.employeeId);
-        }}
-        messageText={surfaceMsgText}
-        onMessageTextChange={setSurfaceMsgText}
-        sending={surfaceMsgSending}
-        applyingMeasurementMessageId={surfaceMsgApplyingMeasurementId}
-        onSend={handleSendSurfaceMsg}
-        onCreateNew={handleOpenSurfaceMsgRecipientPicker}
-        recipientPickerOpen={recipientPickerOpen}
-        onRecipientPickerOpenChange={setRecipientPickerOpen}
-        recipientOptions={surfaceMsgEmployees}
-        loadingRecipients={surfaceMsgLoadingEmployees}
-        recipientLoadError={surfaceMsgLoadError}
-        onRetryLoadRecipients={() => {
-          void handleSurfaceMsgProceed(true);
-        }}
-        onSelectRecipient={(emp) => {
-          const hasExisting = surfaceMsgConversations.some(
-            (c) => c.employeeId === emp.id,
-          );
-          if (!hasExisting) {
-            setSurfaceMsgText(formatSurfaceMessage());
-            setSurfaceMsgSpecsEmployeeIds((prev) =>
-              prev.includes(emp.id) ? prev : [...prev, emp.id],
-            );
-          }
-          setSurfaceMsgEmployeeId(emp.id);
-        }}
-        onFillSpecs={() => {
-          setSurfaceMsgText(formatSurfaceMessage());
-          if (surfaceMsgEmployeeId) {
-            setSurfaceMsgSpecsEmployeeIds((prev) =>
-              prev.includes(surfaceMsgEmployeeId)
-                ? prev
-                : [...prev, surfaceMsgEmployeeId],
-            );
-          }
-        }}
-        onApplyMeasurements={handleApplyMeasurementsFromMessage}
-        onDeleteMessage={async (messageId) => {
-          const res = await fetch(
-            `/api/messages/manage?messageId=${messageId}`,
-            { method: "DELETE" },
-          );
-          if (!res.ok) {
-            const data = await res.json();
-            toast.error(data?.error ?? "Failed to delete message.");
-            return;
-          }
-          void loadStaffConversations(false);
-        }}
-      />
 
       {loading ? (
         <div className="fixed inset-0 z-80 flex items-center justify-center bg-white/80 backdrop-blur-sm dark:bg-slate-950/80">

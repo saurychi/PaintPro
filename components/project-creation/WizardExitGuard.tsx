@@ -13,10 +13,9 @@ import {
 const WIZARD_PATH_PREFIX = "/admin/job-creation/";
 // The quotation-generation page is wrapped by the same job-creation layout
 // (so it gets the dirty-check exit guard) but it is POST-wizard — its
-// status is managed by Grant Access / Cancel Project actions on the page
-// itself, not by the wizard cache. Syncing the cached step here would
-// overwrite the actual DB status (e.g., revert grant_access_quotation back
-// to quotation_pending).
+// status is managed by Cancel Project / downpayment-transition actions
+// on the page itself, not by the wizard cache. Syncing the cached step
+// here would overwrite the actual DB status.
 const POST_WIZARD_PATHS = ["/admin/job-creation/quotation-generation"];
 
 export default function WizardExitGuard() {
