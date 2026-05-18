@@ -316,8 +316,26 @@ export default function AdminMessages() {
     if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0);
   }, [activeChatId]);
 
-  // Polling fallback for the chat panel: every 5s, refetch the active
-  // conversation's messages and merge any new ones in. Realtime alone
+  // Tracks the newest message timestamp currently in chatHistory so the
+  // polling fallback can request only what's strictly newer than that,
+  // instead of re-downloading the whole conversation every tick. Lives in a
+  // ref so the polling interval can read the latest value without restarting.
+  const latestMessageAtRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (chatHistory.length === 0) {
+      latestMessageAtRef.current = null;
+      return;
+    }
+    let max = chatHistory[0].created_at;
+    for (const m of chatHistory) {
+      if (new Date(m.created_at).getTime() > new Date(max).getTime())
+        max = m.created_at;
+    }
+    latestMessageAtRef.current = max;
+  }, [chatHistory]);
+
+  // Polling fallback for the chat panel: every 5s, ask for any messages
+  // newer than the latest one we have and merge them in. Realtime alone
   // isn't reliable here because the browser Supabase client is subject to
   // RLS — if the user can't SELECT a message row directly, the realtime
   // push is filtered out and the chat panel goes stale even though the
@@ -334,8 +352,13 @@ export default function AdminMessages() {
         document.visibilityState === "hidden"
       )
         return;
-      const result = await fetchMessages(activeChatId!);
+      const after = latestMessageAtRef.current;
+      // No baseline yet — the initial-load effect is still in flight or the
+      // conversation is empty. Either way, nothing to incrementally fetch.
+      if (!after) return;
+      const result = await fetchMessages(activeChatId!, { after });
       if (cancelled) return;
+      if (result.messages.length === 0) return;
       setChatHistory((prev) => {
         const seen = new Set(prev.map((m) => m.id));
         const merged = [...prev];

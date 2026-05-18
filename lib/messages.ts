@@ -61,7 +61,7 @@ export type FetchMessagesResult = {
 
 export async function fetchMessages(
   conversationId: string,
-  options: { limit?: number; before?: string | null } = {},
+  options: { limit?: number; before?: string | null; after?: string | null } = {},
 ): Promise<FetchMessagesResult> {
   // Goes through a server endpoint so RLS-blocked callers (project-cookie
   // clients without a Supabase auth user) can still read messages they're
@@ -69,6 +69,7 @@ export async function fetchMessages(
   const params = new URLSearchParams({ conversationId })
   if (options.limit) params.set("limit", String(options.limit))
   if (options.before) params.set("before", options.before)
+  if (options.after) params.set("after", options.after)
 
   const response = await fetch(`/api/messages/list?${params.toString()}`, {
     cache: "no-store",

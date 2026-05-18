@@ -42,6 +42,11 @@ type ConversationSummary = {
   lastMessage: string
   unread: boolean
   lastActivity: number
+  // Project code/title when the conversation is tied to a project. Null for
+  // direct DM threads. Carried into the Measure Generator handoff so the
+  // generator can label which project the surfaces are being measured for.
+  projectCode: string | null
+  projectTitle: string | null
 }
 
 type AvailableUser = {
@@ -61,6 +66,11 @@ type ConversationPayload = {
     username?: string | null
     role?: string | null
     profile_image_url?: string | null
+  } | null
+  project?: {
+    project_id?: string | null
+    project_code?: string | null
+    title?: string | null
   } | null
   latest_message?: {
     content?: string | null
@@ -217,7 +227,9 @@ export default function StaffMessages() {
         profile_image_url: cp.users?.profile_image_url || null,
         lastMessage: lastMsg?.content || "Say hello!",
         unread: isUnread,
-        lastActivity: lastMsgTime
+        lastActivity: lastMsgTime,
+        projectCode: cp.project?.project_code ?? null,
+        projectTitle: cp.project?.title ?? null,
       }
     })
 
@@ -409,10 +421,27 @@ export default function StaffMessages() {
     if (activeChatId) setTimeout(() => inputRef.current?.focus(), 0)
   }, [activeChatId])
 
-  // Polling fallback for the chat panel: every 5s, refetch the active
-  // conversation and merge any new messages in. Realtime alone isn't
-  // reliable because the browser Supabase client is subject to RLS — if
-  // the user can't SELECT a new message row directly the realtime push
+  // Tracks the newest message timestamp currently in chatHistory so the
+  // polling fallback can request only what's strictly newer than that,
+  // instead of re-downloading the whole conversation every tick. Lives in a
+  // ref so the polling interval can read the latest value without restarting.
+  const latestMessageAtRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (chatHistory.length === 0) {
+      latestMessageAtRef.current = null
+      return
+    }
+    let max = chatHistory[0].created_at
+    for (const m of chatHistory) {
+      if (new Date(m.created_at).getTime() > new Date(max).getTime()) max = m.created_at
+    }
+    latestMessageAtRef.current = max
+  }, [chatHistory])
+
+  // Polling fallback for the chat panel: every 5s, ask for any messages
+  // newer than the latest one we have and merge them in. Realtime alone
+  // isn't reliable because the browser Supabase client is subject to RLS —
+  // if the user can't SELECT a new message row directly the realtime push
   // is filtered out and the chat panel goes stale even though the sidebar
   // badge (which uses the server-side admin client) correctly shows the
   // new count. Pauses when the tab isn't visible.
@@ -423,8 +452,13 @@ export default function StaffMessages() {
 
     async function pollActiveChat() {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return
-      const result = await fetchMessages(activeChatId!)
+      const after = latestMessageAtRef.current
+      // No baseline yet — the initial-load effect is still in flight or the
+      // conversation is empty. Either way, nothing to incrementally fetch.
+      if (!after) return
+      const result = await fetchMessages(activeChatId!, { after })
       if (cancelled) return
+      if (result.messages.length === 0) return
       setChatHistory((prev) => {
         // Build the dedup set incrementally so a fetch that itself contains
         // duplicate rows (rare API race) can't slip a second copy through.
@@ -439,6 +473,9 @@ export default function StaffMessages() {
           (a, b) =>
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
         )
+        if (activeChatId) {
+          setMessageCache((cache) => new Map(cache).set(activeChatId, merged))
+        }
         return merged
       })
     }
@@ -601,6 +638,10 @@ export default function StaffMessages() {
       surfacePresetOptions,
     )
     if (surfaceKeys.length === 0) return
+    // Pull project context from the conversation the message lives in so
+    // the generator can show which project these surfaces belong to. Falls
+    // back to nulls for direct DM threads with no associated project.
+    const sourceConvo = conversations.find((c) => c.id === msg.conversation_id)
     try {
       window.sessionStorage.setItem(
         MEASURE_HANDOFF_KEY,
@@ -608,6 +649,8 @@ export default function StaffMessages() {
           surfaceKeys,
           sourceMessage: msg.content,
           conversationId: msg.conversation_id,
+          projectCode: sourceConvo?.projectCode ?? undefined,
+          projectTitle: sourceConvo?.projectTitle ?? undefined,
         }),
       )
     } catch {}

@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const CLIENT_COOKIE = "paintpro_client_project_id";
 
-// GET /api/messages/list?conversationId=xxx&limit=7&before=ISO
+// GET /api/messages/list?conversationId=xxx&limit=7&before=ISO&after=ISO
 //
 // Returns the message history for a conversation. Two access modes:
 //   1. Auth user (admin / staff / client) — caller must be a participant in
@@ -19,6 +19,11 @@ const CLIENT_COOKIE = "paintpro_client_project_id";
 // query DESC + limit so we always return the *newest* N (or the N just older
 // than `before`). The response also includes a `hasMore` flag so the client
 // knows whether to stop trying.
+//
+// Incremental refresh: pass `after` (ISO timestamp) to fetch only messages
+// strictly newer than that timestamp, in chronological order. This lets the
+// client poll for new messages without re-downloading the entire history
+// every tick. `after` takes precedence over `limit`/`before`.
 
 async function getAuthUserId() {
   const cookieStore = await cookies();
@@ -125,6 +130,24 @@ export async function GET(request: Request) {
       ? Math.min(limitParam, 500)
       : null;
     const before = url.searchParams.get("before")?.trim() || null;
+    const after = url.searchParams.get("after")?.trim() || null;
+
+    // Incremental refresh path: caller already has every message up to and
+    // including `after`, just give them what's newer.
+    if (after) {
+      const { data, error } = await supabaseAdmin
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .gt("created_at", after)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ messages: data ?? [], hasMore: false });
+    }
 
     // When `limit` is supplied, query newest-first so we can grab the most
     // recent N (optionally older than `before`), then reverse for the
