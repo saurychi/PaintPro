@@ -323,6 +323,10 @@ export default function ProjectSchedulePage() {
   const { now: projectNow } = useProjectNow();
 
   const [services, setServices] = useState<ServiceGroup[]>([]);
+  // Always start with the spinner up. The cached subtasks are rendered
+  // synchronously once `loadSchedule` finishes, but the user has asked
+  // for a consistent loading screen on every entry rather than a flash
+  // of stale-cached schedule data.
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -445,7 +449,7 @@ export default function ProjectSchedulePage() {
     return Array.from(groupedMap.values());
   }
 
-  async function loadSchedule(forceRefresh = false) {
+  async function loadSchedule(cacheOnly = false) {
     if (!projectId) {
       toast.error("Missing project ID.");
       setLoading(false);
@@ -453,27 +457,46 @@ export default function ProjectSchedulePage() {
     }
 
     try {
-      if (forceRefresh) {
+      // Spinner only when cache is empty. Repeat visits render
+      // synchronously from cache below — no need to flash.
+      const cachedAtStart = getCachedSubTasks(projectId);
+      const hasCacheAtStart = !!cachedAtStart && cachedAtStart.length > 0;
+      if (cacheOnly) {
         setRefreshing(true);
-      } else {
+      } else if (!hasCacheAtStart) {
         setLoading(true);
       }
 
       await ensureWizardCacheHydrated(projectId);
 
-      if (!forceRefresh) {
+      if (cacheOnly) {
+        // Refresh button: re-render ONLY from the wizard cache, no DB
+        // hit. Preserves in-progress drag/resize edits and never
+        // resurrects rows that were removed in earlier wizard steps.
         const cached = getCachedSubTasks(projectId);
         if (cached && cached.length > 0) {
           const nextServices = cachedSubTasksToServiceGroups(cached);
           setServices(nextServices);
           historyRef.current = [];
-          setLoading(false);
-          return;
         }
+        return;
       }
 
-        // ─── Cache miss: fetch from API ────────────────────────────────────
-        let loaded = false;
+      // ─── Initial load: pull from DB so persisted schedule datetimes
+      // show immediately. Earlier wizard pages cache subtasks without
+      // their `scheduled_start_datetime` / `scheduled_end_datetime`
+      // fields, so a pure cache-first render leaves every cell empty
+      // until the user clicks Refresh. We still treat the cache as
+      // authoritative for the row SET — anything the admin deleted in
+      // an earlier wizard step must not reappear here, so we filter
+      // the DB result down to subtask IDs that are still in cache.
+      const cachedForFilter = getCachedSubTasks(projectId);
+      const cachedIdSet =
+        cachedForFilter && cachedForFilter.length > 0
+          ? new Set(cachedForFilter.map((st) => st.id))
+          : null;
+
+      let loaded = false;
 
         try {
           const response = await fetch(
@@ -491,7 +514,14 @@ export default function ProjectSchedulePage() {
                   ? data.rows
                   : [];
 
-            const sortedRows = [...rawGroups].sort((a: any, b: any) => {
+            const filteredRows = cachedIdSet
+              ? rawGroups.filter((row: any) => {
+                  const stepId = row?.project_sub_task_id ?? row?.id;
+                  return stepId && cachedIdSet.has(stepId);
+                })
+              : rawGroups;
+
+            const sortedRows = [...filteredRows].sort((a: any, b: any) => {
               const mainTaskOrder =
                 normalizeSortOrder(
                   a?.project_task?.sort_order ??
@@ -723,12 +753,12 @@ export default function ProjectSchedulePage() {
   }
 
   useEffect(() => {
-    // Cache-first on mount: deletions made in earlier wizard steps
-    // (main-task-assignment, sub-task-assignment) live only in the
-    // wizard cache until the overview-step batch save. A forced DB
-    // pull here would resurrect those rows on screen AND write them
-    // back to the cache via setCachedSubTasks below. Users can still
-    // click the Refresh button to opt into a DB pull on demand.
+    // Initial mount pulls from the DB so persisted schedule datetimes
+    // show on the first paint — earlier wizard pages cache subtasks
+    // without their scheduled_start/end fields, so a pure cache-first
+    // render leaves the cells empty. The DB pull is filtered down to
+    // cached subtask IDs inside loadSchedule, so deletions made in
+    // earlier wizard steps don't resurrect.
     loadSchedule(false);
   }, [projectId]);
 
@@ -1508,7 +1538,7 @@ export default function ProjectSchedulePage() {
                     type="button"
                     onClick={() => loadSchedule(true)}
                     disabled={refreshing}
-                    title="Refresh from database"
+                    title="Refresh from cache"
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
@@ -1553,8 +1583,18 @@ export default function ProjectSchedulePage() {
                 viewMode === "calendar" ? "schedule-calendar" : ""
               }`}>
               {loading ? (
-                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                  Loading project schedule...
+                <div className="flex h-full items-center justify-center">
+                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <Loader2 className="h-5 w-5 animate-spin text-slate-700 dark:text-slate-200" />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                        Loading project schedule...
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Compiling scheduled subtasks and working hours.
+                      </span>
+                    </div>
+                  </div>
                 </div>
               ) : services.every((g) => g.children.length === 0) ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
