@@ -273,37 +273,30 @@ const SAMPLE_DIMENSIONS: ProjectDimensions = {
     interior_wall_area_m2: {
       presetKey: "interior_wall_area_m2",
       estimatedValue: 145,
-      isManualOverride: true,
     },
     ceiling_area_m2: {
       presetKey: "ceiling_area_m2",
       estimatedValue: 92,
-      isManualOverride: true,
     },
     trim_length_m: {
       presetKey: "trim_length_m",
       estimatedValue: 28,
-      isManualOverride: true,
     },
     skirting_length_m: {
       presetKey: "skirting_length_m",
       estimatedValue: 42,
-      isManualOverride: true,
     },
     architrave_length_m: {
       presetKey: "architrave_length_m",
       estimatedValue: 24,
-      isManualOverride: true,
     },
     doors_count: {
       presetKey: "doors_count",
       estimatedValue: 7,
-      isManualOverride: true,
     },
     windows_count: {
       presetKey: "windows_count",
       estimatedValue: 10,
-      isManualOverride: true,
     },
   },
   notes: "Sample dry-run measurements",
@@ -521,10 +514,7 @@ function rowsToProjectDimensions(rows: MeasurementRow[]): ProjectDimensions {
 
     scaled[row.presetKey] = {
       presetKey: row.presetKey as ProjectScaledField["presetKey"],
-      sizeBand: row.sizeBand as ProjectScaledField["sizeBand"],
       estimatedValue: existingValue + currentValue,
-      isManualOverride:
-        Boolean(existing?.isManualOverride) || row.isManualOverride,
     };
   }
 
@@ -547,17 +537,9 @@ function buildRowsFromDimensions(
     const preset = presets[presetKey];
     if (!preset) continue;
 
-    const sizeBand: ScaleBandKey =
-      field.sizeBand === "small" ||
-      field.sizeBand === "medium" ||
-      field.sizeBand === "large"
-        ? field.sizeBand
-        : "medium";
-
     rows.push(
-      makeRowFromPreset(presets, presetKey, sizeBand, {
+      makeRowFromPreset(presets, presetKey, "medium", {
         estimatedValue: Number(field.estimatedValue ?? 0),
-        isManualOverride: Boolean(field.isManualOverride),
       }),
     );
   }

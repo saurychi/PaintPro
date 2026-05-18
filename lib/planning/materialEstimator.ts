@@ -9,9 +9,7 @@ const parser = new Parser();
 
 export type ProjectScaledField = {
   presetKey: ScalePresetKey;
-  sizeBand?: string;
   estimatedValue?: number;
-  isManualOverride?: boolean;
   notes?: string;
 };
 

@@ -66,4 +66,9 @@ export type MeasureHandoff = {
   surfaceKeys: string[];
   sourceMessage?: string;
   conversationId?: string;
+  // Project context for the source message, so the generator can show
+  // which project these surfaces belong to. Either may be missing for
+  // direct DM threads with no associated project.
+  projectCode?: string;
+  projectTitle?: string;
 };
