@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { X, Loader2, Send, Check } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const ACCENT = "#00c065";
@@ -66,8 +66,6 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
   const [inputPayment, setInputPayment] = useState<string>("");
   const [confirming, setConfirming] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [notifying, setNotifying] = useState(false);
-  const [notified, setNotified] = useState(false);
 
   const fetchBudget = useCallback(async () => {
     if (!projectId) return;
@@ -105,7 +103,6 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
     setEstimatedCost(0);
     setEstimatedBudget(0);
     setSavedDownpayment(0);
-    setNotified(false);
 
     fetchBudget();
   }, [open, projectId, fetchBudget]);
@@ -132,54 +129,6 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
   // either via a fresh input or because saved already covers it.
   const canConfirm = meetsCalculated;
   const isBusy = confirming || adding;
-
-  async function handleNotifyClient() {
-    if (!projectId || notifying) return;
-
-    try {
-      setNotifying(true);
-      const response = await fetch("/api/planning/notifyDownpaymentClient", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          // Send the figures the manager is currently looking at so the
-          // reminder message tells the client exactly how much is needed,
-          // rather than a generic "downpayment due". We send the
-          // already-recorded total + the amount still needed after that
-          // — independent of whatever the admin happens to be typing.
-          calculatedDownpayment,
-          paidAmount: savedDownpayment,
-          neededDownpayment: neededAfterSaved,
-          percentage: pct,
-        }),
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to notify client.",
-        );
-      }
-
-      setNotified(true);
-      toast.success("Client notified about downpayment.", {
-        description:
-          "A reminder was posted in the project conversation.",
-      });
-      // Auto-clear so the manager can re-notify if the client hasn't acted
-      // on it yet.
-      window.setTimeout(() => setNotified(false), 10_000);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to notify client.",
-      );
-    } finally {
-      setNotifying(false);
-    }
-  }
 
   async function handleAdd() {
     if (!projectId || isBusy || !canAdd) return;
@@ -216,6 +165,21 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
       // Downpayment field reflects the freshly-saved total.
       setInputPayment("");
       await fetchBudget();
+
+      // Ping the client about the freshly-updated balance. Fire-and-
+      // forget — the partial payment is already recorded server-side,
+      // and a failed messages-API call shouldn't undo that.
+      fetch("/api/planning/notifyDownpaymentClient", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          calculatedDownpayment,
+          paidAmount: newTotal,
+          neededDownpayment: Math.max(0, calculatedDownpayment - newTotal),
+          percentage: pct,
+        }),
+      }).catch(() => {});
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to save partial payment.",
@@ -398,9 +362,21 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
                     type="text"
                     inputMode="decimal"
                     value={inputPayment}
-                    onChange={(e) =>
-                      setInputPayment(formatCurrencyInput(e.target.value))
-                    }
+                    onChange={(e) => {
+                      const formatted = formatCurrencyInput(e.target.value);
+                      // Cap the instalment at what's still owed so the
+                      // cumulative downpayment never overshoots the
+                      // calculated total. Clamping the formatted string
+                      // (not just the parsed number) keeps the visible
+                      // value in sync with the underlying amount.
+                      if (parseCurrencyInput(formatted) > neededAfterSaved) {
+                        setInputPayment(
+                          formatCurrencyInput(neededAfterSaved.toFixed(2)),
+                        );
+                        return;
+                      }
+                      setInputPayment(formatted);
+                    }}
                     placeholder="Enter new instalment"
                     className="flex-1 bg-transparent px-3 text-sm text-gray-900 outline-none placeholder:text-gray-400"
                   />
@@ -431,22 +407,6 @@ export default function DownpaymentModal({ open, projectId, onClose, onConfirmed
 
         {/* Footer */}
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-5 py-4">
-          <button
-            type="button"
-            onClick={handleNotifyClient}
-            disabled={notifying || notified || isBusy || loadingBudget || !projectId}
-            className="mr-auto inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {notifying ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : notified ? (
-              <Check className="h-4 w-4" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            {notified ? "Client notified" : "Notify Client"}
-          </button>
-
           <button
             type="button"
             onClick={onClose}

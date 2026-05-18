@@ -10,7 +10,6 @@ import {
   FileText,
   Loader2,
   RefreshCw,
-  Send,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -113,7 +112,6 @@ export default function CancellationAgreementGeneration() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [sendingToClient, setSendingToClient] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [isGoingBack, setIsGoingBack] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
@@ -261,14 +259,27 @@ export default function CancellationAgreementGeneration() {
         setDocumentExists(true);
         if (mode === "manual") {
           toast.success("Cancellation agreement generated.", {
-            description:
-              "The PDF is ready to preview and send to the client.",
+            description: "PDF saved and the client has been notified.",
           });
         }
 
         // Re-read status so the badge / signed-by panel reflect the
         // new project_documents row instead of "missing".
         await loadAll("refresh");
+
+        // Notify the client right after the PDF lands. Fire-and-forget:
+        // a failed message ping shouldn't undo the generation, and the
+        // status badge / Advance button still drive the rest of the
+        // flow. Runs for both auto and manual generates because the
+        // auto path only fires on first mount (gated by documentExists
+        // + autoGenerateAttemptedRef), so it's not a re-spam vector.
+        fetch("/api/planning/notifyCancellationAgreement", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId }),
+        })
+          .then(() => setAgreementStatus("Sent"))
+          .catch(() => {});
       } catch (error: any) {
         // Don't toast on the silent auto-generate path — the admin
         // didn't ask for it. The manual button still surfaces errors.
@@ -299,42 +310,6 @@ export default function CancellationAgreementGeneration() {
     autoGenerateAttemptedRef.current = true;
     void handleGenerate("auto");
   }, [loading, generating, documentExists, projectId, handleGenerate]);
-
-  async function handleSendToClient() {
-    if (!projectId || sendingToClient) return;
-
-    try {
-      setSendingToClient(true);
-
-      const response = await fetch(
-        "/api/planning/notifyCancellationAgreement",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId }),
-        },
-      );
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(
-          [data?.error, data?.details].filter(Boolean).join(": ") ||
-            "Failed to notify client.",
-        );
-      }
-
-      setAgreementStatus("Sent");
-      toast.success("Client notified.", {
-        description:
-          "A signing link was posted in the project conversation. The client can sign at /client/documents/pending.",
-      });
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to notify client.");
-    } finally {
-      setSendingToClient(false);
-    }
-  }
 
   async function handleAdvanceToPayment() {
     if (!projectId || advancing) return;
@@ -721,24 +696,10 @@ export default function CancellationAgreementGeneration() {
                       )}
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={handleSendToClient}
-                      disabled={sendingToClient || !projectId}
-                      className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 text-[13px] font-semibold text-blue-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:border-blue-400/50 dark:hover:bg-blue-500/25"
-                    >
-                      {sendingToClient ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Notifying...
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-4 w-4" />
-                          Notify Client
-                        </>
-                      )}
-                    </button>
+                    <div className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[12px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                      <Check className="h-4 w-4" />
+                      Awaiting client signature
+                    </div>
                   )}
                 </>
               )}
