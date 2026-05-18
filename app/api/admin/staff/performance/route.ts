@@ -68,7 +68,7 @@ export async function GET(req: Request) {
     if (perfRes.error || !data || data.length === 0) {
       return NextResponse.json({
         hasData: false,
-        cards: METRIC_KEYS.map(({ key, metric }) => ({ key, metric, rating: null, score: 0 })),
+        cards: METRIC_KEYS.map(({ key, metric }) => ({ key, metric, rating: null, score: 0, count: 0 })),
         projectCount: 0,
         totalHours: 0,
         totalSalary: 0,
@@ -80,7 +80,13 @@ export async function GET(req: Request) {
       const ratings = data.map((r) => (r as any)[key] as string | null)
       const rating = avgRating(ratings)
       const score = rating ? (RATING_SCORE[rating] ?? 0) : 0
-      return { key, metric, rating, score }
+      // Total reviewers who rated this metric. The bar shows the
+      // averaged tier across these reviewers, so the count reflects
+      // how many people contributed to that average (not how many
+      // picked the displayed tier exactly — that can be 0 when the
+      // average lands between tiers, e.g. one Great + one Bad → Good).
+      const count = ratings.filter((r) => r && RATING_NUM[r.toLowerCase().trim()]).length
+      return { key, metric, rating, score, count }
     })
 
     const totalHours = data.reduce((sum, r) => sum + (Number(r.total_estimated_hours) || 0), 0)

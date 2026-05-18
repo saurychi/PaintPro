@@ -41,6 +41,7 @@ type PerformanceCard = {
   metric: string
   rating: string | null
   score: number
+  count: number
 }
 
 type PerformanceData = {
@@ -1737,13 +1738,18 @@ function PerformanceBarChart({ data }: { data: PerformanceData | null }) {
               key={card.key}
               className="relative z-1 flex flex-1 flex-col items-center justify-end"
             >
-              <span className={["mb-1 text-[10px] font-bold capitalize", s.text].join(" ")}>
+              <span className={["mb-1 text-center text-[10px] font-bold capitalize leading-tight", s.text].join(" ")}>
                 {card.rating || "-"}
+                {card.rating ? (
+                  <span className="ml-1 font-semibold normal-case opacity-80">
+                    ({card.count} {card.count === 1 ? "review" : "reviews"})
+                  </span>
+                ) : null}
               </span>
               <div
                 className={["w-full rounded-t-md transition-all", s.bar].join(" ")}
                 style={{ height: `${height}%`, minHeight: "2px" }}
-                title={`${card.metric}: ${card.rating ?? "no rating"} (${card.score}%)`}
+                title={`${card.metric}: ${card.rating ?? "no rating"} (${card.count} ${card.count === 1 ? "review" : "reviews"})`}
               />
             </div>
           )
