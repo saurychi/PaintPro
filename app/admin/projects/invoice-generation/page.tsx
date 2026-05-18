@@ -648,6 +648,20 @@ export default function JobInvoice() {
                 </button>
                 ) : null}
 
+                {/* Awaiting-signature acknowledgment. Shown after Send
+                    to Client has flipped the project to
+                    invoice_agreement_pending and we're holding until
+                    the client signs. Mirrors the banner on
+                    /quotation-generation so the admin sees the same
+                    "we're parked waiting on the client" treatment for
+                    both document flows. */}
+                {project?.status === "invoice_agreement_pending" ? (
+                  <div className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 text-[12px] font-semibold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    <Check className="h-4 w-4" />
+                    Awaiting client signature
+                  </div>
+                ) : null}
+
                 {/* Fallback for statuses outside the invoice flow (e.g.
                     landed here from a stale link while the project is
                     still in an earlier stage, or after employee_management
