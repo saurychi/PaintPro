@@ -378,11 +378,11 @@ export async function GET(request: Request) {
       );
     }
 
-    // The "all subtasks finished -> bump project to review" transition
-    // used to block this response. Fire it without await — the client
-    // gets the in-memory updated status in the response, and the DB
-    // write reaches Supabase asynchronously. Errors land in the server
-    // log but don't fail the read.
+    // The "all subtasks finished -> bump project to review" transition.
+    // Must be awaited: a fire-and-forget UPDATE here races with the
+    // admin's explicit Complete-Review write, and if this lands later
+    // it overwrites the freshly-set invoice_pending status with
+    // review_pending, forcing the admin to click Complete Review twice.
     let nextProjectStatus = project.status;
     if (
       canMoveProjectToReview(project.status) &&
@@ -390,21 +390,20 @@ export async function GET(request: Request) {
       !(projectSubTasks ?? []).some((row) => !isFinishedSubTaskStatus(row.status))
     ) {
       nextProjectStatus = "review_pending";
-      void supabaseAdmin
+      const { error: reviewBumpError } = await supabaseAdmin
         .from("projects")
         .update({
           status: nextProjectStatus,
           updated_at: new Date().toISOString(),
         })
-        .eq("project_id", project.project_id)
-        .then(({ error }) => {
-          if (error) {
-            console.error(
-              "[getProjectOverview] background review-status bump failed:",
-              error.message,
-            );
-          }
-        });
+        .eq("project_id", project.project_id);
+
+      if (reviewBumpError) {
+        console.error(
+          "[getProjectOverview] review-status bump failed:",
+          reviewBumpError.message,
+        );
+      }
     }
 
     const subTaskIds = uniqueStrings(
