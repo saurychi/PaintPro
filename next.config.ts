@@ -13,11 +13,15 @@ const PDF_ROUTES = [
   "/api/client/documents/quotation-signature",
   "/api/client/documents/invoice-signature",
   "/api/client/documents/cancellation-agreement-signature",
+  "/api/reports/project-detail/pdf",
 ];
 
 const pdfTracingIncludes = PDF_ROUTES.reduce<Record<string, string[]>>(
   (acc, route) => {
-    acc[route] = ["./node_modules/@sparticuz/chromium/**"];
+    acc[route] = [
+      "./node_modules/@sparticuz/chromium/**",
+      "./node_modules/playwright-core/browsers.json",
+    ];
     return acc;
   },
   {},

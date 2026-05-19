@@ -1,11 +1,9 @@
 import type { Browser } from "playwright-core";
 
-// IMPORTANT:
-// This import is intentionally kept here so Vercel/Next file tracing includes
-// playwright-core's browser metadata in the deployed serverless bundle.
-// Without this, production may fail with:
-// Cannot find module '/var/task/node_modules/playwright-core/browsers.json'
-import "playwright-core/browsers.json";
+// playwright-core's `browsers.json` is required at runtime but isn't exposed
+// via the package's `exports` map, so it can't be side-effect-imported here.
+// It's pulled into the serverless bundle via `outputFileTracingIncludes` in
+// next.config.ts.
 
 // Vercel's serverless functions don't bundle a Chromium binary, and
 // @sparticuz/chromium ships a Lambda-compatible build with the right glibc /
