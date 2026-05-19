@@ -1,5 +1,12 @@
 import type { Browser } from "playwright-core";
 
+// IMPORTANT:
+// This import is intentionally kept here so Vercel/Next file tracing includes
+// playwright-core's browser metadata in the deployed serverless bundle.
+// Without this, production may fail with:
+// Cannot find module '/var/task/node_modules/playwright-core/browsers.json'
+import "playwright-core/browsers.json";
+
 // Vercel's serverless functions don't bundle a Chromium binary, and
 // @sparticuz/chromium ships a Lambda-compatible build with the right glibc /
 // missing system libs already accounted for. Locally we fall back to whatever
@@ -26,27 +33,31 @@ async function resolveLaunchArgs() {
 
   if (isServerless()) {
     // @sparticuz/chromium detects Lambda by sniffing AWS_EXECUTION_ENV /
-    // AWS_LAMBDA_JS_RUNTIME (see node_modules/@sparticuz/chromium/build/
-    // helper.js). Vercel sets AWS_LAMBDA_FUNCTION_NAME but NOT either of
-    // those, so the package treats us as a non-Lambda host: it skips
-    // `setupLambdaEnvironment()` and never inflates `al2023.tar.br`. The
-    // chromium binary then crashes with `libnss3.so: cannot open shared
-    // object file` because its runtime libs never made it onto disk.
-    // Spoof the env var before the import so the module-load-time
-    // detection (and the later executablePath() lib extraction) both
-    // take the AL2023 path.
+    // AWS_LAMBDA_JS_RUNTIME. Vercel sets AWS_LAMBDA_FUNCTION_NAME but may not
+    // set either of those, so the package can treat Vercel as a non-Lambda host.
+    // Spoof the env var before importing @sparticuz/chromium so its module-load
+    // detection takes the Lambda-compatible path.
     if (process.env.VERCEL && !process.env.AWS_EXECUTION_ENV) {
       process.env.AWS_EXECUTION_ENV = "AWS_Lambda_nodejs20.x";
     }
 
     const { default: chromium } = await import("@sparticuz/chromium");
+
     cachedLaunchArgs = {
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-sandbox",
+      ],
       executablePath: await chromium.executablePath(),
       headless: true,
     };
   } else {
-    cachedLaunchArgs = { args: [], headless: true };
+    cachedLaunchArgs = {
+      args: [],
+      headless: true,
+    };
   }
 
   return cachedLaunchArgs;
@@ -61,24 +72,25 @@ type BrowserCache = {
 };
 
 const GLOBAL_KEY = "__paintpro_pdf_browser__" as const;
+
+const globalStore = globalThis as unknown as Record<
+  typeof GLOBAL_KEY,
+  BrowserCache | undefined
+>;
+
 const cache: BrowserCache =
-  ((globalThis as unknown) as Record<typeof GLOBAL_KEY, BrowserCache>)[
-    GLOBAL_KEY
-  ] ??
-  ((((globalThis as unknown) as Record<typeof GLOBAL_KEY, BrowserCache>)[
-    GLOBAL_KEY
-  ] = {
+  globalStore[GLOBAL_KEY] ??
+  (globalStore[GLOBAL_KEY] = {
     browser: null,
     pendingLaunch: null,
-  }),
-  ((globalThis as unknown) as Record<typeof GLOBAL_KEY, BrowserCache>)[
-    GLOBAL_KEY
-  ]);
+  });
 
 async function launchFresh(): Promise<Browser> {
   const { chromium } = await import("playwright-core");
   const launch = await resolveLaunchArgs();
+
   const browser = await chromium.launch(launch);
+
   // Drop the singleton on disconnect so the next caller relaunches instead
   // of attempting to use a dead handle. Playwright fires 'disconnected'
   // when the underlying Chromium crashes or the connection drops.
@@ -87,20 +99,18 @@ async function launchFresh(): Promise<Browser> {
       cache.browser = null;
     }
   });
+
   return browser;
 }
 
 // Returns a reusable, long-lived Browser. The first caller pays the cold
-// launch cost (~500-2000ms); subsequent callers share the same Chromium
-// process and only pay for `browser.newContext()` / `browser.newPage()`
-// (~50-150ms).
-//
-// Concurrent first calls collapse onto a single in-flight launch via
-// `pendingLaunch` so a burst of requests doesn't spawn N browsers.
+// launch cost; subsequent callers share the same Chromium process and only pay
+// for `browser.newContext()` / `browser.newPage()`.
 export async function getPdfBrowser(): Promise<Browser> {
   if (cache.browser && cache.browser.isConnected()) {
     return cache.browser;
   }
+
   if (cache.pendingLaunch) {
     return cache.pendingLaunch;
   }
@@ -118,55 +128,55 @@ export async function getPdfBrowser(): Promise<Browser> {
   return cache.pendingLaunch;
 }
 
-// Back-compat alias for any old call sites — they get the cached browser
-// now too. Don't `await browser.close()` on this; close pages/contexts
-// instead.
+// Back-compat alias for any old call sites. Do not `await browser.close()` on
+// this shared browser; close pages/contexts instead.
 export async function launchPdfBrowser(): Promise<Browser> {
   return getPdfBrowser();
 }
 
 // Force the next getPdfBrowser() call to relaunch instead of handing back
-// the cached handle. Used by withFreshPdfBrowser when the underlying
-// Chromium process is dead but the cache still thinks it's healthy.
+// the cached handle.
 export async function invalidatePdfBrowser(): Promise<void> {
   const stale = cache.browser;
   cache.browser = null;
+
   if (stale) {
     try {
       await stale.close();
     } catch {
-      // The browser is already gone — that's why we're invalidating.
+      // The browser is already gone.
     }
   }
 }
 
-// Pattern matched against caught errors to decide "is this a dead-browser
-// case worth retrying?". Playwright surfaces the same Chromium tear-down
-// under a few different wordings depending on whether newContext, newPage,
-// or an in-flight call was the one that landed on the closed handle.
+// Pattern matched against caught errors to decide if this is a dead-browser
+// case worth retrying.
 const BROWSER_CLOSED_RE =
-  /(Target page, context or browser has been closed|browser has been closed|disconnected from|browserType\.launch)/i;
+  /(Target page, context or browser has been closed|browser has been closed|disconnected from|browserType\.launch|Executable doesn't exist|Failed to launch|browserType\.launch:)/i;
 
-// Runs `fn` against a healthy PDF browser. If the first attempt fails with
-// a closed-browser error, the cached handle is torn down and the work runs
-// again on a fresh launch. Used by the PDF / signature routes whose cached
-// browser can otherwise zombie-reap between Vercel function freezes.
+// Runs `fn` against a healthy PDF browser. If the first attempt fails with a
+// closed-browser / failed-launch error, the cached handle is torn down and the
+// work runs again on a fresh launch.
 export async function withFreshPdfBrowser<T>(
   fn: (browser: Browser) => Promise<T>,
 ): Promise<T> {
   let attempt = 0;
+
   while (true) {
     const browser = await getPdfBrowser();
+
     try {
       return await fn(browser);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error ?? "");
+
       if (attempt === 0 && BROWSER_CLOSED_RE.test(message)) {
-        attempt++;
+        attempt += 1;
         await invalidatePdfBrowser();
         continue;
       }
+
       throw error;
     }
   }
