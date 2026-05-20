@@ -99,9 +99,15 @@ export default function FinalPaymentModal({
 
   const totalInvoice = Math.max(0, estimatedBudget);
   const paidDownpayment = Math.max(0, downpayment);
-  const remainingBalance = Math.max(0, totalInvoice - paidDownpayment);
+  // Round to cents so downstream comparisons match the displayed value;
+  // raw subtraction can yield FP artifacts (e.g. 53086.310000000005) that
+  // make `paid >= remainingBalance` false even when the user enters the
+  // exact displayed amount.
+  const remainingBalance =
+    Math.round(Math.max(0, totalInvoice - paidDownpayment) * 100) / 100;
   const paid = parseCurrencyInput(paidAmount);
-  const neededPayment = Math.max(0, remainingBalance - paid);
+  const neededPayment =
+    Math.round(Math.max(0, remainingBalance - paid) * 100) / 100;
 
   const canConfirm = remainingBalance <= 0 || paid >= remainingBalance;
 
